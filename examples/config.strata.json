@@ -1,8 +1,8 @@
 {
-  "baseUrl": "http://127.0.0.1:8080/v1",
+  "baseUrl": "http://127.0.0.1:8081/v1",
   "apiKey": "any",
-  "model": "any",
-  "contextWindow": 131072,
+  "model": "qwen3.8-flash-next-coder-iq1_m-120k",
+  "contextWindow": 122880,
   "reasoningEffort": "low",
   "maxOutputTokens": 8192
 }

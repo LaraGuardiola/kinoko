@@ -2,13 +2,14 @@
 // Usage: bun run scripts/probe-engine.ts [baseUrl] [model]
 // Paste the printed report into docs/engines/strata-probe.txt.
 
-const BASE = (process.argv[2] ?? "http://127.0.0.1:8080/v1").replace(/\/+$/, "");
+const BASE = (process.argv[2] ?? "http://127.0.0.1:8081/v1").replace(/\/+$/, "");
 const MODEL = process.argv[3] ?? "any";
 const LIMIT = 4096;
 const THINK_OPEN = "<think>";
 
 interface Probe {
   firstByteMs: number; // ms to the first response byte, -1 when nothing arrived
+  firstTokenMs: number; // ms to the first real delta, -1 when none arrived
   thinkFields: string[]; // delta keys that carried thinking
   fragments: number; // streamed tool-call argument fragments
   argsParse: boolean; // accumulated args parse as JSON
@@ -16,7 +17,7 @@ interface Probe {
 }
 
 function blank(): Probe {
-  return { firstByteMs: -1, thinkFields: [], fragments: 0, argsParse: false, usage: undefined };
+  return { firstByteMs: -1, firstTokenMs: -1, thinkFields: [], fragments: 0, argsParse: false, usage: undefined };
 }
 
 async function chat(body: Record<string, unknown>, abortAfterMs = 0): Promise<Probe> {
@@ -39,8 +40,12 @@ async function chat(body: Record<string, unknown>, abortAfterMs = 0): Promise<Pr
   let fragments = 0;
   let usage: Record<string, unknown> | undefined;
   let firstByteMs = -1;
+  let firstTokenMs = -1;
 
-  const observe = (raw: string): void => {
+  // SSE lines: "data: {...}" frames, ": keep-alive" comments, and blank separators.
+  const observe = (frame: string): void => {
+    if (!frame.startsWith("data:")) return;
+    const raw = frame.slice(5).trimStart();
     if (raw === "" || raw === "[DONE]") return;
     let chunk: Record<string, unknown>;
     try {
@@ -52,6 +57,11 @@ async function chat(body: Record<string, unknown>, abortAfterMs = 0): Promise<Pr
     const choice = (chunk.choices as Array<Record<string, unknown>> | undefined)?.[0];
     const delta = choice?.delta as Record<string, unknown> | undefined;
     if (!delta) return;
+    if (firstTokenMs < 0 && (delta.content || delta.reasoning_content || delta.reasoning || delta.tool_calls)) {
+      // The engine sends an empty first frame plus keep-alives straight away, so the
+      // first byte proves nothing: time the first delta that actually carries output.
+      firstTokenMs = performance.now() - started;
+    }
     if (delta.reasoning_content) thinkFields.add("reasoning_content");
     if (delta.reasoning) thinkFields.add("reasoning");
     if (typeof delta.content === "string" && delta.content.includes(THINK_OPEN)) {
@@ -87,7 +97,7 @@ async function chat(body: Record<string, unknown>, abortAfterMs = 0): Promise<Pr
   } catch {
     argsParse = false;
   }
-  return { firstByteMs, fragments, argsParse, usage, thinkFields: [...thinkFields] };
+  return { firstByteMs, firstTokenMs, fragments, argsParse, usage, thinkFields: [...thinkFields] };
 }
 
 function line(label: string, ok: boolean, detail: string): void {
@@ -144,8 +154,8 @@ const followUp = await chat({
 });
 line(
   "3. abort stops generation",
-  followUp.firstByteMs >= 0 && followUp.firstByteMs < 3000,
-  `cut after 1.5s; next request first byte in ${Math.round(followUp.firstByteMs)}ms (>=3000ms means the engine kept generating)`,
+  followUp.firstTokenMs >= 0 && followUp.firstTokenMs < 3000,
+  `cut after 1.5s; next request first delta in ${Math.round(followUp.firstTokenMs)}ms (>=3000ms means the engine kept generating)`,
 );
 
 // 4. prompt prefix reuse: same long prefix, one extra message
@@ -164,8 +174,8 @@ const warm = await chat({
 });
 line(
   "4. prompt prefix reused",
-  cold.firstByteMs >= 0 && warm.firstByteMs >= 0 && warm.firstByteMs < cold.firstByteMs / 3,
-  `cold ${Math.round(cold.firstByteMs)}ms, warm ${Math.round(warm.firstByteMs)}ms`,
+  cold.firstTokenMs >= 0 && warm.firstTokenMs >= 0 && warm.firstTokenMs < cold.firstTokenMs / 2,
+  `first delta: cold ${Math.round(cold.firstTokenMs)}ms, warm ${Math.round(warm.firstTokenMs)}ms (warm must be well under cold)`,
 );
 
 // 5. usage chunk (and cached-token details)

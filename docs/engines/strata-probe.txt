@@ -1,0 +1,38 @@
+# Strata probe report
+
+Pasted from `bun run scripts/probe-engine.ts` on 2026-10-07 12:02 CEST.
+
+    bun run scripts/probe-engine.ts http://127.0.0.1:8081/v1 qwen3.8-flash-next-coder-iq1_m-120k
+
+    engine http://127.0.0.1:8081/v1 model qwen3.8-flash-next-coder-iq1_m-120k
+    1. thinking field: OK (reasoning_content)
+    2. tool call streaming: OK (5 fragments, args parse)
+    3. abort stops generation: OK (cut after 1.5s; next request first delta in 1147ms (>=3000ms means the engine kept generating))
+    4. prompt prefix reused: OK (first delta: cold 13133ms, warm 421ms (warm must be well under cold))
+    5. usage chunk: OK ({"prompt_tokens":271,"completion_tokens":49,"total_tokens":320,"prompt_tokens_details":{"cached_tokens":0}})
+
+## What the five answers mean for Kinoko
+1. `delta.reasoning_content` carries thinking; it never arrives inside `content` (0 occurrences in a
+   full reasoning answer) and `<think>` tags are not used. The `<think>` splitter stays in the code
+   for other engines, but it is disarmed until a tag is actually seen.
+   `reasoning_effort` is honored: `"off"` sent 0 reasoning frames and `"low"` sent 34 for the same
+   question, so the config knob works end to end.
+2. Tool calls stream in fragments (5 for one call) whose arguments concatenate into valid JSON, so the
+   existing accumulate-then-parse approach is right.
+3. Aborting really frees the engine: after cutting a generation at 1.5s the next request's first delta
+   arrived in 1.1s. So NO startup warning, NO capped maxOutputTokens and NO abort workaround is needed
+   (see docs/engines/strata.md).
+4. The prompt prefix IS reused: a ~6,000-token prefix read cold took 13.1s, the same prefix plus one
+   extra message took 0.42s (31x faster). History therefore has to stay byte-stable and append-only
+   (see docs/phases/05-session-context-compaction.md).
+5. A `usage` chunk is sent with `prompt_tokens_details.cached_tokens` (0 here, the prefix was not a
+   repeat). Usage and cacheRead are both mapped.
+
+## Measured on this machine (Qwen3.8-Flash-Next-Coder IQ1, n_ctx 122880)
+- Prompt read: ~450 tokens/s cold, so a 30,000-token prompt is ~65s. Faster than the first byte
+  suggests, the engine sends an empty first `delta` plus `: keep-alive` comment lines immediately,
+  which is why the probe times the first delta that carries output instead of the first byte.
+- Kinoko's own print mode against this engine (port 8081, `reasoningEffort: "low"`, tools enabled):
+  `bun run src/main.ts --base-url http://127.0.0.1:8081/v1 --api-key any --model
+  qwen3.8-flash-next-coder-iq1_m-120k --reasoning-effort low --max-output-tokens 300 -p "..."` answers
+  normally; thinking is kept out of stdout and used for display only.
