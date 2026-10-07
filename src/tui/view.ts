@@ -26,7 +26,7 @@ export interface Tokens {
 }
 
 export interface RegionInput {
-  userMessages: string[];
+  transcript: Array<{ role: "user" | "assistant" | "thinking"; text: string }>;
   stream: string;
   thinking: string;
   tool: ToolView | undefined;
@@ -50,8 +50,12 @@ export interface Region {
 /** The live region: streaming text, the running tool, marker, queued messages, editor, status. */
 export function liveRegion(input: RegionInput): Region {
   const content: string[] = [];
-  for (const message of input.userMessages) {
-    content.push(...message.split("\n").map((line) => `${ANSI.user} > ${line}${ANSI.reset}`));
+  for (const message of input.transcript) {
+    const style = message.role === "user" ? ANSI.user : "";
+    const prefix = message.role === "user" ? "> " : "";
+    const lines = message.role === "assistant" ? renderMarkdown(message.text).split("\n") : message.text.split("\n");
+    if (message.role === "thinking") content.push(...thinkingBlock(message.text).split("\n"));
+    else content.push(...lines.map((line) => `${style}${prefix}${line}${style ? ANSI.reset : ""}`));
   }
   if (input.thinking !== "") content.push(...thinkingBlock(input.thinking).split("\n"));
   if (input.stream !== "") {

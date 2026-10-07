@@ -10,7 +10,7 @@ import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
 import { renderMarkdown } from "./markdown.ts";
-import { ABORTED, HELP, STREAM_ROWS, liveRegion, oneLine, overflow, statusLine, thinkingBlock, toolBlock, wrapTo } from "./view.ts";
+import { ABORTED, HELP, STREAM_ROWS, liveRegion, oneLine, overflow, statusLine, toolBlock, wrapTo } from "./view.ts";
 import { actionFor } from "./keys.ts";
 import type { QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -55,7 +55,7 @@ export class App {
   #running = false;
   #stream = ""; // assistant text still streaming
   #thinking = ""; // model reasoning, never sent back to the provider
-  #userMessages: string[] = [];
+  #transcript: Array<{ role: "user" | "assistant" | "thinking"; text: string }> = [];
   #tool: ToolView | undefined;
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
@@ -296,7 +296,7 @@ export class App {
       this.#cost += usage.cost ?? 0;
     }
     const thinking = message.thinking ?? this.#thinking;
-    if (thinking.trim() !== "") this.#printAbove(thinkingBlock(thinking));
+    if (thinking.trim() !== "") this.#transcript.push({ role: "thinking", text: thinking });
     this.#thinking = "";
     if (this.#stream.trim() !== "") {
       // Text that no longer fits moves up into the scrollback instead of the region.
@@ -319,7 +319,7 @@ export class App {
     this.#running = false;
     this.#queued = [];
     if (this.#stream.trim() !== "") {
-      this.#printAbove(renderMarkdown(this.#stream));
+      this.#transcript.push({ role: "assistant", text: this.#stream });
       this.#stream = "";
     }
     if (dropped !== undefined && dropped.length > 0) {
@@ -348,7 +348,7 @@ export class App {
   }
 
   #echoUser(text: string): void {
-    this.#userMessages.push(text);
+    this.#transcript.push({ role: "user", text: text });
     this.render();
   }
 
@@ -358,7 +358,7 @@ export class App {
     const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 4);
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
-      userMessages: this.#userMessages,
+      transcript: this.#transcript,
       stream: this.#stream,
       thinking: this.#thinking,
       tool: this.#tool,

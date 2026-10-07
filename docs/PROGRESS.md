@@ -155,3 +155,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - The renderer positions the adaptive region from a stable top row, rather than bottom-anchoring a short initial frame.
 - Build: rebuilt and installed `~/.local/bin/kinoko`. `bun run check` passes (145 tests, zero lint warnings).
 - Prompt visibility restored in the live transcript using light-blue foreground only; echoes no longer go through `printAbove`, where absolute repaint covered them.
+
+## TUI completed answer persistence — DONE
+- Fixed: finalized assistant text is retained in the live transcript instead of being printed under the absolute-positioned region and then erased by its repaint. User prompts remain blue; assistant answers remain visible after run completion.
+- Tests: final app frame retains the answer and user styling has no background. `bun run check` passes (146 tests); binary rebuilt and installed.
+- Fixed thinking persistence too: finalized reasoning is kept as its own transcript entry and stays dim/italic after the run ends.
+- `bun run check` passes (147 tests); binary rebuilt and installed.

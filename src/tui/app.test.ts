@@ -110,10 +110,11 @@ describe("TUI app with the agent", () => {
     const h = await harness([[{ type: "text", delta: "here is the answer" }, { type: "done", stop: "end" }]]);
     h.press("show me\r");
     await settle(h.agent);
-    expect(h.screen()).toContain("> show me");
-    expect(h.screen()).toContain("here is the answer");
-    expect(h.out.join("")).toContain("\x1b[38;5;159m > show me\x1b[0m");
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    h.app.render();
+    expect(h.out.join("")).toContain("\x1b[38;5;159m> show me\x1b[0m");
     expect(h.out.join("")).not.toContain("\x1b[48;5");
+    expect(h.out.at(-1)).toContain("here is the answer");
   });
 
   test("1. Enter sends the prompt, Esc aborts within 100ms", async () => {
