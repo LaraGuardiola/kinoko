@@ -1,3 +1,7 @@
+/* oxlint-disable no-await-in-loop -- the agent loop is linear by design: one provider request at
+   a time, tools and log appends in order. Parallelism here would be a bug, not a speed-up. */
+import { compactHistory, isContextOverflow, shouldCompact } from "./compact.ts";
+import type { Session } from "./session.ts";
 import type {
   Message,
   Provider,
@@ -20,6 +24,7 @@ export type AgentEvent =
   | { type: "tool_output"; call: ToolCall; output: string }
   | { type: "tool_end"; call: ToolCall }
   | { type: "queue_change"; steer: string[]; followUp: string[] }
+  | { type: "compacted"; keep: number } // head of the history replaced by a summary, tail kept
   | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[] };
 
 export type RunResult = { reason: "done" | "aborted" | "error" | "limit"; dropped?: string[] };
@@ -40,6 +45,8 @@ export class Agent {
   #steerQueue: string[] = [];
   #followUpQueue: string[] = [];
   #malformedCount = 0;
+  #session: Session | undefined;
+  #contextWindow = 0;
 
   constructor(opts: {
     provider: Provider;
@@ -48,6 +55,8 @@ export class Agent {
     tools: Tool[];
     maxTurns: number;
     maxCost: number;
+    session?: Session; // when given, the session log owns the history and every message is appended
+    contextWindow?: number; // 0 disables compaction
   }) {
     this.#provider = opts.provider;
     this.#model = opts.model;
@@ -55,6 +64,9 @@ export class Agent {
     this.#tools = opts.tools;
     this.#maxTurns = opts.maxTurns;
     this.#maxCost = opts.maxCost;
+    this.#session = opts.session;
+    this.#contextWindow = opts.contextWindow ?? 0;
+    if (this.#session) this.#messages = [...this.#session.view()];
   }
 
   get state(): "idle" | "running" {
@@ -115,7 +127,7 @@ export class Agent {
 
   async #run(initialPrompt: string): Promise<RunResult> {
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: initialPrompt };
-    this.#messages.push(userMsg);
+    await this.#push(userMsg);
     this.#emit({ type: "run_start", prompt: initialPrompt });
 
     while (true) {
@@ -126,6 +138,10 @@ export class Agent {
       if (this.#cost >= this.#maxCost) return { reason: "limit" };
 
       this.#turns++;
+      // Late trigger, before the request that would otherwise not fit.
+      if (this.#contextWindow > 0 && shouldCompact(this.#messages, this.#contextWindow)) await this.#compact();
+      if (this.#abortController!.signal.aborted) return this.#handleAbort();
+
       const req: ProviderRequest = {
         model: this.#model,
         system: this.#system,
@@ -139,6 +155,7 @@ export class Agent {
       const streamEvents: StreamEvent[] = [];
       let stopReason: StopReason = "end";
       let usage: Usage | undefined;
+      let overflow = false;
 
       // oxlint-disable-next-line no-await-in-loop -- consume SSE frames sequentially to preserve message/tool-call ordering
       for await (const ev of this.#provider.stream(req)) {
@@ -153,6 +170,9 @@ export class Agent {
         }
         if (ev.type === "text") {
           this.#emit({ type: "message_delta", delta: ev.delta });
+        } else if (ev.type === "error") {
+          if (isContextOverflow(ev.message)) overflow = true;
+          else streamEvents.push(ev);
         } else if (ev.type === "done") {
           stopReason = ev.stop ?? "end";
           if (ev.usage) usage = ev.usage;
@@ -163,6 +183,9 @@ export class Agent {
         this.#emitPartialAssistant(streamEvents);
         return this.#handleAbort();
       }
+
+      // Reactive trigger: the provider rejected the prompt, so shrink and retry the same turn.
+      if (overflow && (await this.#compact())) continue;
 
       const text = joinOf(streamEvents, "text");
       const toolCalls = callsOf(streamEvents);
@@ -177,20 +200,20 @@ export class Agent {
       const thinking = joinOf(streamEvents, "thinking");
       if (thinking) assistantMsg.thinking = thinking;
       if (toolCalls.length > 0) assistantMsg.toolCalls = toolCalls;
-      this.#messages.push(assistantMsg);
+      await this.#push(assistantMsg);
       this.#emit({ type: "message_end", message: assistantMsg });
 
       if (toolCalls.length === 0) {
         const steer = this.#steerQueue.shift();
         if (steer !== undefined) {
           this.#notifyQueueChange();
-          this.#messages.push({ id: crypto.randomUUID(), role: "user", content: steer });
+          await this.#push({ id: crypto.randomUUID(), role: "user", content: steer });
           continue;
         }
         const followUp = this.#followUpQueue.shift();
         if (followUp !== undefined) {
           this.#notifyQueueChange();
-          this.#messages.push({ id: crypto.randomUUID(), role: "user", content: followUp });
+          await this.#push({ id: crypto.randomUUID(), role: "user", content: followUp });
           continue;
         }
         const finalReason = stopReason === "aborted" ? "aborted" : stopReason === "length" ? "limit" : stopReason === "error" ? "error" : "done";
@@ -202,7 +225,7 @@ export class Agent {
 
       for (const tc of invalid) {
         this.#malformedCount++;
-        this.#messages.push({
+        await this.#push({
           id: crypto.randomUUID(),
           role: "tool",
           content: `ERROR: unknown tool ${tc.name}`,
@@ -216,12 +239,12 @@ export class Agent {
       for (const tc of ro) {
         // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
         const msg = await this.#runTool(tc);
-        this.#messages.push(msg);
+        await this.#push(msg);
       }
       for (const tc of rw) {
         // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
         const msg = await this.#runTool(tc);
-        this.#messages.push(msg);
+        await this.#push(msg);
       }
 
       if (this.#abortController!.signal.aborted) {
@@ -231,10 +254,32 @@ export class Agent {
       const steerAfter = this.#steerQueue.shift();
       if (steerAfter !== undefined) {
         this.#notifyQueueChange();
-        this.#messages.push({ id: crypto.randomUUID(), role: "user", content: steerAfter });
+        await this.#push({ id: crypto.randomUUID(), role: "user", content: steerAfter });
         continue;
       }
     }
+  }
+
+  /** Appends to the in-memory history and, when a session is open, to the append-only log. */
+  async #push(message: Message): Promise<Message> {
+    const stored = this.#session ? await this.#session.append(message) : message;
+    this.#messages.push(stored);
+    return stored;
+  }
+
+  /** Replaces the head of the history with a summary. Returns false when nothing changed. */
+  async #compact(): Promise<boolean> {
+    const result = await compactHistory(this.#messages, {
+      provider: this.#provider,
+      model: this.#model,
+      system: this.#system,
+      signal: this.#abortController!.signal,
+    });
+    if (!result) return false;
+    if (this.#session) result.summary = await this.#session.markCompaction(result.summary, result.keepFrom);
+    this.#messages = result.view;
+    this.#emit({ type: "compacted", keep: result.view.length - 1 });
+    return true;
   }
 
   async #runTool(tc: ToolCall): Promise<Message> {
@@ -262,7 +307,7 @@ export class Agent {
     }
   }
 
-  #emitPartialAssistant(streamEvents: StreamEvent[]): void {
+  async #emitPartialAssistant(streamEvents: StreamEvent[]): Promise<void> {
     const text = joinOf(streamEvents, "text");
     const thinking = joinOf(streamEvents, "thinking");
     const calls = callsOf(streamEvents);
@@ -275,7 +320,7 @@ export class Agent {
     };
     if (thinking) msg.thinking = thinking;
     if (calls.length > 0) msg.toolCalls = calls;
-    this.#messages.push(msg);
+    await this.#push(msg);
     this.#emit({ type: "message_end", message: msg });
   }
 
