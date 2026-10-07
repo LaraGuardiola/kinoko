@@ -123,6 +123,7 @@ export class Agent {
 
     try {
       const result = await this.#run(text);
+      this.#emit({ type: "run_end", reason: result.reason, dropped: result.dropped });
       this.#ext?.emit("run_end", result);
       return result;
     } finally {
@@ -273,6 +274,20 @@ export class Agent {
     const stored = this.#session ? await this.#session.append(message) : message;
     this.#messages.push(stored);
     return stored;
+  }
+
+  /**
+   * Compacts outside a run, for /compact. Uses its own signal so nothing the user is typing gets
+   * cut short, and restores the run's controller afterwards.
+   */
+  async compactNow(): Promise<boolean> {
+    const running = this.#abortController;
+    this.#abortController = new AbortController();
+    try {
+      return await this.#compact();
+    } finally {
+      this.#abortController = running;
+    }
   }
 
   /** Replaces the head of the history with a summary. Returns false when nothing changed. */

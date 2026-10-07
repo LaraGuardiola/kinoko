@@ -4,6 +4,9 @@ import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
 import { Session, latestSession } from "./session.ts";
 import { Extensions, loadExtensions } from "./ext.ts";
+import { App } from "./tui/app.ts";
+import { Term } from "./tui/term.ts";
+import { ansi } from "./tui/render.ts";
 import { discoverContext, discoverSkills } from "./context.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { defaultTools } from "./tools/registry.ts";
@@ -29,13 +32,23 @@ const FLAGS: Record<string, string> = {
 
 const RESUME_FLAGS = new Set(["continue", "c"]);
 
-function parseArgs(argv: string[]): { prompt?: string; flags: Record<string, string>; resume: boolean } {
+function parseArgs(argv: string[]): {
+  prompt?: string;
+  flags: Record<string, string>;
+  resume: boolean;
+  tui: boolean;
+} {
   const flags: Record<string, string> = {};
   let prompt: string | undefined;
   let resume = false;
+  let tui = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === undefined) continue;
+    if (arg === "--tui") {
+      tui = true;
+      continue;
+    }
     if (arg === "-p" || arg === "--print") {
       const next = argv[i + 1];
       if (next !== undefined) prompt = next;
@@ -57,7 +70,7 @@ function parseArgs(argv: string[]): { prompt?: string; flags: Record<string, str
       prompt = arg;
     }
   }
-  return { prompt, flags, resume };
+  return { prompt, flags, resume, tui };
 }
 
 /** Text to stdout, everything else (thinking, tool activity, timing) to stderr. */
@@ -91,9 +104,13 @@ function print(agent: Agent): void {
   });
 }
 
-const { prompt, flags, resume } = parseArgs(process.argv.slice(2));
-if (!prompt) {
-  process.stderr.write('usage: bun run src/main.ts [-p] "your prompt" [--continue]\n');
+const { prompt, flags, resume, tui } = parseArgs(process.argv.slice(2));
+if (tui && prompt) {
+  process.stderr.write("note: --tui takes no prompt; type it in the editor\n");
+}
+if (!prompt && !tui) {
+  process.stderr.write('usage: bun run src/main.ts --tui [--continue]\n');
+  process.stderr.write('       bun run src/main.ts [-p] "your prompt" [--continue]\n');
   process.stderr.write('       bun run src/main.ts -p "/command args"   (from an extension)\n');
   process.exit(1);
 }
@@ -104,7 +121,7 @@ const cwd = process.cwd();
 const ext = new Extensions();
 for (const path of await loadExtensions(ext, { cwd: cwd })) process.stderr.write(`[ext] loaded ${path}\n`);
 
-if (prompt.startsWith("/")) {
+if (prompt !== undefined && prompt.startsWith("/")) {
   const [name, ...rest] = prompt.slice(1).split(" ");
   const command = ext.command(name ?? "");
   if (command === undefined) {
@@ -134,7 +151,7 @@ const system = buildSystemPrompt({
   skills: await discoverSkills(cwd),
 });
 
-const previous = resume ? latestSession(cwd) : undefined;
+const previous = resume && !tui ? latestSession(cwd) : undefined;
 const session = previous ? await Session.load(previous) : await Session.create({ cwd, model: config.model });
 if (previous) process.stderr.write(`[resumed ${session.meta.id}]\n`);
 ext.emit("session_start", { cwd: cwd, model: config.model });
@@ -157,8 +174,36 @@ const agent = new Agent({
 });
 
 const startedAt = Date.now();
-print(agent);
-process.on("SIGINT", () => agent.abort());
-const result = await agent.prompt(prompt);
-process.stdout.write("\n");
-process.stderr.write(`[${result.reason}] session ${session.meta.id}\n`);
+
+if (tui) {
+  // The interactive mode: raw terminal in, live region out. Everything else is the same Agent.
+  const term = new Term();
+  const app = new App({
+    agent: agent,
+    write: (text) => term.write(text),
+    model: config.model,
+    contextWindow: config.contextWindow,
+    session: session,
+    onQuit: () => {
+      term.stop();
+      process.exit(0);
+    },
+  });
+  term.on({ key: (key) => app.handleKey(key), resize: () => app.render() });
+  const loop = setInterval(() => {
+    term.pollKeys(); // a lone Esc waits one frame before it counts
+    app.render();
+  }, 33);
+  term.start();
+  term.write(ansi.hide);
+  app.render();
+  process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
+  await new Promise<void>(() => undefined); // runs until the user quits
+  clearInterval(loop);
+} else {
+  print(agent);
+  process.on("SIGINT", () => agent.abort());
+  const result = await agent.prompt(prompt ?? "");
+  process.stdout.write("\n");
+  process.stderr.write(`[${result.reason}] session ${session.meta.id}\n`);
+}

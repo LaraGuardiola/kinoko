@@ -121,8 +121,9 @@ export class Session {
 
   /** Moves the head pointer: the branch that `activeBranch` walks changes, nothing else. */
   async setHead(id: string): Promise<void> {
-    await this.#write({ type: "head", id });
+    // Visible immediately, even though the record is still being appended.
     this.#head = id;
+    await this.#write({ type: "head", id });
   }
 
   /** Root-first messages from the head back to the first message, following parentId. */
