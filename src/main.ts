@@ -39,22 +39,27 @@ function parseArgs(argv: string[]): {
   flags: Record<string, string>;
   resume: boolean;
   mode: "tui" | "print" | "rpc";
+  explicitMode: boolean;
 } {
   const flags: Record<string, string> = {};
   let prompt: string | undefined;
   let resume = false;
-  let mode: "tui" | "print" | "rpc" = "print";
+  // Bare `kinoko` means the interactive mode; `-p` and `--mode` are how you ask for the others.
+  let mode: "tui" | "print" | "rpc" = "tui";
+  let explicitMode = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === undefined) continue;
     if (arg === "--tui") {
       mode = "tui";
+      explicitMode = true;
       continue;
     }
     if (arg === "--mode") {
       const next = argv[i + 1];
       if (next !== undefined && MODES.has(next)) {
         mode = next as "tui" | "print" | "rpc";
+        explicitMode = true;
         i++;
       }
       continue;
@@ -62,6 +67,8 @@ function parseArgs(argv: string[]): {
     if (arg === "-p" || arg === "--print") {
       const next = argv[i + 1];
       if (next !== undefined) prompt = next;
+      mode = "print";
+      explicitMode = true;
       i++;
     } else if (arg.startsWith("--")) {
       const key = arg.slice(2);
@@ -80,7 +87,7 @@ function parseArgs(argv: string[]): {
       prompt = arg;
     }
   }
-  return { prompt, flags, resume, mode };
+  return { prompt, flags, resume, mode, explicitMode };
 }
 
 /** Text to stdout, everything else (thinking, tool activity, timing) to stderr. */
@@ -114,15 +121,17 @@ function print(agent: Agent): void {
   });
 }
 
-const { prompt, flags, resume, mode } = parseArgs(process.argv.slice(2));
+const { prompt, flags, resume, mode: askedMode, explicitMode } = parseArgs(process.argv.slice(2));
+// No prompt and no explicit mode: the interactive one, if there is a terminal to draw on.
+const mode = explicitMode || prompt !== undefined ? askedMode : process.stdin.isTTY ? "tui" : "print";
 const tui = mode === "tui";
 if (tui && prompt) {
   process.stderr.write("note: the TUI takes no prompt; type it in the editor\n");
 }
 if (!prompt && mode === "print") {
-  process.stderr.write('usage: kinoko --tui [--continue]\n');
-  process.stderr.write('       kinoko -p "your prompt" [--continue]\n');
-  process.stderr.write('       kinoko --mode rpc        (JSONL on stdin, events on stdout)\n');
+  process.stderr.write('usage: kinoko                 (interactive)\n');
+  process.stderr.write('       kinoko -p "prompt"      (print mode)\n');
+  process.stderr.write('       kinoko --mode rpc       (JSONL on stdin)\n');
   process.exit(1);
 }
 

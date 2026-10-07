@@ -114,12 +114,17 @@ back to `$KINOKO_API_KEY`. Unknown keys are dropped rather than silently ignored
 - **`--mode rpc`** — JSONL on stdin, JSONL on stdout. Commands: `prompt`, `steer`, `follow_up`,
   `abort`, `get_state`. Out: the AgentEvent stream. `steer`/`follow_up`/`abort` work mid-run.
 
-## Build
+## Install
 
 ```
-bun run build     # bun build --compile -> a single binary
-./kinoko-out/kinoko --tui
+bun run build
+install -m 755 kinoko-out/kinoko ~/.local/bin/kinoko   # anywhere on PATH
+cp examples/config.strata.json ~/.kinoko/config.json    # or write your own
 ```
+
+Then just type `kinoko`. Bare `kinoko` opens the interactive mode, `-p` prints,
+`--mode rpc` speaks JSONL. `bun run start -- --tui` runs it from source without
+building.
 
 ## Development
 
