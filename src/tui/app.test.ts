@@ -112,6 +112,8 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
     expect(h.screen()).toContain("> show me");
     expect(h.screen()).toContain("here is the answer");
+    expect(h.out.join("")).toContain("\x1b[38;5;159m > show me\x1b[0m");
+    expect(h.out.join("")).not.toContain("\x1b[48;5");
   });
 
   test("1. Enter sends the prompt, Esc aborts within 100ms", async () => {

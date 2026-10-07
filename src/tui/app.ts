@@ -28,6 +28,9 @@ export interface AppOptions {
   contextWindow: number;
   viewportRows?: number;
   viewportCols?: number;
+  reservedRows?: number;
+  viewportHeight?: () => number;
+  viewportTop?: () => number;
   session?: Session;
   /** Called by /quit. The demo and the CLI pass the process exit. */
   onQuit?: () => void;
@@ -44,6 +47,7 @@ export class App {
   #window: number;
   #viewportRows: number | undefined;
   #viewportCols: number | undefined;
+  #reservedRows: number;
   #session: Session | undefined;
   #rebuild: (() => Agent) | undefined;
   #onQuit: (() => void) | undefined;
@@ -51,6 +55,7 @@ export class App {
   #running = false;
   #stream = ""; // assistant text still streaming
   #thinking = ""; // model reasoning, never sent back to the provider
+  #userMessages: string[] = [];
   #tool: ToolView | undefined;
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
@@ -60,12 +65,18 @@ export class App {
 
   constructor(opts: AppOptions) {
     this.#agent = opts.agent;
-    this.#renderer = new Renderer({ write: opts.write });
+    this.#renderer = new Renderer({
+      write: opts.write,
+      columns: () => this.#viewportCols ?? 80,
+      rows: opts.viewportHeight,
+      topRow: opts.viewportTop,
+    });
     this.#editor = new Editor();
     this.#model = opts.model;
     this.#window = opts.contextWindow;
     this.#viewportRows = opts.viewportRows;
     this.#viewportCols = opts.viewportCols;
+    this.#reservedRows = opts.reservedRows ?? 0;
     this.#session = opts.session;
     this.#rebuild = opts.rebuild;
     this.#onQuit = opts.onQuit;
@@ -91,7 +102,7 @@ export class App {
   /** Updates the available terminal height after a resize. */
   resize(cols: number, rows: number): void {
     this.#viewportCols = cols;
-    this.#viewportRows = rows;
+    this.#viewportRows = Math.max(2, rows - this.#reservedRows);
     this.render();
   }
 
@@ -337,17 +348,17 @@ export class App {
   }
 
   #echoUser(text: string): void {
-    const blue = "\x1b[38;5;159m";
-    const reset = "\x1b[0m";
-    this.#printAbove(text.split("\n").map((line) => `${blue} > ${line} ${reset}`).join("\n"));
+    this.#userMessages.push(text);
+    this.render();
   }
 
   // ---- the live region ----
 
   #state(): { lines: string[]; row: number; col: number } {
-    const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 3);
+    const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 4);
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
+      userMessages: this.#userMessages,
       stream: this.#stream,
       thinking: this.#thinking,
       tool: this.#tool,

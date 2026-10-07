@@ -23,7 +23,7 @@ describe("tui renderer", () => {
     renderer.update({ lines: ["thinking...", "> draft"], row: 1, col: 6 });
     expect(tick(50)).toBe(true);
     // The final row has no newline: a full-height region must never scroll during a repaint.
-    expect(out[0]).toBe("\x1b[2K\rthinking...\n\x1b[2K\r> draft\x1b[J\x1b[7G");
+    expect(out[0]).toBe("\x1b[1;1H\x1b[2K\r thinking...\n\x1b[2K\r > draft\x1b[J\x1b[2;8H");
     expect(renderer.drawn).toEqual(["thinking...", "> draft"]);
   });
 
@@ -63,9 +63,9 @@ describe("tui renderer", () => {
     tick(50);
     renderer.update({ lines: ["one", "two"], row: 1, col: 0 });
     tick(50);
-    expect(out[1]?.startsWith("\x1b[1A")).toBe(false); // only one row was on screen
-    expect(out[1]).toContain("\x1b[2K\rtwo");
-    expect(out[1]?.endsWith("\x1b[1G")).toBe(true);
+    expect(out[1]?.startsWith("\x1b[1;1H")).toBe(true);
+    expect(out[1]).toContain("\x1b[2K\r two");
+    expect(out[1]?.endsWith("\x1b[2;2H")).toBe(true);
   });
 
   test("5. printAbove moves the live region out of the way and redraws it below", () => {
@@ -85,7 +85,7 @@ describe("tui renderer", () => {
   test("6. printAbove before anything was drawn just prints", () => {
     const { renderer, out } = harness();
     renderer.printAbove("hello");
-    expect(out[0]).toBe("hello\n");
+    expect(out[0]).toBe(" hello\n");
   });
 
   test("7. flush ignores the throttle", () => {
@@ -106,9 +106,16 @@ describe("tui renderer", () => {
     tick(50);
     renderer.update({ lines: Array.from({ length: 10 }, (_, i) => `row ${i} changed`), row: 7, col: 3 });
     tick(50);
-    expect(out[1]?.startsWith("\x1b[7A")).toBe(true);
+    expect(out[1]?.startsWith("\x1b[1;1H")).toBe(true);
     expect(out[1]).toContain("row 0 changed");
-    expect(out[1]?.endsWith("\x1b[2A\x1b[4G")).toBe(true);
+    expect(out[1]?.endsWith("\x1b[8;5H")).toBe(true);
+  });
+
+  test("9. printAbove wraps the transcript to the current terminal width", () => {
+    const out: string[] = [];
+    const renderer = new Renderer({ write: (text) => out.push(text), columns: () => 8 });
+    renderer.printAbove("abcdefghijk");
+    expect(out[0]).toBe(" abcdef\n ghijk\n");
   });
 });
 

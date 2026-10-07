@@ -136,10 +136,12 @@ if (!prompt && mode === "print") {
 }
 
 const cwd = process.cwd();
+const VERSION = "0.1.0";
 
 // Extensions load first and need nothing but the cwd, so a slash command works without an engine.
 const ext = new Extensions();
-for (const path of await loadExtensions(ext, { cwd: cwd })) process.stderr.write(`[ext] loaded ${path}\n`);
+const extensionPaths = await loadExtensions(ext, { cwd: cwd });
+for (const path of extensionPaths) process.stderr.write(`[ext] loaded ${path}\n`);
 
 if (prompt !== undefined && prompt.startsWith("/")) {
   const [name, ...rest] = prompt.slice(1).split(" ");
@@ -163,12 +165,14 @@ if (!config.apiKey) {
 
 // Everything the prompt needs is read once here: the date is frozen and the context never
 // changes, so the bytes before the first user message stay identical for the whole session.
+const context = await discoverContext(cwd);
+const skills = await discoverSkills(cwd);
 const system = buildSystemPrompt({
   cwd,
   date: new Date().toISOString().slice(0, 10),
   tools: [...defaultTools(), ...ext.tools()],
-  context: await discoverContext(cwd),
-  skills: await discoverSkills(cwd),
+  context,
+  skills,
 });
 
 const previous = resume && mode === "print" ? latestSession(cwd) : undefined;
@@ -198,13 +202,18 @@ const startedAt = Date.now();
 if (tui) {
   // The interactive mode: raw terminal in, live region out. Everything else is the same Agent.
   const term = new Term();
+  const startup = startupPanel({ context, skills, extensions: extensionPaths, version: VERSION });
+  const reservedRows = startup.split("\n").length + 2;
   const app = new App({
     agent: agent,
     write: (text) => term.write(text),
     model: config.model,
     contextWindow: config.contextWindow,
-    viewportRows: term.rows,
+    viewportRows: Math.max(2, term.rows - reservedRows),
     viewportCols: term.cols,
+    reservedRows,
+    viewportHeight: () => term.rows,
+    viewportTop: () => reservedRows + 1,
     session: session,
     onQuit: () => {
       term.stop();
@@ -217,9 +226,7 @@ if (tui) {
     app.render();
   }, 33);
   term.start();
-  // Start the full-height live region at a known terminal origin. Without this, drawing below
-  // the shell prompt can scroll the region and invalidate the renderer's row-relative cursor math.
-  term.write(`${ansi.clearScreen}${ansi.hide}`);
+  term.write(`${ansi.clearScreen}${ansi.hide}\n${startup.split("\n").map((line) => ` ${line}`).join("\n")}\n`);
   app.render();
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
@@ -247,4 +254,22 @@ if (tui) {
   process.stdout.write("\n");
   process.stderr.write(`[${result.reason}] session ${session.meta.id}\n`);
   process.exit(result.reason === "done" ? 0 : 1);
+}
+
+function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string }): string {
+  return [
+    `kinoko v${parts.version}`,
+    "",
+    "\x1b[38;5;214m[Capabilities]\x1b[0m",
+    `  Context: ${names(parts.context.map((file) => file.path.split("/").at(-1) ?? file.path), "none")}`,
+    `  Skills: ${names(parts.skills.map((skill) => skill.name), "none")}`,
+    `  Extensions: ${names(parts.extensions.map((path) => path.split("/").at(-1) ?? path), "none")}`,
+    "",
+    "Kinoko can inspect and change this project. Ask it to work on a coding task.",
+    "",
+  ].join("\n");
+}
+
+function names(items: string[], empty: string): string {
+  return items.length === 0 ? empty : items.join(", ");
 }

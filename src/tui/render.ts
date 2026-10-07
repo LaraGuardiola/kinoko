@@ -20,6 +20,9 @@ export interface RenderState {
 
 export interface RendererOptions {
   write: (text: string) => void;
+  columns?: () => number;
+  rows?: () => number;
+  topRow?: () => number;
   /** Minimum gap between repaints, in ms. ~30fps. */
   minIntervalMs?: number;
   now?: () => number;
@@ -31,8 +34,10 @@ export class Renderer {
   #write: (text: string) => void;
   #minInterval: number;
   #now: () => number;
+  #columns: () => number;
+  #rows: () => number;
+  #topRow: () => number;
   #drawn: string[] = [];
-  #drawnRow = 0;
   #lastAt = 0;
   #dirty = false;
   #state: RenderState = { lines: [], row: 0, col: 0 };
@@ -41,6 +46,9 @@ export class Renderer {
     this.#write = opts.write;
     this.#minInterval = opts.minIntervalMs ?? DEFAULT_INTERVAL;
     this.#now = opts.now ?? (() => performance.now());
+    this.#columns = opts.columns ?? (() => 80);
+    this.#rows = opts.rows ?? (() => 24);
+    this.#topRow = opts.topRow ?? (() => 1);
   }
 
   /** What should be on screen now. Cheap: nothing is drawn until `frame()`. */
@@ -68,7 +76,7 @@ export class Renderer {
   /** Prints finished content above the live region, then lets the region redraw below it. */
   printAbove(text: string): void {
     this.#erase();
-    this.#write(`${text}\n`);
+    this.#write(`${wrap(text, Math.max(1, this.#columns() - 2)).map((line) => ` ${line}`).join("\n")}\n`);
     this.#drawn = [];
     this.#dirty = true;
     this.#draw();
@@ -81,28 +89,27 @@ export class Renderer {
 
   #draw(): void {
     const lines = this.#state.lines;
-    let out = this.#drawn.length > 0 && this.#drawnRow > 0 ? `\x1b[${this.#drawnRow}A` : "";
+    const startRow = Math.min(this.#rows(), Math.max(1, this.#topRow()));
+    let out = `\x1b[${startRow};1H`;
     for (const [index, line] of lines.entries()) {
-      out += `${CLEAR_LINE}${line}`;
+      out += `${CLEAR_LINE} ${line}`;
       // A newline after the bottom row scrolls a full-height live region on every keypress.
       if (index < lines.length - 1) out += "\n";
     }
     // Anything left from a taller previous frame has to go.
     out += CLEAR_BELOW;
     // Come back up to the cursor row and place it.
-    const up = lines.length - 1 - this.#state.row;
-    if (up > 0) out += `\x1b[${up}A`;
-    out += `\x1b[${this.#state.col + 1}G`; // terminals count columns from 1
+    out += `\x1b[${startRow + this.#state.row};${this.#state.col + 2}H`;
     this.#write(out);
     this.#drawn = [...lines];
-    this.#drawnRow = this.#state.row;
     this.#dirty = false;
     this.#lastAt = this.#now();
   }
 
   #erase(): void {
     if (this.#drawn.length === 0) return;
-    let out = this.#drawnRow > 0 ? `\x1b[${this.#drawnRow}A` : "";
+    const startRow = Math.min(this.#rows(), Math.max(1, this.#topRow()));
+    let out = `\x1b[${startRow};1H`;
     for (let row = 0; row < this.#drawn.length; row++) {
       out += CLEAR_LINE;
       if (row < this.#drawn.length - 1) out += "\n";
@@ -110,6 +117,36 @@ export class Renderer {
     if (this.#drawn.length > 1) out += `\x1b[${this.#drawn.length - 1}A`;
     this.#write(out);
   }
+}
+
+/** Wrap terminal text without counting CSI styling sequences as cells. */
+function wrap(text: string, width: number): string[] {
+  const rows: string[] = [];
+  for (const line of text.split("\n")) {
+    let row = "";
+    let cells = 0;
+    for (let index = 0; index < line.length;) {
+      if (line.startsWith("\x1b[", index)) {
+        const end = line.slice(index + 2).search(/[@-~]/);
+        if (end >= 0) {
+          const sequenceEnd = index + end + 3;
+          row += line.slice(index, sequenceEnd);
+          index = sequenceEnd;
+          continue;
+        }
+      }
+      if (cells === width) {
+        rows.push(row);
+        row = "";
+        cells = 0;
+      }
+      row += line[index] ?? "";
+      cells++;
+      index++;
+    }
+    rows.push(row);
+  }
+  return rows;
 }
 
 function sameState(a: RenderState, b: RenderState): boolean {

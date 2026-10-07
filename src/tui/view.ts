@@ -26,6 +26,7 @@ export interface Tokens {
 }
 
 export interface RegionInput {
+  userMessages: string[];
   stream: string;
   thinking: string;
   tool: ToolView | undefined;
@@ -49,6 +50,9 @@ export interface Region {
 /** The live region: streaming text, the running tool, marker, queued messages, editor, status. */
 export function liveRegion(input: RegionInput): Region {
   const content: string[] = [];
+  for (const message of input.userMessages) {
+    content.push(...message.split("\n").map((line) => `${ANSI.user} > ${line}${ANSI.reset}`));
+  }
   if (input.thinking !== "") content.push(...thinkingBlock(input.thinking).split("\n"));
   if (input.stream !== "") {
     content.push(...renderStream(input.stream));
@@ -76,11 +80,10 @@ export function liveRegion(input: RegionInput): Region {
 
   // Keep both the cursor and the status visible even when a small terminal cannot fit every draft
   // or queued row. Content is deliberately the expendable part of the live region.
-  // Pi leaves roughly the bottom third quiet; keep the editor at the lower edge of the active
-  // transcript instead of pinning it to the terminal's physical bottom.
+  // Keep the initial composer around two-thirds down; its live area grows upward as content fills.
   const bottomRows = Math.floor(viewport / 3);
   const activeRows = viewport - bottomRows;
-  const maxEditorRows = activeRows - 1;
+  const maxEditorRows = Math.max(1, activeRows - 1);
   const editorStartAt = Math.max(0, Math.min(input.editorRow - maxEditorRows + 1, editor.length - maxEditorRows));
   const visibleEditor = editor.slice(editorStartAt, editorStartAt + maxEditorRows);
   const contentRows = activeRows - visibleEditor.length - 1;
@@ -102,7 +105,7 @@ export function thinkingBlock(text: string): string {
 /** Keeps a live row inside the terminal margin: terminals wrap a margin write on the next byte. */
 function region(rows: string[], row: number, col: number, width: number | undefined): Region {
   if (width === undefined) return { lines: rows, row, col };
-  const max = Math.max(1, width - 1);
+  const max = Math.max(1, width - 2);
   return { lines: rows.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max) };
 }
 
@@ -190,6 +193,7 @@ const ANSI = {
   italic: `${ESC}3m`,
   reset: `${ESC}0m`,
   inverse: `${ESC}7m`,
+  user: `${ESC}38;5;159m`,
 };
 
 export const HELP = [

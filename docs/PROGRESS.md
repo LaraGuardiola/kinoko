@@ -139,3 +139,19 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Done: the editor/status anchor at the lower edge of the active upper two-thirds of the terminal, leaving a quiet lower third like Pi while the transcript stays above it. User messages keep their light-blue foreground without a background.
 - Done: the agent now emits `thinking_delta`; streamed and finalized reasoning is rendered dim and italic, never mixed with answer text or sent back to a provider.
 - Build: rebuilt and installed `~/.local/bin/kinoko`. `bun run check` passes (143 tests, zero lint warnings).
+
+## TUI Pi-style startup and padding — DONE
+- Done: startup prints the version, discovered context/skills/extensions, and a one-line prompt above the live region. These rows remain reserved across terminal resizes.
+- Done: a one-column global horizontal padding applies to live and finalized transcript output. Finalized transcript rows wrap to the current terminal width instead of overflowing or requiring fullscreen to read.
+- Build: rebuilt and installed `~/.local/bin/kinoko`. `bun run check` passes (144 tests, zero lint warnings).
+
+## TUI fixed-bottom input — DONE
+- Fixed: live rendering uses absolute terminal row positioning and the actual terminal height. The live region fills from below the startup panel through the bottom row; editor/status stay anchored there while transcript content scrolls above them.
+- Styled `[Capabilities]` in orange and reserved two blank rows before the editor.
+- Build: rebuilt and installed `~/.local/bin/kinoko`. `bun run check` passes (144 tests, zero lint warnings).
+
+## TUI adaptive input anchor correction — DONE
+- Corrected: the live region now begins immediately below the startup panel and starts at half the available terminal height. It grows with transcript content until it fills the viewport; only then the editor/status sit at the terminal's bottom edge.
+- The renderer positions the adaptive region from a stable top row, rather than bottom-anchoring a short initial frame.
+- Build: rebuilt and installed `~/.local/bin/kinoko`. `bun run check` passes (145 tests, zero lint warnings).
+- Prompt visibility restored in the live transcript using light-blue foreground only; echoes no longer go through `printAbove`, where absolute repaint covered them.
