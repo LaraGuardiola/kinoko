@@ -160,4 +160,8 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Fixed: finalized assistant text is retained in the live transcript instead of being printed under the absolute-positioned region and then erased by its repaint. User prompts remain blue; assistant answers remain visible after run completion.
 - Tests: final app frame retains the answer and user styling has no background. `bun run check` passes (146 tests); binary rebuilt and installed.
 - Fixed thinking persistence too: finalized reasoning is kept as its own transcript entry and stays dim/italic after the run ends.
-- `bun run check` passes (147 tests); binary rebuilt and installed.
+
+## CLI reference doc — DONE
+- Added `kinoko-cli.md`: tables of invocations, flags, RPC commands and dev commands, read off `src/main.ts`, `src/rpc.ts`, `src/ext.ts`. No code touched.
+- `bun run check` passes (147 tests, zero warnings).
+- Assumption: "cli commands" = modes, flags, RPC commands and npm scripts; the five agent tools are already tabulated in README.md and were not duplicated.
