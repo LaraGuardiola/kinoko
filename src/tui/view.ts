@@ -91,19 +91,17 @@ export function liveRegion(input: RegionInput): Region {
     return region(rows, editorStart + input.editorRow, input.editorCol + 2, input.viewportCols);
   }
 
-  // Keep both the cursor and the status visible even when a small terminal cannot fit every draft
-  // or queued row. Content is deliberately the expendable part of the live region.
-  // Keep the initial composer around two-thirds down; its live area grows upward as content fills.
-  const bottomRows = Math.floor(viewport / 3);
-  const activeRows = viewport - bottomRows;
-  const maxEditorRows = Math.max(1, activeRows - 1);
-  const editorStartAt = Math.max(0, Math.min(input.editorRow - maxEditorRows + 1, editor.length - maxEditorRows));
-  const visibleEditor = editor.slice(editorStartAt, editorStartAt + maxEditorRows);
-  const contentRows = activeRows - visibleEditor.length - 1;
-  const visibleContent = contentRows === 0 ? [] : content.slice(-contentRows);
-  const rows = [...visibleContent, ...Array.from({ length: contentRows - visibleContent.length }, () => "")];
-  const editorStart = rows.length;
-  rows.push(...visibleEditor, input.status, ...Array.from({ length: bottomRows }, () => ""));
+  // The region flows downward from the startup panel: content, then the editor
+  // and status right below it, with no filler rows. Only when everything no
+  // longer fits the viewport is the tail kept, which pins the editor/status
+  // to the bottom while the conversation scrolls above them.
+  const editorRoom = Math.max(1, viewport - 1);
+  const editorStartAt = Math.max(0, Math.min(input.editorRow - editorRoom + 1, editor.length - editorRoom));
+  const visibleEditor = editor.length <= editorRoom ? editor : editor.slice(editorStartAt, editorStartAt + editorRoom);
+  const contentRoom = Math.max(0, viewport - visibleEditor.length - 1);
+  const visibleContent = contentRoom === 0 ? [] : content.slice(-contentRoom);
+  const rows = [...visibleContent, ...visibleEditor, input.status];
+  const editorStart = visibleContent.length;
   return region(rows, editorStart + input.editorRow - editorStartAt, input.editorCol + 2, input.viewportCols);
 }
 

@@ -170,3 +170,8 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Fixed: long transcript rows (user prompts, assistant/stream text, queued, markers) are wrapped to the full terminal width with ANSI colors preserved across split rows, instead of being clipped with a "…" ellipsis. `clipAnsi` no longer cuts rows that already fit (a trailing reset used to trigger the ellipsis), remaining only as a safety net for truly overlong rows. The idle hint wraps instead of clipping too; editor rows and cursor math are untouched (the editor was already wrapped by the App).
 - Tests: two new tests in `src/tui/view.test.ts` (full-width wrap with no ellipsis + style-preserving `wrapAnsi`). `bun run check` passes (149 tests, zero warnings).
 - Build: rebuilt `kinoko-out/kinoko` and installed it at `~/.local/bin/kinoko`.
+
+## TUI flowing layout (no fixed input, no filler gap) — DONE
+- Fixed: the live region no longer pads with blank rows or reserves a bottom third, so the input sits right below the startup panel (the panel's own trailing lines are the only gap, max 2) and flows downward as the conversation grows. Only when content + editor + status exceed the viewport is the head trimmed, which pins the editor/status to the bottom while the conversation scrolls above. Cursor-visibility trimming for oversized editors is kept.
+- Tests: reworked the two viewport layout tests in `src/tui/view.test.ts` (flowing start, tail-keep on short viewport) plus a new overflow-pinning test. `bun run check` passes (150 tests, zero warnings).
+- Build: rebuilt `kinoko-out/kinoko` and installed it at `~/.local/bin/kinoko` (via `mv`, the old binary was running).

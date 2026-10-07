@@ -3,7 +3,7 @@ import { liveRegion, wrapAnsi } from "./view.ts";
 
 const stripAnsi = (line: string): string => line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
 
-test("live region fills viewport with editor and status at the active region bottom", () => {
+test("live region flows from the top with no filler between panel and input", () => {
   const region = liveRegion({
     transcript: [],
     stream: "",
@@ -19,15 +19,14 @@ test("live region fills viewport with editor and status at the active region bot
     viewportRows: 10,
   });
 
-  expect(region.lines).toHaveLength(10);
-  expect(region.lines[4]).toBe("> ");
-  expect(region.lines[5]).toContain("type a prompt");
-  expect(region.lines[6]).toBe(" IDLE ");
-  expect(region.lines.slice(7)).toEqual(["", "", ""]);
-  expect(region.row).toBe(4);
+  expect(region.lines).toHaveLength(3);
+  expect(region.lines[0]).toBe("> ");
+  expect(region.lines[1]).toContain("type a prompt");
+  expect(region.lines[2]).toBe(" IDLE ");
+  expect(region.row).toBe(0);
 });
 
-test("live region reserves the bottom rows for the editor on a short viewport", () => {
+test("a short viewport keeps the content tail with the editor pinned below it", () => {
   const region = liveRegion({
     transcript: [],
     stream: "one\ntwo\nthree\nfour",
@@ -43,8 +42,36 @@ test("live region reserves the bottom rows for the editor on a short viewport", 
     viewportRows: 3,
   });
 
-  expect(region.lines).toEqual(["> draft", " IDLE ", ""]);
-  expect(region.row).toBe(0);
+  expect(region.lines).toEqual(["four", "> draft", " IDLE "]);
+  expect(region.row).toBe(1);
+});
+
+test("an overflowing transcript trims the head and pins the editor to the bottom", () => {
+  const region = liveRegion({
+    transcript: [
+      { role: "user", text: "q1" },
+      { role: "assistant", text: "a1" },
+      { role: "user", text: "q2" },
+      { role: "assistant", text: "a2" },
+    ],
+    stream: "",
+    thinking: "",
+    tool: undefined,
+    marker: "",
+    queued: [],
+    editorLines: [""],
+    editorEmpty: false,
+    editorRow: 0,
+    editorCol: 0,
+    status: " IDLE ",
+    viewportRows: 5,
+  });
+
+  expect(region.lines).toHaveLength(5);
+  expect(stripAnsi(region.lines[0] ?? "")).toBe("a1");
+  expect(stripAnsi(region.lines[1] ?? "")).toBe("> q2");
+  expect(region.lines.at(-2)).toBe("> ");
+  expect(region.lines.at(-1)).toBe(" IDLE ");
 });
 
 test("live region clips styled rows before the terminal margin", () => {
