@@ -55,3 +55,21 @@ Found by driving the tool through the real model on Strata (8081): it repeated o
 - Verified all three backends give identical output for the whole matrix: rg on PATH, the pinned `~/.kinoko/bin/rg` (checked with rg hidden from PATH, so the download path is finally exercised), and the Bun fallback.
 - Tests: search.test.ts 4 -> 7 (empty results per mode and per backend, refusals instead of throws, absolute paths outside the cwd). 62 tests, zero warnings.
 - Known limitation, documented not fixed: the Bun fallback stops early on a directory it cannot read, where rg skips it. The spec pins the fallback to `Bun.Glob.scan`, so instead of hand-rolling a walker the scan reports it honestly. Only reachable when searching system directories like /etc.
+
+## Phase 6 (Anthropic provider): SKIPPED on purpose
+The spec itself marks it "optional if you only use local models", and nothing in phases 7-10 refers to
+it, so the first version ships against Strata only (it speaks the OpenAI wire format, which
+`openai-compat` already handles). No placeholder or stub was written for it.
+Deferred, for whenever an Anthropic model is actually needed:
+- `src/providers/anthropic.ts` (Messages API: content_block_start/delta/stop, message_delta) — just
+  another `Provider`, one file, no change to the loop.
+- Prompt caching: `cache_control` breakpoints on the system prompt and the last tool definition,
+  mapped to the `cacheRead` / `cacheWrite` that `Usage` already has.
+- `reasoning_effort` is OpenAI-specific; Claude wants `thinking: {type, budget_tokens}`.
+- `max_tokens` is REQUIRED by the Messages API (no server default). Today it is always sent anyway
+  because `maxOutputTokens` defaults to 8192, so nothing breaks if this is bolted on later.
+- `src/providers/models.json` (per-model contextWindow / supportsCache / reasoning format) is NOT
+  Anthropic-specific and would be worth having as soon as a second provider or model appears;
+  `contextWindow` is a hand-written config value today.
+- Strata also exposes `/v1/messages` (Anthropic format), so a Claude-style endpoint is reachable
+  from the same local engine if that is ever handy.
