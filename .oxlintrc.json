@@ -1,0 +1,11 @@
+{
+  "ignorePatterns": ["node_modules", "bun.lock"],
+  "categories": {
+    "correctness": "error",
+    "suspicious": "warn",
+    "perf": "warn"
+  },
+  "rules": {
+    "typescript/no-explicit-any": "warn"
+  }
+}

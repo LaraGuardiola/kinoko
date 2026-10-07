@@ -1,0 +1,159 @@
+import { expect, test, describe } from "bun:test";
+import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "node:fs";
+import { defaultTools } from "./registry";
+import type { Tool } from "../types";
+
+const ROOT = `${process.cwd()}/.tmp-tools-test-${process.pid}`;
+
+function fresh(name: string): string {
+  const dir = `${ROOT}/${name}`;
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function pick(name: string): Tool {
+  const found = defaultTools().find((t) => t.name === name);
+  if (!found) throw new Error(`tool ${name} not registered`);
+  return found;
+}
+
+function ctx(cwd: string): { signal: AbortSignal; cwd: string } {
+  return { signal: new AbortController().signal, cwd };
+}
+
+describe("kinoko core tools", () => {
+  test("read: line-numbered, offset/limit, binary refusal", async () => {
+    const dir = fresh("read");
+    writeFileSync(`${dir}/a.txt`, "one\ntwo\nthree\n");
+    const r = pick("read");
+    const out = await r.run({ path: "a.txt" }, ctx(dir));
+    expect(out).toBe("1: one\n2: two\n3: three");
+    const paged = await r.run({ path: "a.txt", offset: 2, limit: 1 }, ctx(dir));
+    expect(paged).toBe("2: two");
+    writeFileSync(`${dir}/b.bin`, "a\u0000b");
+    const bin = await r.run({ path: "b.bin" }, ctx(dir));
+    expect(bin).toContain("ERROR");
+  });
+
+  test("read-before-edit enforced", async () => {
+    const dir = fresh("rb");
+    writeFileSync(`${dir}/a.txt`, "alpha\nbeta\n");
+    const e = pick("edit");
+    const err = await e.run({ path: "a.txt", edits: [{ old: "alpha", new: "x" }] }, ctx(dir));
+    expect(err).toContain("must read");
+  });
+
+  test("write: creates dirs, read-before-overwrite, changed-on-disk detected", async () => {
+    const dir = fresh("w");
+    const w = pick("write");
+    const r = pick("read");
+    const made = await w.run({ path: "sub/deep/new.txt", content: "hello" }, ctx(dir));
+    expect(made.includes("ERROR")).toBe(false);
+    writeFileSync(`${dir}/other.txt`, "created outside the tracker");
+    const unread = await w.run({ path: "other.txt", content: "other" }, ctx(dir));
+    expect(unread).toContain("ERROR");
+    await r.run({ path: "sub/deep/new.txt" }, ctx(dir));
+    writeFileSync(`${dir}/sub/deep/new.txt`, "tampered");
+    const stale = await w.run({ path: "sub/deep/new.txt", content: "again" }, ctx(dir));
+    expect(stale).toContain("changed on disk");
+  });
+
+  test("edit: unique match applies, untouched whitespace kept", async () => {
+    const dir = fresh("e1");
+    writeFileSync(`${dir}/a.txt`, "keep this\n  indented line  \nkeep this too\n");
+    const e = pick("edit");
+    const r = pick("read");
+    await r.run({ path: "a.txt" }, ctx(dir));
+    const ok = await e.run({ path: "a.txt", edits: [{ old: "indented", new: "OUTDATED" }] }, ctx(dir));
+    expect(ok.includes("ERROR")).toBe(false);
+    const text = readFileSync(`${dir}/a.txt`, "utf8");
+    expect(text).toBe("keep this\n  OUTDATED line  \nkeep this too\n");
+  });
+
+  test("edit: ambiguous (N matches) vs not found, with line hints", async () => {
+    const dir = fresh("amb");
+    writeFileSync(`${dir}/a.txt`, "alpha one\nbeta one\ngamma two\n");
+    const e = pick("edit");
+    const r = pick("read");
+    await r.run({ path: "a.txt" }, ctx(dir));
+    const amb = await e.run({ path: "a.txt", edits: [{ old: "one", new: "X" }] }, ctx(dir));
+    expect(amb).toContain("ambiguous");
+    const miss = await e.run({ path: "a.txt", edits: [{ old: "zzz", new: "X" }] }, ctx(dir));
+    expect(miss).toContain("not found");
+    expect(miss).toContain("Closest lines");
+  });
+
+  test("edit: overlapping edits rejected, all-or-none", async () => {
+    const dir = fresh("ov");
+    writeFileSync(`${dir}/a.txt`, "abcdef\n");
+    const e = pick("edit");
+    const r = pick("read");
+    await r.run({ path: "a.txt" }, ctx(dir));
+    const bad = await e.run({ path: "a.txt", edits: [{ old: "abc", new: "X" }, { old: "cde", new: "Y" }] }, ctx(dir));
+    expect(bad).toContain("overlap");
+    const text = readFileSync(`${dir}/a.txt`, "utf8");
+    expect(text).toBe("abcdef\n");
+  });
+
+  test("bash: output budget spills full output, spill readable", async () => {
+    const dir = fresh("spill");
+    const b = pick("bash");
+    const spillDir = `${process.cwd()}/.kinoko/spill`;
+    rmSync(spillDir, { recursive: true, force: true });
+    const out = await b.run({ cmd: "seq 1 4000" }, ctx(dir));
+    expect(out).toContain("spill");
+    const files = readdirSync(spillDir);
+    expect(files.length).toBe(1);
+    const full = readFileSync(`${process.cwd()}/.kinoko/spill/${files[0]}`, "utf8");
+    expect(full).toContain("1\n2");
+    expect(out.length).toBeLessThan(4000 * 4 + 200);
+  });
+
+  test("bash: abort kills the process group, returns <200ms", async () => {
+    const dir = fresh("abort");
+    const b = pick("bash");
+    const controller = new AbortController();
+    const started = Date.now();
+    const run = b.run({ cmd: "echo $$ > pid.txt && sleep 30" }, { signal: controller.signal, cwd: dir });
+    setTimeout(() => controller.abort(), 50);
+    const out = await run;
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeLessThan(200);
+    expect(out).toBe("Aborted by user");
+    await Bun.sleep(100);
+    const pid = parseInt(readFileSync(`${dir}/pid.txt`, "utf8"), 10);
+    let alive = false;
+    try {
+      process.kill(pid, 0);
+      alive = true;
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(false);
+  });
+
+  test("bash: timeout kills the group", async () => {
+    const dir = fresh("to");
+    const b = pick("bash");
+    const t0 = Date.now();
+    const out = await b.run({ cmd: "echo $$ > pid.txt && sleep 5", timeout: 150 }, ctx(dir));
+    expect(Date.now() - t0).toBeLessThan(1000);
+    expect(out).toContain("timed out");
+    const pid = parseInt(readFileSync(`${dir}/pid.txt`, "utf8"), 10);
+    let alive = false;
+    try {
+      process.kill(pid, 0);
+      alive = true;
+    } catch {
+      alive = false;
+    }
+    expect(alive).toBe(false);
+  });
+});
+
+describe("cleanup", () => {
+  test("remove temp root", () => {
+    rmSync(ROOT, { recursive: true, force: true });
+  });
+});
