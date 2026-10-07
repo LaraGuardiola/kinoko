@@ -1,6 +1,7 @@
 /* oxlint-disable no-await-in-loop -- the agent loop is linear by design: one provider request at
    a time, tools and log appends in order. Parallelism here would be a bug, not a speed-up. */
 import { compactHistory, isContextOverflow, shouldCompact } from "./compact.ts";
+import type { Extensions } from "./ext.ts";
 import type { Session } from "./session.ts";
 import type {
   Message,
@@ -47,6 +48,7 @@ export class Agent {
   #malformedCount = 0;
   #session: Session | undefined;
   #contextWindow = 0;
+  #ext: Extensions | undefined;
 
   constructor(opts: {
     provider: Provider;
@@ -57,6 +59,7 @@ export class Agent {
     maxCost: number;
     session?: Session; // when given, the session log owns the history and every message is appended
     contextWindow?: number; // 0 disables compaction
+    extensions?: Extensions;
   }) {
     this.#provider = opts.provider;
     this.#model = opts.model;
@@ -66,6 +69,7 @@ export class Agent {
     this.#maxCost = opts.maxCost;
     this.#session = opts.session;
     this.#contextWindow = opts.contextWindow ?? 0;
+    this.#ext = opts.extensions;
     if (this.#session) this.#messages = [...this.#session.view()];
   }
 
@@ -118,7 +122,9 @@ export class Agent {
     this.#malformedCount = 0;
 
     try {
-      return await this.#run(text);
+      const result = await this.#run(text);
+      this.#ext?.emit("run_end", result);
+      return result;
     } finally {
       this.#state = "idle";
       this.#abortController = null;
@@ -145,10 +151,11 @@ export class Agent {
       const req: ProviderRequest = {
         model: this.#model,
         system: this.#system,
-        messages: this.#messages,
+        messages: this.#ext ? this.#ext.chain("context", this.#messages) : this.#messages,
         tools: this.#tools,
         signal: this.#abortController!.signal,
       };
+      this.#ext?.emit("before_provider_request", req);
 
       this.#emit({ type: "request_start", at: Date.now() });
       let firstToken = false;
@@ -201,6 +208,7 @@ export class Agent {
       if (thinking) assistantMsg.thinking = thinking;
       if (toolCalls.length > 0) assistantMsg.toolCalls = toolCalls;
       await this.#push(assistantMsg);
+      this.#ext?.emit("turn_end", assistantMsg);
       this.#emit({ type: "message_end", message: assistantMsg });
 
       if (toolCalls.length === 0) {
@@ -277,7 +285,9 @@ export class Agent {
     });
     if (!result) return false;
     if (this.#session) result.summary = await this.#session.markCompaction(result.summary, result.keepFrom);
+    const before = this.#messages.length;
     this.#messages = result.view;
+    this.#ext?.emit("compact", { before: before, after: this.#messages.length });
     this.#emit({ type: "compacted", keep: result.view.length - 1 });
     return true;
   }
@@ -285,19 +295,34 @@ export class Agent {
   async #runTool(tc: ToolCall): Promise<Message> {
     const tool = this.#tools.find((t) => t.name === tc.name)!;
     this.#emit({ type: "tool_start", call: tc });
-    const ctx: ToolContext = { signal: this.#abortController!.signal, cwd: process.cwd() };
+    const signal = this.#abortController!.signal;
+    const ctx: ToolContext = { signal: signal, cwd: process.cwd() };
+
+    // Extensions get the last word: they may rewrite args, or block the call outright.
+    if (this.#ext) {
+      const event = { name: tc.name, args: tc.args as Record<string, unknown>, signal: signal };
+      const blocked = this.#ext.beforeTool(event);
+      if (blocked) {
+        this.#emit({ type: "tool_output", call: tc, output: blocked.reason });
+        this.#emit({ type: "tool_end", call: tc });
+        return { id: crypto.randomUUID(), role: "tool", content: blocked.reason, toolCallId: tc.id };
+      }
+    }
+
     try {
-      if (this.#abortController!.signal.aborted) {
+      if (signal.aborted) {
         throw new Error("Aborted by user");
       }
       // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
       const output = await tool.run(tc.args, ctx);
-      if (this.#abortController!.signal.aborted) {
+      if (signal.aborted) {
         throw new Error("Aborted by user");
       }
-      this.#emit({ type: "tool_output", call: tc, output });
+      const result = { name: tc.name, output: output, signal: signal };
+      this.#ext?.emit("tool_result", result);
+      this.#emit({ type: "tool_output", call: tc, output: result.output });
       this.#emit({ type: "tool_end", call: tc });
-      return { id: crypto.randomUUID(), role: "tool", content: output, toolCallId: tc.id };
+      return { id: crypto.randomUUID(), role: "tool", content: result.output, toolCallId: tc.id };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const isAborted = msg === "Aborted by user" || this.#abortController!.signal.aborted;

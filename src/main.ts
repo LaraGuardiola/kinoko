@@ -3,6 +3,7 @@ import { openaiCompat } from "./providers/openai-compat.ts";
 import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
 import { Session, latestSession } from "./session.ts";
+import { Extensions, loadExtensions } from "./ext.ts";
 import { discoverContext, discoverSkills } from "./context.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { defaultTools } from "./tools/registry.ts";
@@ -93,7 +94,28 @@ function print(agent: Agent): void {
 const { prompt, flags, resume } = parseArgs(process.argv.slice(2));
 if (!prompt) {
   process.stderr.write('usage: bun run src/main.ts [-p] "your prompt" [--continue]\n');
+  process.stderr.write('       bun run src/main.ts -p "/command args"   (from an extension)\n');
   process.exit(1);
+}
+
+const cwd = process.cwd();
+
+// Extensions load first and need nothing but the cwd, so a slash command works without an engine.
+const ext = new Extensions();
+for (const path of await loadExtensions(ext, { cwd: cwd })) process.stderr.write(`[ext] loaded ${path}\n`);
+
+if (prompt.startsWith("/")) {
+  const [name, ...rest] = prompt.slice(1).split(" ");
+  const command = ext.command(name ?? "");
+  if (command === undefined) {
+    const known = ext.commandNames();
+    process.stderr.write(
+      `unknown command /${name ?? ""}${known.length > 0 ? ` (available: ${known.map((c) => `/${c}`).join(", ")})` : " (no extensions loaded)"}\n`,
+    );
+    process.exit(1);
+  }
+  process.stdout.write(`${await command(rest.join(" "))}\n`);
+  process.exit(0);
 }
 
 const config = await loadConfig(flags);
@@ -102,13 +124,12 @@ if (!config.apiKey) {
   process.exit(1);
 }
 
-const cwd = process.cwd();
 // Everything the prompt needs is read once here: the date is frozen and the context never
 // changes, so the bytes before the first user message stay identical for the whole session.
 const system = buildSystemPrompt({
   cwd,
   date: new Date().toISOString().slice(0, 10),
-  tools: defaultTools(),
+  tools: [...defaultTools(), ...ext.tools()],
   context: await discoverContext(cwd),
   skills: await discoverSkills(cwd),
 });
@@ -116,6 +137,7 @@ const system = buildSystemPrompt({
 const previous = resume ? latestSession(cwd) : undefined;
 const session = previous ? await Session.load(previous) : await Session.create({ cwd, model: config.model });
 if (previous) process.stderr.write(`[resumed ${session.meta.id}]\n`);
+ext.emit("session_start", { cwd: cwd, model: config.model });
 
 const agent = new Agent({
   provider: openaiCompat({
@@ -126,11 +148,12 @@ const agent = new Agent({
   }),
   model: config.model,
   system,
-  tools: defaultTools(),
+  tools: [...defaultTools(), ...ext.tools()],
   maxTurns: config.maxTurns,
   maxCost: config.maxCost,
   contextWindow: config.contextWindow,
   session,
+  extensions: ext,
 });
 
 const startedAt = Date.now();
