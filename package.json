@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "bun run src/main.ts",
+    "build": "bun build --compile --outfile kinoko-out/kinoko src/main.ts",
     "lint": "oxlint --deny-warnings",
     "test": "bun test",
     "check": "oxlint --deny-warnings && tsc --noEmit && bun test"

@@ -1,0 +1,9 @@
+# build output
+kinoko-out/
+
+# test fixtures and spills (tests clean up after themselves; leftovers mean a crashed run)
+.tmp-*/
+.kinoko/spill/
+.probe-*/
+
+pid.txt

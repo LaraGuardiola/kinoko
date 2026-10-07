@@ -10,6 +10,7 @@ import { ansi } from "./tui/render.ts";
 import { discoverContext, discoverSkills } from "./context.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { defaultTools } from "./tools/registry.ts";
+import { Rpc, serveStdio } from "./rpc.ts";
 
 // CLI spelling -> Config key. Kebab-case is what a human types.
 const FLAGS: Record<string, string> = {
@@ -31,22 +32,31 @@ const FLAGS: Record<string, string> = {
 };
 
 const RESUME_FLAGS = new Set(["continue", "c"]);
+const MODES = new Set(["tui", "print", "rpc"]);
 
 function parseArgs(argv: string[]): {
   prompt?: string;
   flags: Record<string, string>;
   resume: boolean;
-  tui: boolean;
+  mode: "tui" | "print" | "rpc";
 } {
   const flags: Record<string, string> = {};
   let prompt: string | undefined;
   let resume = false;
-  let tui = false;
+  let mode: "tui" | "print" | "rpc" = "print";
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === undefined) continue;
     if (arg === "--tui") {
-      tui = true;
+      mode = "tui";
+      continue;
+    }
+    if (arg === "--mode") {
+      const next = argv[i + 1];
+      if (next !== undefined && MODES.has(next)) {
+        mode = next as "tui" | "print" | "rpc";
+        i++;
+      }
       continue;
     }
     if (arg === "-p" || arg === "--print") {
@@ -70,7 +80,7 @@ function parseArgs(argv: string[]): {
       prompt = arg;
     }
   }
-  return { prompt, flags, resume, tui };
+  return { prompt, flags, resume, mode };
 }
 
 /** Text to stdout, everything else (thinking, tool activity, timing) to stderr. */
@@ -104,14 +114,15 @@ function print(agent: Agent): void {
   });
 }
 
-const { prompt, flags, resume, tui } = parseArgs(process.argv.slice(2));
+const { prompt, flags, resume, mode } = parseArgs(process.argv.slice(2));
+const tui = mode === "tui";
 if (tui && prompt) {
-  process.stderr.write("note: --tui takes no prompt; type it in the editor\n");
+  process.stderr.write("note: the TUI takes no prompt; type it in the editor\n");
 }
-if (!prompt && !tui) {
-  process.stderr.write('usage: bun run src/main.ts --tui [--continue]\n');
-  process.stderr.write('       bun run src/main.ts [-p] "your prompt" [--continue]\n');
-  process.stderr.write('       bun run src/main.ts -p "/command args"   (from an extension)\n');
+if (!prompt && mode === "print") {
+  process.stderr.write('usage: kinoko --tui [--continue]\n');
+  process.stderr.write('       kinoko -p "your prompt" [--continue]\n');
+  process.stderr.write('       kinoko --mode rpc        (JSONL on stdin, events on stdout)\n');
   process.exit(1);
 }
 
@@ -151,7 +162,7 @@ const system = buildSystemPrompt({
   skills: await discoverSkills(cwd),
 });
 
-const previous = resume && !tui ? latestSession(cwd) : undefined;
+const previous = resume && mode === "print" ? latestSession(cwd) : undefined;
 const session = previous ? await Session.load(previous) : await Session.create({ cwd, model: config.model });
 if (previous) process.stderr.write(`[resumed ${session.meta.id}]\n`);
 ext.emit("session_start", { cwd: cwd, model: config.model });
@@ -200,10 +211,27 @@ if (tui) {
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
   clearInterval(loop);
+} else if (mode === "rpc") {
+  const rpc = new Rpc({
+    agent: agent,
+    model: config.model,
+    write: (text) => process.stdout.write(text),
+    // stdin closed: the client is gone, so the run and the process end here.
+    onClose: () => {
+      agent.abort();
+      process.exit(0);
+    },
+  });
+  serveStdio(rpc);
+  process.on("SIGINT", () => agent.abort());
+  await new Promise<void>(() => undefined); // runs until stdin closes
 } else {
+  // Print mode: the agent loop runs to the end, tool activity stays on stderr, and an aborted or
+  // failed run exits non-zero so a script can tell.
   print(agent);
   process.on("SIGINT", () => agent.abort());
   const result = await agent.prompt(prompt ?? "");
   process.stdout.write("\n");
   process.stderr.write(`[${result.reason}] session ${session.meta.id}\n`);
+  process.exit(result.reason === "done" ? 0 : 1);
 }

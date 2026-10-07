@@ -168,7 +168,8 @@ export class Agent {
       // oxlint-disable-next-line no-await-in-loop -- consume SSE frames sequentially to preserve message/tool-call ordering
       for await (const ev of this.#provider.stream(req)) {
         if (this.#abortController!.signal.aborted) {
-          this.#emitPartialAssistant(streamEvents);
+          // Awaited: the partial message must reach the log (and the UI) before run_end.
+          await this.#emitPartialAssistant(streamEvents);
           return this.#handleAbort();
         }
         streamEvents.push(ev);
@@ -188,7 +189,7 @@ export class Agent {
       }
 
       if (this.#abortController!.signal.aborted) {
-        this.#emitPartialAssistant(streamEvents);
+        await this.#emitPartialAssistant(streamEvents);
         return this.#handleAbort();
       }
 
