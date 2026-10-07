@@ -1,0 +1,8 @@
+{
+  "baseUrl": "http://127.0.0.1:8080/v1",
+  "apiKey": "any",
+  "model": "any",
+  "contextWindow": 131072,
+  "reasoningEffort": "low",
+  "maxOutputTokens": 8192
+}

@@ -21,6 +21,7 @@ export interface Message {
   parentId?: string;
   role: Role;
   content: string;
+  thinking?: string; // display + session logs ONLY: never sent back to a provider
   toolCalls?: ToolCall[];
   toolCallId?: string; // toolCallId only on role "tool"
   stop?: StopReason;
@@ -29,6 +30,7 @@ export interface Message {
 
 export type StreamEvent =
   | { type: "text"; delta: string }
+  | { type: "thinking"; delta: string }
   | { type: "tool_call"; call: ToolCall } // emitted ONLY when its JSON args are complete
   | { type: "done"; stop: StopReason; usage?: Usage }
   | { type: "error"; message: string };

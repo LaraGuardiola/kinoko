@@ -1,3 +1,5 @@
+export type ReasoningEffort = "off" | "low" | "medium" | "high";
+
 export interface Config {
   baseUrl: string;
   apiKey: string;
@@ -5,6 +7,8 @@ export interface Config {
   maxTurns: number;
   maxCost: number;
   contextWindow: number;
+  maxOutputTokens: number;
+  reasoningEffort?: ReasoningEffort;
 }
 
 export const DEFAULTS: Config = {
@@ -14,9 +18,10 @@ export const DEFAULTS: Config = {
   maxTurns: 50,
   maxCost: 5,
   contextWindow: 128_000,
-};
+  maxOutputTokens: 8192,
+}
 
-const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow"]);
+const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens"]);
 const FILE_KEYS: ReadonlySet<string> = new Set([
   "baseUrl",
   "apiKey",
@@ -24,7 +29,10 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "maxTurns",
   "maxCost",
   "contextWindow",
+  "maxOutputTokens",
+  "reasoningEffort",
 ]);
+const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);
 
 type Loose = Record<string, string | number>;
 
@@ -35,6 +43,8 @@ function sanitize(raw: Loose): Partial<Config> {
     if (!FILE_KEYS.has(k)) continue;
     if (NUM_KEYS.has(k)) {
       if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
+    } else if (k === "reasoningEffort") {
+      if (typeof v === "string" && EFFORTS.has(v)) out[k] = v;
     } else if (typeof v === "string") {
       out[k] = v;
     }
@@ -59,6 +69,9 @@ function fromFlag(key: string, value: string): Partial<Config> {
   if (NUM_KEYS.has(key)) {
     const n = Number(value);
     return Number.isFinite(n) ? ({ [key]: n } as Partial<Config>) : {};
+  }
+  if (key === "reasoningEffort") {
+    return EFFORTS.has(value) ? ({ reasoningEffort: value as ReasoningEffort } as Partial<Config>) : {};
   }
   return { [key]: value } as Partial<Config>;
 }

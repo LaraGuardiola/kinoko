@@ -15,6 +15,10 @@ const FLAGS: Record<string, string> = {
   maxCost: "maxCost",
   "context-window": "contextWindow",
   contextWindow: "contextWindow",
+  "max-output-tokens": "maxOutputTokens",
+  maxOutputTokens: "maxOutputTokens",
+  "reasoning-effort": "reasoningEffort",
+  reasoningEffort: "reasoningEffort",
 };
 
 function parseArgs(argv: string[]): { prompt?: string; flags: Record<string, string> } {
@@ -71,4 +75,10 @@ if (!config.apiKey) {
   process.stderr.write("no apiKey: set it in ~/.kinoko/config.json, ./.kinoko/config.json, or --api-key\n");
   process.exit(1);
 }
-await print(openaiCompat({ baseUrl: config.baseUrl, apiKey: config.apiKey }), config.model, prompt);
+const provider = openaiCompat({
+  baseUrl: config.baseUrl,
+  apiKey: config.apiKey,
+  reasoningEffort: config.reasoningEffort,
+  maxOutputTokens: config.maxOutputTokens,
+});
+await print(provider, config.model, prompt);

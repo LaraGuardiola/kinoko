@@ -12,6 +12,8 @@ import type {
 
 export type AgentEvent =
   | { type: "run_start"; prompt: string }
+  | { type: "request_start"; at: number } // epoch ms: TUI shows "reading prompt..." until first_token
+  | { type: "first_token"; at: number } // epoch ms of the first delta of any kind
   | { type: "message_delta"; delta: string }
   | { type: "message_end"; message: Message }
   | { type: "tool_start"; call: ToolCall }
@@ -132,6 +134,8 @@ export class Agent {
         signal: this.#abortController!.signal,
       };
 
+      this.#emit({ type: "request_start", at: Date.now() });
+      let firstToken = false;
       const streamEvents: StreamEvent[] = [];
       let stopReason: StopReason = "end";
       let usage: Usage | undefined;
@@ -143,6 +147,10 @@ export class Agent {
           return this.#handleAbort();
         }
         streamEvents.push(ev);
+        if (!firstToken && (ev.type === "text" || ev.type === "thinking" || ev.type === "tool_call")) {
+          firstToken = true;
+          this.#emit({ type: "first_token", at: Date.now() });
+        }
         if (ev.type === "text") {
           this.#emit({ type: "message_delta", delta: ev.delta });
         } else if (ev.type === "done") {
@@ -156,8 +164,8 @@ export class Agent {
         return this.#handleAbort();
       }
 
-      const text = streamEvents.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("");
-      const toolCalls = streamEvents.filter((e) => e.type === "tool_call").map((e) => (e as { call: ToolCall }).call);
+      const text = joinOf(streamEvents, "text");
+      const toolCalls = callsOf(streamEvents);
 
       const assistantMsg: Message = {
         id: crypto.randomUUID(),
@@ -166,6 +174,8 @@ export class Agent {
         stop: stopReason,
         usage,
       };
+      const thinking = joinOf(streamEvents, "thinking");
+      if (thinking) assistantMsg.thinking = thinking;
       if (toolCalls.length > 0) assistantMsg.toolCalls = toolCalls;
       this.#messages.push(assistantMsg);
       this.#emit({ type: "message_end", message: assistantMsg });
@@ -253,16 +263,17 @@ export class Agent {
   }
 
   #emitPartialAssistant(streamEvents: StreamEvent[]): void {
-    const hasText = streamEvents.some((e) => e.type === "text");
-    if (!hasText) return;
-    const text = streamEvents.filter((e) => e.type === "text").map((e) => (e as { delta: string }).delta).join("");
-    const calls = streamEvents.filter((e) => e.type === "tool_call").map((e) => (e as { call: ToolCall }).call);
+    const text = joinOf(streamEvents, "text");
+    const thinking = joinOf(streamEvents, "thinking");
+    const calls = callsOf(streamEvents);
+    if (!text && !thinking) return;
     const msg: Message = {
       id: crypto.randomUUID(),
       role: "assistant",
       content: text,
       stop: "aborted",
     };
+    if (thinking) msg.thinking = thinking;
     if (calls.length > 0) msg.toolCalls = calls;
     this.#messages.push(msg);
     this.#emit({ type: "message_end", message: msg });
@@ -275,4 +286,16 @@ export class Agent {
     this.#notifyQueueChange();
     return { reason: "aborted", dropped: dropped.length ? dropped : undefined };
   }
+}
+
+function joinOf(events: StreamEvent[], kind: "text" | "thinking"): string {
+  let out = "";
+  for (const e of events) {
+    if (e.type === kind) out += (e as { delta: string }).delta;
+  }
+  return out;
+}
+
+function callsOf(events: StreamEvent[]): ToolCall[] {
+  return events.filter((e) => e.type === "tool_call").map((e) => (e as { call: ToolCall }).call);
 }

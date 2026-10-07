@@ -169,4 +169,57 @@ describe("Agent loop with abort, steer and follow-up", () => {
     const result = await agent.prompt("test");
     expect(result.reason).toBe("error");
   });
+
+  // A local engine serves one request at a time, so overlapping calls must never happen.
+  // The second request of a run stands in for the compaction call of Phase 5.
+  test("10. two prompts in a row never overlap provider requests", async () => {
+    let inFlight = 0;
+    let peak = 0;
+    let calls = 0;
+    const tool = { name: "noop", description: "", schema: {}, readOnly: true, run: async () => "" };
+    const provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        await new Promise((r) => setTimeout(r, 20));
+        calls++;
+        inFlight--;
+        if (calls % 2 === 1) {
+          yield { type: "tool_call", call: { id: `c${calls}`, name: "noop", args: {} } };
+          yield { type: "done", stop: "tool_use" };
+        } else {
+          yield { type: "text", delta: "answer" };
+          yield { type: "done", stop: "end" };
+        }
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [tool], maxTurns: 10, maxCost: 100 });
+    await agent.prompt("first");
+    await agent.prompt("second");
+    expect(calls).toBe(4);
+    expect(peak).toBe(1);
+  });
+
+  test("11. request_start and first_token carry timestamps and bracket a request", async () => {
+    const provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        await new Promise((r) => setTimeout(r, 15));
+        yield { type: "thinking", delta: "hmm" };
+        yield { type: "text", delta: "answer" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100 });
+    const seen: Array<{ type: string; at?: number }> = [];
+    agent.on((e) => seen.push(e as { type: string; at?: number }));
+    const before = Date.now();
+    await agent.prompt("test");
+    const marks = seen.filter((e) => e.type === "request_start" || e.type === "first_token");
+    expect(marks.map((e) => e.type)).toEqual(["request_start", "first_token"]);
+    const [start, first] = marks;
+    // Thinking counts as the first token of any kind.
+    expect(start!.at!).toBeGreaterThanOrEqual(before);
+    expect(first!.at!).toBeGreaterThanOrEqual(start!.at!);
+    expect(agent.messages.at(-1)!.thinking).toBe("hmm");
+  });
 });

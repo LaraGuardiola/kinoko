@@ -1,7 +1,10 @@
 import type { Message, Provider, ProviderRequest, StreamEvent, Usage } from "../types.ts";
+import { ThinkSplit } from "./think-split.ts";
 
 interface Delta {
   content?: string;
+  reasoning_content?: string;
+  reasoning?: string;
   tool_calls?: Array<{ index?: number; id?: string; function?: { name?: string; arguments?: string } }>;
 }
 
@@ -10,7 +13,11 @@ interface Chunk {
     delta?: Delta;
     finish_reason?: string | null;
   }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    prompt_tokens_details?: { cached_tokens?: number };
+  };
 }
 
 interface Pending {
@@ -22,6 +29,8 @@ interface Pending {
 export interface OpenAiCompatOptions {
   baseUrl: string;
   apiKey: string;
+  reasoningEffort?: "off" | "low" | "medium" | "high";
+  maxOutputTokens?: number;
 }
 
 /** Splits an SSE byte stream into complete `data:` payloads. */
@@ -69,9 +78,10 @@ export class SseParser {
 
 function toUsage(raw: Chunk["usage"]): Usage | undefined {
   if (!raw) return undefined;
-  const input = raw.prompt_tokens ?? 0;
-  const output = raw.completion_tokens ?? 0;
-  return { input, output };
+  const out: Usage = { input: raw.prompt_tokens ?? 0, output: raw.completion_tokens ?? 0 };
+  const cached = raw.prompt_tokens_details?.cached_tokens;
+  if (cached !== undefined) out.cacheRead = cached;
+  return out;
 }
 
 function stopFor(reason: string | null | undefined): StreamEvent & { type: "done" } {
@@ -94,7 +104,7 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
           "content-type": "application/json",
           authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(body(req)),
+        body: JSON.stringify(body(req, opts)),
         signal: req.signal,
       }).catch(() => null);
       if (!res || !res.ok || !res.body) {
@@ -107,6 +117,7 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
       const decoder = new TextDecoder();
       const parser = new SseParser();
       const pending = new Map<number, Pending>();
+      const think = new ThinkSplit();
       let finish: string | null | undefined;
       let usage: Usage | undefined;
 
@@ -121,11 +132,23 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
             if (chunk.usage) usage = toUsage(chunk.usage);
             const choice = chunk.choices?.[0];
             if (!choice) continue;
-            if (choice.delta?.content) yield { type: "text", delta: choice.delta.content };
+            const delta = choice.delta;
+            if (delta?.reasoning_content) yield { type: "thinking", delta: delta.reasoning_content };
+            else if (delta?.reasoning) yield { type: "thinking", delta: delta.reasoning };
+            if (delta?.content) {
+              for (const part of think.push(delta.content)) {
+                if (part.kind === "thinking") yield { type: "thinking", delta: part.delta };
+                else yield { type: "text", delta: part.delta };
+              }
+            }
             for (const tc of choice.delta?.tool_calls ?? []) merge(pending, tc);
             if (choice.finish_reason) finish = choice.finish_reason;
           }
           if (parser.done) break;
+        }
+        for (const p of think.flush()) {
+          if (p.kind === "thinking") yield { type: "thinking", delta: p.delta };
+          else yield { type: "text", delta: p.delta };
         }
       } catch {
         // Socket died mid-stream: any pending tool call has incomplete args, so drop it.
@@ -179,7 +202,7 @@ function merge(pending: Map<number, Pending>, tc: NonNullable<Delta["tool_calls"
   pending.set(index, next);
 }
 
-function body(req: ProviderRequest): object {
+function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
   const messages = req.system
     ? [{ role: "system", content: req.system }, ...req.messages.map(wire)]
     : req.messages.map(wire);
@@ -188,6 +211,8 @@ function body(req: ProviderRequest): object {
     stream: true,
     stream_options: { include_usage: true },
     messages,
+    ...(opts.reasoningEffort ? { reasoning_effort: opts.reasoningEffort } : {}),
+    ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
     tools: req.tools.length
       ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }))
       : undefined,
