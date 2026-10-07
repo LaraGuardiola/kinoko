@@ -1,14 +1,23 @@
 // The live region: a few lines at the bottom of the terminal that we repaint in place.
 //
-// No alternate screen, so the native scrollback keeps everything that scrolls off the top. Only
-// the live region is ever rewritten; `printAbove` moves it out of the way, prints finished content,
-// and lets the region redraw underneath.
+// No alternate screen, so the native scrollback keeps everything. The region is addressed with
+// RELATIVE cursor moves only ("go up N rows from where I left the cursor"), never with absolute
+// rows. That is what lets the terminal scroll for real: whatever is printed above the region
+// becomes ordinary scrollback, and the user can scroll up through it while the model streams.
+//
+// Contract with the caller: the region must be shorter than the terminal (liveRegion guarantees
+// it), otherwise its top scrolls out of reach and cannot be repainted.
+
+import { wrapAnsi } from "./view.ts";
 
 const ESC = "\x1b[";
-const CLEAR_LINE = `${ESC}2K\r`;
 const CLEAR_BELOW = `${ESC}J`;
 const HIDE_CURSOR = `${ESC}?25l`;
 const SHOW_CURSOR = `${ESC}?25h`;
+// Synchronized output: terminals that know it paint the whole update at once (no flicker);
+// the others ignore it.
+const SYNC_START = `${ESC}?2026h`;
+const SYNC_END = `${ESC}?2026l`;
 
 export interface RenderState {
   /** Rows of the live region, top to bottom, already styled. */
@@ -21,8 +30,6 @@ export interface RenderState {
 export interface RendererOptions {
   write: (text: string) => void;
   columns?: () => number;
-  rows?: () => number;
-  topRow?: () => number;
   /** Minimum gap between repaints, in ms. ~30fps. */
   minIntervalMs?: number;
   now?: () => number;
@@ -35,9 +42,9 @@ export class Renderer {
   #minInterval: number;
   #now: () => number;
   #columns: () => number;
-  #rows: () => number;
-  #topRow: () => number;
   #drawn: string[] = [];
+  /** Where we left the cursor, in rows below the top of the drawn region. */
+  #cursorRow = 0;
   #lastAt = 0;
   #dirty = false;
   #state: RenderState = { lines: [], row: 0, col: 0 };
@@ -47,8 +54,6 @@ export class Renderer {
     this.#minInterval = opts.minIntervalMs ?? DEFAULT_INTERVAL;
     this.#now = opts.now ?? (() => performance.now());
     this.#columns = opts.columns ?? (() => 80);
-    this.#rows = opts.rows ?? (() => 24);
-    this.#topRow = opts.topRow ?? (() => 1);
   }
 
   /** What should be on screen now. Cheap: nothing is drawn until `frame()`. */
@@ -64,22 +69,36 @@ export class Renderer {
   frame(): boolean {
     if (!this.#dirty) return false;
     if (this.#now() - this.#lastAt < this.#minInterval) return false;
-    this.#draw();
+    this.flush();
     return true;
   }
 
-  /** Repaints right now, ignoring the throttle (used before printing something above). */
+  /** Repaints right now, ignoring the throttle (used on resize and before printing above). */
   flush(): void {
-    this.#draw();
+    this.#write(`${SYNC_START}${this.#moveToTop()}${CLEAR_BELOW}${this.#paint()}${SYNC_END}`);
   }
 
-  /** Prints finished content above the live region, then lets the region redraw below it. */
+  /**
+   * Prints finished content above the live region. The region is wiped, the text is written
+   * where the region used to start (the terminal scrolls by itself when it reaches the bottom)
+   * and the region is repainted below it. History is never rewritten, so it stays in scrollback.
+   */
   printAbove(text: string): void {
-    this.#erase();
-    this.#write(`${wrap(text, Math.max(1, this.#columns() - 2)).map((line) => ` ${line}`).join("\n")}\n`);
+    if (text === "") return;
+    const rows = text.split("\n").flatMap((line) => wrapAnsi(line, Math.max(1, this.#columns() - 2)));
+    const body = rows.map((line) => ` ${line}`).join("\r\n");
+    const out = `${SYNC_START}${this.#moveToTop()}${CLEAR_BELOW}${body}\r\n`;
     this.#drawn = [];
-    this.#dirty = true;
-    this.#draw();
+    this.#cursorRow = 0;
+    this.#write(`${out}${this.#paint()}${SYNC_END}`);
+  }
+
+  /** Leaves the cursor on a fresh row under the region, e.g. before the process exits. */
+  release(): void {
+    const down = this.#drawn.length - 1 - this.#cursorRow;
+    this.#write(`${down > 0 ? `${ESC}${down}B` : ""}\r\n${SHOW_CURSOR}`);
+    this.#drawn = [];
+    this.#cursorRow = 0;
   }
 
   /** The rows currently on screen, for tests. */
@@ -87,66 +106,27 @@ export class Renderer {
     return [...this.#drawn];
   }
 
-  #draw(): void {
-    const lines = this.#state.lines;
-    const startRow = Math.min(this.#rows(), Math.max(1, this.#topRow()));
-    let out = `\x1b[${startRow};1H`;
-    for (const [index, line] of lines.entries()) {
-      out += `${CLEAR_LINE} ${line}`;
-      // A newline after the bottom row scrolls a full-height live region on every keypress.
-      if (index < lines.length - 1) out += "\n";
-    }
-    // Anything left from a taller previous frame has to go.
-    out += CLEAR_BELOW;
-    // Come back up to the cursor row and place it.
-    out += `\x1b[${startRow + this.#state.row};${this.#state.col + 2}H`;
-    this.#write(out);
-    this.#drawn = [...lines];
+  /** Escape that puts the cursor on the first column of the region's top row. */
+  #moveToTop(): string {
+    return `${this.#cursorRow > 0 ? `${ESC}${this.#cursorRow}A` : ""}\r`;
+  }
+
+  /** Writes the region from the cursor (already at its top, nothing below) and parks the cursor. */
+  #paint(): string {
+    const { lines, row, col } = this.#state;
     this.#dirty = false;
     this.#lastAt = this.#now();
+    this.#drawn = [...lines];
+    this.#cursorRow = 0;
+    if (lines.length === 0) return "";
+    let out = lines.map((line) => ` ${line}`).join("\r\n");
+    // The cursor is after the last row now; walk back up to the editor row.
+    const up = lines.length - 1 - row;
+    if (up > 0) out += `${ESC}${up}A`;
+    out += `${ESC}${col + 2}G`;
+    this.#cursorRow = row;
+    return out;
   }
-
-  #erase(): void {
-    if (this.#drawn.length === 0) return;
-    const startRow = Math.min(this.#rows(), Math.max(1, this.#topRow()));
-    let out = `\x1b[${startRow};1H`;
-    for (let row = 0; row < this.#drawn.length; row++) {
-      out += CLEAR_LINE;
-      if (row < this.#drawn.length - 1) out += "\n";
-    }
-    if (this.#drawn.length > 1) out += `\x1b[${this.#drawn.length - 1}A`;
-    this.#write(out);
-  }
-}
-
-/** Wrap terminal text without counting CSI styling sequences as cells. */
-function wrap(text: string, width: number): string[] {
-  const rows: string[] = [];
-  for (const line of text.split("\n")) {
-    let row = "";
-    let cells = 0;
-    for (let index = 0; index < line.length;) {
-      if (line.startsWith("\x1b[", index)) {
-        const end = line.slice(index + 2).search(/[@-~]/);
-        if (end >= 0) {
-          const sequenceEnd = index + end + 3;
-          row += line.slice(index, sequenceEnd);
-          index = sequenceEnd;
-          continue;
-        }
-      }
-      if (cells === width) {
-        rows.push(row);
-        row = "";
-        cells = 0;
-      }
-      row += line[index] ?? "";
-      cells++;
-      index++;
-    }
-    rows.push(row);
-  }
-  return rows;
 }
 
 function sameState(a: RenderState, b: RenderState): boolean {
@@ -158,7 +138,7 @@ function sameState(a: RenderState, b: RenderState): boolean {
   );
 }
 
-/** Cursor helpers, used by the demo and by phase 9. */
+/** Cursor helpers, used by the demo. */
 export const ansi = {
   hide: HIDE_CURSOR,
   show: SHOW_CURSOR,

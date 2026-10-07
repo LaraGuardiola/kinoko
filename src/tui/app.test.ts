@@ -116,7 +116,8 @@ describe("TUI app with the agent", () => {
     h.app.render();
     expect(h.out.join("")).toContain("\x1b[38;5;159m> show me\x1b[0m");
     expect(h.out.join("")).not.toContain("\x1b[48;5");
-    expect(h.out.at(-1)).toContain("here is the answer");
+    // Finished text goes to the scrollback (printed above the region), not into the last repaint.
+    expect(h.screen()).toContain("here is the answer");
   });
 
   test("trimmed chats move to the scrollback instead of being lost", async () => {

@@ -2,17 +2,19 @@
 // while the model streams, Enter steers, Alt+Enter follows up, Esc cuts the run, and anything the
 // user typed while it was cut comes back.
 //
-// Only the live region is repainted; finished messages and tool blocks are printed above it, so the
-// native scrollback keeps the history.
+// Everything finished is printed above the live region, in the order it happened, so the native
+// scrollback keeps the whole history and the terminal scrolls like in any other harness. The live
+// region only holds the block being streamed, the running tool, the queue, the editor and the
+// status line. There is ONE open block at a time: when the stream switches between thinking and
+// answer (or a tool starts, or the message ends) the open block is closed and printed first.
 
 import { KeyParser } from "./term.ts";
 import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
-import { renderMarkdown } from "./markdown.ts";
-import { ABORTED, HELP, STREAM_ROWS, liveRegion, oneLine, overflow, statusLine, toolBlock, wrapTo } from "./view.ts";
+import { ABORTED, HELP, formatBlock, liveRegion, oneLine, splitStable, statusLine, toolBlock, wrapTo } from "./view.ts";
 import { actionFor } from "./keys.ts";
-import type { QueuedView, ToolView } from "./view.ts";
+import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Session } from "../session.ts";
@@ -28,8 +30,11 @@ export interface AppOptions {
   contextWindow: number;
   viewportRows?: number;
   viewportCols?: number;
+  /** @deprecated No longer used: the region is positioned relative to the cursor. */
   reservedRows?: number;
+  /** @deprecated No longer used. */
   viewportHeight?: () => number;
+  /** @deprecated No longer used. */
   viewportTop?: () => number;
   session?: Session;
   /** Called by /quit. The demo and the CLI pass the process exit. */
@@ -47,37 +52,34 @@ export class App {
   #window: number;
   #viewportRows: number | undefined;
   #viewportCols: number | undefined;
-  #reservedRows: number;
   #session: Session | undefined;
   #rebuild: (() => Agent) | undefined;
   #onQuit: (() => void) | undefined;
 
   #running = false;
-  #stream = ""; // assistant text still streaming
-  #thinking = ""; // model reasoning, never sent back to the provider
-  #transcript: Array<{ role: "user" | "assistant" | "thinking"; text: string }> = [];
+  // The block being streamed (thinking or answer). Thinking is display-only, never sent back.
+  #open: OpenBlock | undefined;
+  #thinkingSeen = false; // this message already streamed its thinking
+  #printedAny = false; // something is already in the scrollback (decides blank rows between blocks)
+  #lastKind: BlockKind | undefined;
   #tool: ToolView | undefined;
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
   #tokens = { input: 0, output: 0, cacheRead: 0 };
   #cost = 0;
-  #flushed = 0; // transcript head rows already moved to the scrollback
 
   constructor(opts: AppOptions) {
     this.#agent = opts.agent;
     this.#renderer = new Renderer({
       write: opts.write,
       columns: () => this.#viewportCols ?? 80,
-      rows: opts.viewportHeight,
-      topRow: opts.viewportTop,
     });
     this.#editor = new Editor();
     this.#model = opts.model;
     this.#window = opts.contextWindow;
     this.#viewportRows = opts.viewportRows;
     this.#viewportCols = opts.viewportCols;
-    this.#reservedRows = opts.reservedRows ?? 0;
     this.#session = opts.session;
     this.#rebuild = opts.rebuild;
     this.#onQuit = opts.onQuit;
@@ -103,8 +105,10 @@ export class App {
   /** Updates the available terminal height after a resize. */
   resize(cols: number, rows: number): void {
     this.#viewportCols = cols;
-    this.#viewportRows = Math.max(2, rows - this.#reservedRows);
-    this.render();
+    // The region has to stay shorter than the terminal, or its top could not be repainted.
+    this.#viewportRows = Math.max(2, rows - 1);
+    this.#renderer.update(this.#state());
+    this.#renderer.flush();
   }
 
   // ---- what the tests and the CLI read ----
@@ -182,7 +186,7 @@ export class App {
     if (text === "") return;
     if (text.startsWith("/")) {
       this.#editor.clear();
-      if (!(await this.command(text))) this.#printAbove(`unknown command ${text}: try /help`);
+      if (!(await this.command(text))) this.#print("system", `unknown command ${text}: try /help`);
       this.render();
       return;
     }
@@ -197,8 +201,6 @@ export class App {
       return;
     }
     this.#running = true;
-    this.#stream = "";
-    this.#thinking = "";
     this.#echoUser(text);
     void this.#run(text);
   }
@@ -217,8 +219,6 @@ export class App {
       this.render();
       return;
     }
-    this.#stream = "";
-    this.#thinking = "";
     this.#echoUser(text);
     void this.#run(text);
   }
@@ -230,6 +230,7 @@ export class App {
   }
 
   #quit(): void {
+    this.#renderer.release();
     this.#onQuit?.();
   }
 
@@ -247,12 +248,14 @@ export class App {
   #onAgentEvent(e: AgentEvent): void {
     switch (e.type) {
       case "message_delta":
-        this.#stream += e.delta;
+        this.#append("assistant", e.delta);
         return;
       case "thinking_delta":
-        this.#thinking += e.delta;
+        this.#thinkingSeen = true;
+        this.#append("thinking", e.delta);
         return;
       case "tool_start":
+        this.#closeBlock();
         this.#tool = {
           name: e.call.name,
           args: oneLine(JSON.stringify(e.call.args ?? {})),
@@ -287,7 +290,7 @@ export class App {
     }
   }
 
-  /** Finalized assistant text: keep what is on screen, print the rest above it. */
+  /** The message is over: whatever was streaming is final, and goes to the scrollback now. */
   #finishMessage(message: Message): void {
     const usage = message.usage;
     if (usage) {
@@ -296,33 +299,27 @@ export class App {
       this.#tokens.cacheRead += usage.cacheRead ?? 0;
       this.#cost += usage.cost ?? 0;
     }
-    const thinking = message.thinking ?? this.#thinking;
-    if (thinking.trim() !== "") this.#transcript.push({ role: "thinking", text: thinking });
-    this.#thinking = "";
-    if (this.#stream.trim() !== "") {
-      // Text that no longer fits moves up into the scrollback instead of the region.
-      const spilled = overflow(this.#stream);
-      if (spilled !== "") this.#printAbove(renderMarkdown(spilled));
-      const rows = this.#stream.split("\n");
-      this.#stream = rows.length <= STREAM_ROWS ? this.#stream : rows.slice(-STREAM_ROWS).join("\n");
-    }
+    this.#closeBlock();
+    // A provider that only reports the reasoning at the end (no deltas): better late than lost.
+    const thinking = message.thinking ?? "";
+    if (!this.#thinkingSeen && thinking.trim() !== "") this.#print("thinking", formatBlock("thinking", thinking));
+    this.#thinkingSeen = false;
     this.render();
   }
 
   #printTool(): void {
     const tool = this.#tool;
     if (!tool) return;
+    this.#closeBlock();
     this.#tool = undefined;
-    this.#printAbove(toolBlock(tool, this.#toolBlocksFull));
+    this.#print("tool", toolBlock(tool, this.#toolBlocksFull));
   }
 
   #finishRun(reason: RunResult["reason"], dropped: string[] | undefined): void {
     this.#running = false;
     this.#queued = [];
-    if (this.#stream.trim() !== "") {
-      this.#transcript.push({ role: "assistant", text: this.#stream });
-      this.#stream = "";
-    }
+    this.#closeBlock();
+    this.#thinkingSeen = false;
     if (dropped !== undefined && dropped.length > 0) {
       // Nothing the user typed is ever lost: it goes back into the editor.
       const back = dropped.join("\n");
@@ -335,6 +332,55 @@ export class App {
     this.render();
   }
 
+  // ---- ordered blocks ----
+
+  /** Adds streamed text to the open block; a different kind of text closes it first. */
+  #append(kind: "thinking" | "assistant", delta: string): void {
+    if (this.#open !== undefined && this.#open.kind !== kind) this.#closeBlock();
+    // Whitespace between two blocks must not open a block of its own.
+    if (this.#open === undefined && delta.trim() === "") return;
+    const open = (this.#open ??= { kind: kind, text: "", gap: this.#gapFor(kind), inFence: false });
+    open.text += delta;
+    this.#spill();
+  }
+
+  /** Streaming text taller than the region: the stable head moves to the scrollback, in order. */
+  #spill(): void {
+    const open = this.#open;
+    if (open === undefined) return;
+    const split = splitStable(open.text, this.#viewportCols, open.inFence);
+    if (split === undefined) return;
+    const chunk = formatBlock(open.kind, split.commit, open.inFence);
+    const gap = open.gap;
+    this.#open = { kind: open.kind, text: split.rest, gap: split.gap, inFence: split.restInFence };
+    if (chunk !== "") this.#print(open.kind, chunk, gap);
+  }
+
+  /** Prints what is left of the open block and forgets it. */
+  #closeBlock(): void {
+    const open = this.#open;
+    if (open === undefined) return;
+    this.#open = undefined;
+    const text = formatBlock(open.kind, open.text, open.inFence);
+    if (text !== "") this.#print(open.kind, text, open.gap);
+  }
+
+  /** Does a block of this kind need a blank row above it, given what is already printed? */
+  #gapFor(kind: BlockKind): boolean {
+    if (!this.#printedAny) return false;
+    return !(kind === "tool" && this.#lastKind === "tool");
+  }
+
+  /** Sends one finished piece to the scrollback. `gap` defaults to the usual blank row between blocks. */
+  #print(kind: BlockKind, text: string, gap = this.#gapFor(kind)): void {
+    if (text === "") return;
+    // The renderer repaints the region right after the text: it has to know the current state.
+    this.#renderer.update(this.#state());
+    this.#renderer.printAbove(gap ? `\n${text}` : text);
+    this.#printedAny = true;
+    this.#lastKind = kind;
+  }
+
   #syncQueued(steer: string[], followUp: string[]): void {
     this.#queued = [
       ...steer.map((text) => ({ kind: "steer" as const, text: text })),
@@ -343,13 +389,10 @@ export class App {
     this.render();
   }
 
-  #printAbove(text: string): void {
-    this.#renderer.update(this.#state());
-    this.#renderer.printAbove(text);
-  }
-
   #echoUser(text: string): void {
-    this.#transcript.push({ role: "user", text: text });
+    // Closing first keeps the order true: what was already streamed stays above the message.
+    this.#closeBlock();
+    this.#print("user", formatBlock("user", text));
     this.render();
   }
 
@@ -358,11 +401,10 @@ export class App {
   #state(): { lines: string[]; row: number; col: number } {
     const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 4);
     const view = this.#editor.view(wrapTo(editorWidth));
-    const region = liveRegion({
-      transcript: this.#transcript,
-      stream: this.#stream,
-      thinking: this.#thinking,
+    return liveRegion({
+      open: this.#open,
       tool: this.#tool,
+      toolGap: this.#gapFor("tool"),
       marker: this.#marker,
       queued: this.#queued,
       editorLines: view.lines,
@@ -373,18 +415,6 @@ export class App {
       viewportRows: this.#viewportRows,
       viewportCols: this.#viewportCols,
     });
-    // Trimmed transcript rows move to the scrollback once, in order, so every
-    // chat stays reachable by scrolling up. The transcript prefix is append-only,
-    // so a running count never prints a row twice.
-    if (region.dropped.length > this.#flushed) {
-      const newly = region.dropped.slice(this.#flushed);
-      this.#flushed = region.dropped.length;
-      const frame = { lines: region.lines, row: region.row, col: region.col };
-      this.#renderer.update(frame);
-      this.#renderer.printAbove(newly.join("\n"));
-      return frame;
-    }
-    return region;
   }
 
   // ---- slash commands ----
@@ -394,11 +424,11 @@ export class App {
     const [name = ""] = input.replace(/^\//, "").split(" ");
     switch (name) {
       case "help":
-        this.#printAbove(HELP);
+        this.#print("system", HELP);
         this.render();
         return true;
       case "model":
-        this.#printAbove(`model: ${this.#model}  context: ${this.#window} tokens`);
+        this.#print("system", `model: ${this.#model}  context: ${this.#window} tokens`);
         this.render();
         return true;
       case "compact": {
@@ -409,7 +439,7 @@ export class App {
       }
       case "fork": {
         const moved = await this.#forkHead();
-        this.#printAbove(moved);
+        this.#print("system", moved);
         this.render();
         return true;
       }

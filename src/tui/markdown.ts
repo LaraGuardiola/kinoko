@@ -1,5 +1,5 @@
 // Just enough markdown for a terminal: fenced code blocks, bold and inline code.
-// Finalized assistant text only, so nothing here has to cope with a half-received line.
+// Callers hand it whole lines (finished blocks, or the live tail of a stream cut at a line boundary).
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
@@ -10,6 +10,8 @@ const CYAN = `${ESC}36m`;
 export interface MarkdownOptions {
   /** ANSI colour off for plain logs and tests. */
   color?: boolean;
+  /** The text starts inside a ``` fence (the head of that code block was already printed). */
+  inFence?: boolean;
 }
 
 /** Renders markdown to ANSI. Fenced blocks are dimmed and keep their text verbatim. */
@@ -19,7 +21,7 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
   const lines = text.split("\n");
   const out: string[] = [];
 
-  let inFence = false;
+  let inFence = opts.inFence ?? false;
   for (const line of lines) {
     if (line.trimStart().startsWith("```")) {
       inFence = !inFence;

@@ -1,11 +1,19 @@
 // How the live region looks: pure functions, no state. The App decides what is true, this decides
 // how the rows look.
+//
+// Model of the screen: everything that is FINISHED lives in the terminal's own scrollback, in the
+// order it happened (user, thinking, answer, tool, thinking, answer...). The live region only
+// holds what is still moving: the one block being streamed, the running tool, queued messages,
+// the editor and the status line.
 
 import { renderMarkdown } from "./markdown.ts";
 
-export const STREAM_ROWS = 12; // how much streaming text stays in the live region
+/** Rows of streaming text kept in the live region before the stable part moves to scrollback. */
+export const STREAM_ROWS = 12;
 export const COMPACT_ROWS = 3;
 export const ABORTED = "Aborted by user"; // what the Agent puts back for a cut-short tool
+
+export type BlockKind = "user" | "thinking" | "assistant" | "tool" | "system";
 
 export interface ToolView {
   name: string;
@@ -25,11 +33,21 @@ export interface Tokens {
   cacheRead: number;
 }
 
+/** The block that is being streamed right now. At most one exists at any time. */
+export interface OpenBlock {
+  kind: "thinking" | "assistant";
+  text: string;
+  /** A blank row goes before it (it follows another block). */
+  gap: boolean;
+  /** The text starts inside a ``` fence (a code block that was cut while streaming). */
+  inFence: boolean;
+}
+
 export interface RegionInput {
-  transcript: Array<{ role: "user" | "assistant" | "thinking"; text: string }>;
-  stream: string;
-  thinking: string;
+  open: OpenBlock | undefined;
   tool: ToolView | undefined;
+  /** A blank row goes before the running tool line. */
+  toolGap?: boolean;
   marker: string;
   queued: QueuedView[];
   editorLines: string[];
@@ -45,26 +63,96 @@ export interface Region {
   lines: string[];
   row: number;
   col: number;
-  /** Transcript head rows cut off by the viewport: the App prints them to the scrollback once. */
-  dropped: string[];
 }
 
-/** The live region: streaming text, the running tool, marker, queued messages, editor, status. */
-export function liveRegion(input: RegionInput): Region {
-  let transcriptRows: string[] = [];
-  for (const message of input.transcript) {
-    const style = message.role === "user" ? ANSI.user : "";
-    const prefix = message.role === "user" ? "> " : "";
-    const lines = message.role === "assistant" ? renderMarkdown(message.text).split("\n") : message.text.split("\n");
-    if (message.role === "thinking") transcriptRows.push(...thinkingBlock(message.text).split("\n"));
-    else transcriptRows.push(...lines.map((line) => `${style}${prefix}${line}${style ? ANSI.reset : ""}`));
+/** A finished block as terminal rows. Used both for scrollback and for the open block. */
+export function formatBlock(kind: BlockKind, text: string, inFence = false): string {
+  const body = inFence ? text.replace(/\n+$/, "") : text.replace(/^\n+|\n+$/g, "");
+  if (body === "") return "";
+  switch (kind) {
+    case "user":
+      return body
+        .split("\n")
+        .map((line) => `${ANSI.user}> ${line}${ANSI.reset}`)
+        .join("\n");
+    case "thinking":
+      return thinkingBlock(body);
+    case "assistant":
+      return renderMarkdown(body, { inFence: inFence });
+    default:
+      return body;
   }
+}
+
+/**
+ * Streaming text that has grown past STREAM_ROWS: splits it into a part that is stable (moves to
+ * the scrollback, once, in order) and the rest (stays live). Cuts at the last paragraph boundary
+ * outside a code fence; a paragraph or code block taller than the region is cut by line, and
+ * `restInFence` tells the renderer the rest continues inside a fence.
+ * Returns undefined while everything still fits.
+ */
+export function splitStable(
+  text: string,
+  cols: number | undefined,
+  startsInFence = false,
+  limit = STREAM_ROWS,
+): { commit: string; rest: string; gap: boolean; restInFence: boolean } | undefined {
+  const width = Math.max(1, (cols ?? 80) - 2);
+  const lines = text.split("\n");
+  const rowsOf = (line: string): number => Math.max(1, Math.ceil(line.length / width));
+  const total = lines.reduce((sum, line) => sum + rowsOf(line), 0);
+  if (total <= limit || lines.length < 2) return undefined;
+
+  // inFenceAt[i]: are we inside a ``` fence just before line i?
+  const inFenceAt: boolean[] = [];
+  let fence = startsInFence;
+  for (const line of lines) {
+    inFenceAt.push(fence);
+    if (line.trimStart().startsWith("```")) fence = !fence;
+  }
+  const restRows = (from: number): number => lines.slice(from).reduce((sum, line) => sum + rowsOf(line), 0);
+
+  // Preferred: everything before the paragraph that is being written now.
+  for (let cut = lines.length - 1; cut >= 1; cut--) {
+    if (lines[cut - 1]?.trim() !== "" || inFenceAt[cut]) continue;
+    if (restRows(cut) > limit) break; // the live paragraph alone is too tall: cut by line instead
+    return {
+      commit: lines.slice(0, cut).join("\n").replace(/\n+$/, ""),
+      rest: lines.slice(cut).join("\n"),
+      gap: true,
+      restInFence: false,
+    };
+  }
+
+  // Fallback: keep roughly half the region as the live tail.
+  const keep = Math.ceil(limit / 2);
+  let cut = lines.length - 1;
+  let rows = rowsOf(lines[cut] ?? "");
+  while (cut > 1 && rows + rowsOf(lines[cut - 1] ?? "") <= keep) {
+    cut--;
+    rows += rowsOf(lines[cut] ?? "");
+  }
+  return {
+    commit: lines.slice(0, cut).join("\n"),
+    rest: lines.slice(cut).join("\n"),
+    gap: false,
+    restInFence: inFenceAt[cut] === true,
+  };
+}
+
+/** The live region: the open block, the running tool, marker, queued messages, editor, status. */
+export function liveRegion(input: RegionInput): Region {
   let tail: string[] = [];
-  if (input.thinking !== "") tail.push(...thinkingBlock(input.thinking).split("\n"));
-  if (input.stream !== "") {
-    tail.push(...renderStream(input.stream));
+  const open = input.open;
+  if (open !== undefined) {
+    const text = formatBlock(open.kind, open.text, open.inFence);
+    if (text !== "") {
+      if (open.gap) tail.push("");
+      tail.push(...text.split("\n"));
+    }
   }
   if (input.tool !== undefined) {
+    if (input.toolGap) tail.push("");
     tail.push(`${ANSI.dim}● ${input.tool.name} ${input.tool.args} …${ANSI.reset}`);
   }
   if (input.marker !== "") tail.push(`${ANSI.inverse}${input.marker}${ANSI.reset}`);
@@ -80,7 +168,6 @@ export function liveRegion(input: RegionInput): Region {
   const viewport = input.viewportRows;
   const width = input.viewportCols === undefined ? undefined : Math.max(1, input.viewportCols - 2);
   if (width !== undefined) {
-    transcriptRows = transcriptRows.flatMap((line) => wrapAnsi(line, width));
     tail = tail.flatMap((line) => wrapAnsi(line, width));
     // The idle hint never holds the cursor, so it can wrap instead of ending in "…".
     if (input.editorEmpty && editor.length > 0) {
@@ -88,30 +175,23 @@ export function liveRegion(input: RegionInput): Region {
       editor.push(...wrapAnsi(hint, width));
     }
   }
-  const content = [...transcriptRows, ...tail];
   if (viewport === undefined || viewport < 2) {
-    const rows = [...content];
+    const rows = [...tail];
     const editorStart = rows.length;
     rows.push(...editor, input.status);
-    return { ...region(rows, editorStart + input.editorRow, input.editorCol + 2, input.viewportCols), dropped: [] };
+    return region(rows, editorStart + input.editorRow, input.editorCol + 2, input.viewportCols);
   }
 
-  // The region flows downward from the startup panel: content, then the editor
-  // and status right below it, with no filler rows. Only when everything no
-  // longer fits the viewport is the tail kept, which pins the editor/status
-  // to the bottom while the conversation scrolls above them.
+  // The region must stay shorter than the terminal, or its top scrolls out of reach and cannot be
+  // repainted. When the tail does not fit, only its last rows are shown: the rest of a streamed
+  // block was already moved to the scrollback by splitStable, so this only trims extremes.
   const editorRoom = Math.max(1, viewport - 1);
   const editorStartAt = Math.max(0, Math.min(input.editorRow - editorRoom + 1, editor.length - editorRoom));
   const visibleEditor = editor.length <= editorRoom ? editor : editor.slice(editorStartAt, editorStartAt + editorRoom);
   const contentRoom = Math.max(0, viewport - visibleEditor.length - 1);
-  const visibleContent = contentRoom === 0 ? [] : content.slice(-contentRoom);
-  const rows = [...visibleContent, ...visibleEditor, input.status];
-  const editorStart = visibleContent.length;
-  // Rows of the transcript that no longer fit are reported, not hidden: the App
-  // moves them to the scrollback once, so no chat is ever lost to the trim.
-  const visibleTail = Math.min(tail.length, visibleContent.length);
-  const dropped = transcriptRows.slice(0, Math.max(0, transcriptRows.length - (visibleContent.length - visibleTail)));
-  return { ...region(rows, editorStart + input.editorRow - editorStartAt, input.editorCol + 2, input.viewportCols), dropped };
+  const visibleTail = contentRoom === 0 ? [] : tail.slice(-contentRoom);
+  const rows = [...visibleTail, ...visibleEditor, input.status];
+  return region(rows, visibleTail.length + input.editorRow - editorStartAt, input.editorCol + 2, input.viewportCols);
 }
 
 /** Model reasoning is display-only: muted and distinct from the answer. */
@@ -202,19 +282,6 @@ function clipAnsi(line: string, max: number): string {
     index++;
   }
   return out;
-}
-
-/** Markdown for the streaming tail; keeps only the last rows so the region stays small. */
-export function renderStream(text: string): string[] {
-  const lines = text.split("\n");
-  const tail = lines.length <= STREAM_ROWS ? text : lines.slice(-STREAM_ROWS).join("\n");
-  return renderMarkdown(tail).split("\n");
-}
-
-/** The part of a long message that has to move up into the scrollback instead of the region. */
-export function overflow(text: string): string {
-  const lines = text.split("\n");
-  return lines.length <= STREAM_ROWS ? "" : lines.slice(0, lines.length - STREAM_ROWS).join("\n");
 }
 
 /** A finished tool block: collapsed to COMPACT_ROWS lines unless `full` is set. */
