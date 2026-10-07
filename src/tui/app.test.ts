@@ -320,7 +320,7 @@ describe("TUI app with the agent", () => {
     );
     h.press("list\r");
     await settle(h.agent);
-    expect(h.screen()).toContain("● bash {\"cmd\":\"ls\"}");
+    expect(h.screen()).toContain("● bash ls");
     expect(h.screen()).toContain("… 6 more lines (ctrl+t)");
 
     h.press("\x14"); // ctrl+t, then run again to see the expanded block

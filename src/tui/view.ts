@@ -153,7 +153,7 @@ export function liveRegion(input: RegionInput): Region {
   }
   if (input.tool !== undefined) {
     if (input.toolGap) tail.push("");
-    tail.push(`${ANSI.dim}● ${input.tool.name} ${input.tool.args} …${ANSI.reset}`);
+    tail.push(`${toolHead(input.tool)} ${ANSI.dim}…${ANSI.reset}`);
   }
   if (input.marker !== "") tail.push(`${ANSI.inverse}${input.marker}${ANSI.reset}`);
   for (const item of input.queued) {
@@ -284,16 +284,57 @@ function clipAnsi(line: string, max: number): string {
   return out;
 }
 
-/** A finished tool block: collapsed to COMPACT_ROWS lines unless `full` is set. */
-export function toolBlock(tool: ToolView, full: boolean): string {
-  const head = `${ANSI.dim}● ${tool.name}${tool.args === "" ? "" : ` ${tool.args}`}${ANSI.reset}`;
+/** The tool line: name in bold yellow, what it acts on in bold white. */
+export function toolHead(tool: Pick<ToolView, "name" | "args">): string {
+  const args = tool.args === "" ? "" : ` ${ANSI.white}${tool.args}`;
+  return `${ANSI.toolDot}●${ANSI.reset} ${ANSI.tool}${tool.name}${ANSI.reset}${args}${ANSI.reset}`;
+}
+
+/** What a call acts on, instead of its JSON: the path, the command, the pattern. */
+export function toolSummary(name: string, args: unknown): string {
+  const a = (args ?? {}) as Record<string, unknown>;
+  const str = (key: string): string => (typeof a[key] === "string" ? (a[key] as string) : "");
+  let main = "";
+  if (name === "read" || name === "write" || name === "edit") main = str("path");
+  else if (name === "bash") main = str("cmd");
+  else if (name === "search") main = [str("pattern"), str("path")].filter((part) => part !== "").join(" in ");
+  return oneLine(main === "" ? JSON.stringify(a) : main, 100);
+}
+
+/** A tool failed when it says so: an ERROR result, a non-zero exit or a timeout (see bash.ts). */
+export function toolFailed(output: string): boolean {
+  return output.startsWith("ERROR:") || /\n\[(exit code \d+|timed out after [^\]]*)\]$/.test(output.trimEnd());
+}
+
+/**
+ * A finished tool block: collapsed to COMPACT_ROWS lines unless `full` is set. The whole block,
+ * head included, sits on a soft green band when the tool succeeded and a soft red one when it
+ * failed, `width` wide.
+ */
+export function toolBlock(tool: ToolView, full: boolean, width = 80): string {
+  const head = toolHead(tool);
   if (tool.aborted) return `${head} ${ANSI.dim}aborted${ANSI.reset}`;
-  const all = tool.output.split("\n");
+  const all = tool.output.replace(/\n+$/, "").split("\n");
   const shown = full ? all : all.slice(0, COMPACT_ROWS);
-  const body = shown.map((row) => `  ${ANSI.dim}${row}${ANSI.reset}`).join("\n");
+  // One column of padding each side, plus the renderer's own margin.
+  const inner = Math.max(3, width - 4);
+  const rows = [
+    ...wrapAnsi(head, inner),
+    ...shown.flatMap((row) => wrapAnsi(row.replace(/\t/g, "  "), inner - 2)).map((row) => `  ${row}`),
+  ];
   const hidden = all.length - shown.length;
-  const hint = hidden > 0 ? `\n  ${ANSI.dim}… ${hidden} more lines (ctrl+t)${ANSI.reset}` : "";
-  return `${head}\n${body}${hint}`;
+  if (hidden > 0) rows.push(`  ${ANSI.dim}… ${hidden} more lines (ctrl+t)${ANSI.reset}`);
+  return band(rows, toolFailed(tool.output) ? ANSI.bgErr : ANSI.bgOk, inner);
+}
+
+/** Paints rows on a background `inner` wide; a reset inside a row must not end the band. */
+function band(rows: string[], bg: string, inner: number): string {
+  return rows
+    .map((row) => {
+      const pad = " ".repeat(Math.max(0, inner - visibleLength(row)));
+      return `${bg} ${row.replaceAll(ANSI.reset, `${ANSI.reset}${bg}`)}${pad} ${ANSI.reset}`;
+    })
+    .join("\n");
 }
 
 export function statusLine(parts: {
@@ -317,9 +358,9 @@ export function statusLine(parts: {
 }
 
 /** Tool arguments on one line, trimmed: the region is narrow. */
-export function oneLine(text: string): string {
+export function oneLine(text: string, max = 60): string {
   const line = text.replace(/\s+/g, " ").trim();
-  return line.length > 60 ? `${line.slice(0, 57)}...` : line;
+  return line.length > max ? `${line.slice(0, max - 3)}...` : line;
 }
 
 /** Hard wraps a logical editor line to the terminal width. */
@@ -335,6 +376,13 @@ const ANSI = {
   reset: `${ESC}0m`,
   inverse: `${ESC}7m`,
   user: `${ESC}38;5;159m`,
+  // Yellow means "a tool": the dot and the name share it.
+  tool: `${ESC}1;38;5;221m`,
+  toolDot: `${ESC}38;5;221m`,
+  white: `${ESC}1;97m`,
+  // Tints only a step away from a dark background, so they read as translucent.
+  bgOk: `${ESC}48;2;30;44;38m`,
+  bgErr: `${ESC}48;2;50;30;36m`,
 };
 
 export const HELP = [

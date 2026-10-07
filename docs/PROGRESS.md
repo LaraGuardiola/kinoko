@@ -181,3 +181,17 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Tests: two `view.test.ts` cases (dropped head, tail rows never dropped) and an `app.test.ts` case driving two prompts in a 6-row viewport (first exchange reachable in scrollback, exactly once, correct order). `bun run check` passes (153 tests, zero warnings).
 - Assumptions: a terminal resize rewraps rows, so the flushed-row count can misalign by a few boundary lines after a width change (resize-only cosmetic artifact, never a loss). `session.test.ts` #5 ("--continue picks the newest") failed once in a full run and passed alone and on rerun: pre-existing mtime-resolution flake, untouched by this change.
 - Build: rebuilt `kinoko-out/kinoko` and installed it at `~/.local/bin/kinoko`.
+
+## TUI tool block styling — DONE
+- Tool head: name in bold yellow, then what the call acts on in bold white instead of its JSON (`read`/`write`/`edit` → path, `bash` → cmd, `search` → pattern [in path], unknown/extension tools → JSON fallback). Same style on the running line.
+- Tool output sits on a full-width light band: green on success, red on failure. Failure = `ERROR:` result, a non-zero exit or a timeout.
+- `bash` now appends `[exit code N]` on a non-zero exit (visible to the model too; stdout/stderr stay merged in order).
+- Tests: view.test.ts (summary, head colors, failure detection, bands) and tools.test.ts (exit code). 174 pass, tsc clean. Lint: the pre-existing test-file warnings/errors from commit 43bd5f2 remain (render/order/view tests), untouched.
+- Build: rebuilt and installed `~/.local/bin/kinoko`.
+
+## TUI tool block styling, round 2 — DONE
+- The band now covers the whole tool block (head, output and the "more lines" hint), not just the output; resets inside a row re-open the band so it never breaks mid-row.
+- Softer tints, one step off a dark background: ok `rgb(30,44,38)`, error `rgb(50,30,36)`.
+- The tool dot is yellow like the tool name (yellow = tool), also on the running line.
+- Tests: band covers every row and pads to the width, yellow dot. 175 pass, tsc clean, view.ts lints clean.
+- Build: rebuilt and installed `~/.local/bin/kinoko`.

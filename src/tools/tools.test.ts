@@ -110,6 +110,12 @@ describe("kinoko core tools", () => {
     expect(out.length).toBeLessThan(4000 * 4 + 200);
   });
 
+  test("bash: a non-zero exit is reported at the end", async () => {
+    const b = pick("bash");
+    expect(await b.run({ cmd: "echo hi; exit 3" }, ctx(fresh("exit")))).toBe("hi\n\n[exit code 3]");
+    expect(await b.run({ cmd: "echo hi" }, ctx(fresh("exit0")))).toBe("hi\n");
+  });
+
   test("bash: abort kills the process group, returns <200ms", async () => {
     const dir = fresh("abort");
     const b = pick("bash");

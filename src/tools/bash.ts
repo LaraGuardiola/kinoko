@@ -66,11 +66,13 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
     };
     ctx.signal.addEventListener("abort", onAbort);
 
-    child.on("close", async () => {
+    child.on("close", async (code: number | null) => {
       if (timer) clearTimeout(timer);
       ctx.signal.removeEventListener("abort", onAbort);
       const raw = chunks.join("");
-      const suffix = timedOut ? `\n[timed out after ${timeoutMs}ms — process group killed]` : "";
+      // A failed command says so at the end, where the budget's head+tail always keeps it.
+      const exit = code !== null && code !== 0 ? `\n[exit code ${code}]` : "";
+      const suffix = timedOut ? `\n[timed out after ${timeoutMs}ms — process group killed]` : exit;
       finish(await budget(raw + suffix, { maxTokens: DEFAULT_MAX_TOKENS, id: crypto.randomUUID() }));
     });
   });

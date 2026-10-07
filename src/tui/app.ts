@@ -12,7 +12,7 @@ import { KeyParser } from "./term.ts";
 import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
-import { ABORTED, HELP, formatBlock, liveRegion, oneLine, splitStable, statusLine, toolBlock, wrapTo } from "./view.ts";
+import { ABORTED, HELP, formatBlock, liveRegion, splitStable, statusLine, toolBlock, toolSummary, wrapTo } from "./view.ts";
 import { actionFor } from "./keys.ts";
 import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -258,7 +258,7 @@ export class App {
         this.#closeBlock();
         this.#tool = {
           name: e.call.name,
-          args: oneLine(JSON.stringify(e.call.args ?? {})),
+          args: toolSummary(e.call.name, e.call.args),
           output: "",
           aborted: false,
         };
@@ -312,7 +312,7 @@ export class App {
     if (!tool) return;
     this.#closeBlock();
     this.#tool = undefined;
-    this.#print("tool", toolBlock(tool, this.#toolBlocksFull));
+    this.#print("tool", toolBlock(tool, this.#toolBlocksFull, this.#viewportCols));
   }
 
   #finishRun(reason: RunResult["reason"], dropped: string[] | undefined): void {

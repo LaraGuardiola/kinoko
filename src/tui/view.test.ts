@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { formatBlock, liveRegion, splitStable, STREAM_ROWS, wrapAnsi } from "./view.ts";
+import { formatBlock, liveRegion, splitStable, STREAM_ROWS, toolBlock, toolFailed, toolSummary, wrapAnsi } from "./view.ts";
 import type { RegionInput } from "./view.ts";
 
 const stripAnsi = (line: string): string => line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
@@ -191,4 +191,44 @@ test("wrapAnsi keeps styles across split rows and leaves fitting rows alone", ()
   expect(rows).toHaveLength(3);
   expect(rows[0]).toBe("\x1b[1mboldtextth\x1b[0m");
   expect(rows[1]).toBe("\x1b[1matiswaytoo\x1b[0m");
+});
+
+describe("tool blocks", () => {
+  test("the head shows what the call acts on, not its JSON", () => {
+    expect(toolSummary("read", { path: "/home/x/a.ts", offset: 3 })).toBe("/home/x/a.ts");
+    expect(toolSummary("bash", { cmd: "ls  -la\n| wc" })).toBe("ls -la | wc");
+    expect(toolSummary("search", { pattern: "foo", path: "src" })).toBe("foo in src");
+    expect(toolSummary("mytool", { a: 1 })).toBe('{"a":1}');
+  });
+
+  test("name in bold yellow, argument in bold white", () => {
+    const head = toolBlock({ name: "read", args: "/a.ts", output: "ok", aborted: false }, false).split("\n")[0] ?? "";
+    expect(head).toContain("\x1b[1;38;5;221mread");
+    expect(head).toContain("\x1b[1;97m/a.ts");
+  });
+
+  test("failures are told apart from successes", () => {
+    expect(toolFailed("ERROR: read: no such file")).toBe(true);
+    expect(toolFailed("boom\n[exit code 2]")).toBe(true);
+    expect(toolFailed("x\n[timed out after 10ms — process group killed]")).toBe(true);
+    expect(toolFailed("wrote 8 chars to /a.txt")).toBe(false);
+  });
+
+  test("the whole block sits on a soft green band on success and a red one on failure, padded to the width", () => {
+    const ok = toolBlock({ name: "bash", args: "ls", output: "a\nb", aborted: false }, false, 20).split("\n");
+    expect(ok).toHaveLength(3);
+    for (const row of ok) {
+      expect(row.startsWith("\x1b[48;2;30;44;38m")).toBe(true);
+      expect(stripAnsi(row)).toHaveLength(18);
+    }
+    // A reset inside the head re-opens the band right away.
+    expect(ok[0]).toContain("\x1b[0m\x1b[48;2;30;44;38m");
+    const bad = toolBlock({ name: "bash", args: "x", output: "nope\n[exit code 1]", aborted: false }, false, 20);
+    expect(bad.startsWith("\x1b[48;2;50;30;36m")).toBe(true);
+  });
+
+  test("the tool dot is yellow, like the name", () => {
+    const region = liveRegion(input({ tool: { name: "bash", args: "ls", output: "", aborted: false } }));
+    expect(region.lines[0]?.startsWith("\x1b[38;5;221m●")).toBe(true);
+  });
 });
