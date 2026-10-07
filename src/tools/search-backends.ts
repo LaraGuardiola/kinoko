@@ -49,6 +49,7 @@ interface LineItem {
 
 export interface ScanNote {
   timedOut: boolean;
+  error?: string; // why the backend failed, e.g. an invalid pattern from rg
 }
 
 export interface Backend {
@@ -98,7 +99,7 @@ function hasUpper(text: string): boolean {
 }
 
 /** smart-case: case-insensitive unless the pattern has an upper-case letter. */
-function smartRegex(pattern: string): null | RegExp {
+export function smartRegex(pattern: string): null | RegExp {
   try {
     return new RegExp(pattern, hasUpper(pattern) ? "" : "i");
   } catch {
@@ -302,6 +303,14 @@ async function* pump(
       wakeUp();
     });
   }
+  const err = child.stderr;
+  if (err !== null) {
+    err.on("data", (chunk: Buffer) => {
+      if (note.error === undefined && chunk.length > 0) {
+        note.error = chunk.toString().trim().split("\n")[0] ?? "backend failed";
+      }
+    });
+  }
   child.on("close", () => {
     ended = true;
     wakeUp();
@@ -379,12 +388,25 @@ function rgArgs(query: SearchQuery): string[] {
   return args;
 }
 
+/** A spawn that cannot even start is a scan error, not a crash of the whole tool. */
+function start(exe: string, args: string[], query: SearchQuery, note: ScanNote): null | ChildProcess {
+  try {
+    return spawn(exe, args, { cwd: query.path, stdio: ["pipe", "pipe", "pipe"] });
+  } catch (e) {
+    note.error = e instanceof Error ? e.message.split("\n")[0] ?? e.message : String(e);
+    return null;
+  }
+}
+
 async function* rgContent(
   query: SearchQuery,
   note: ScanNote,
   exe: string,
 ): AsyncGenerator<Hit, void> {
-  const child = spawn(exe, rgArgs(query), { cwd: query.path, stdio: ["pipe", "pipe", "pipe"] });
+  const child = start(exe, rgArgs(query), query, note);
+  if (child === null) {
+    return;
+  }
   let pending = "";
   for await (const chunk of pump(child, query.signal, note, HARD_MS)) {
     if (query.signal.aborted) {
@@ -429,7 +451,10 @@ async function* rgFiles(
   note: ScanNote,
   exe: string,
 ): AsyncGenerator<FileRow, void> {
-  const child = spawn(exe, rgFileArgs(query), { cwd: query.path, stdio: ["pipe", "pipe", "pipe"] });
+  const child = start(exe, rgFileArgs(query), query, note);
+  if (child === null) {
+    return;
+  }
   const rows: FileRow[] = [];
   let pending = "";
   for await (const chunk of pump(child, query.signal, note, HARD_MS)) {
@@ -595,61 +620,74 @@ function norm(rel: string): string {
   return rel.startsWith("./") ? rel.slice(2) : rel;
 }
 
-async function* bunContent(query: SearchQuery, _note: ScanNote): AsyncGenerator<Hit, void> {
+async function* bunContent(query: SearchQuery, note: ScanNote): AsyncGenerator<Hit, void> {
   const regex = smartRegex(query.pattern);
   if (regex === null) {
+    note.error = `invalid regex pattern: ${query.pattern}`;
     return;
   }
   const rules = readIgnores(query.path);
   const globber = new Bun.Glob(query.glob === "" ? "**/*" : query.glob);
-  for await (const found of globber.scan({ cwd: query.path })) {
-    const rel = norm(found);
-    if (query.signal.aborted) {
-      return;
-    }
-    if (ignored(rel, rules) || (!query.hidden && hiddenPath(rel))) {
-      continue;
-    }
-    const abs = `${query.path}/${rel}`;
+  try {
+    for await (const found of globber.scan({ cwd: query.path })) {
+      const rel = norm(found);
+      if (query.signal.aborted) {
+        return;
+      }
+      if (ignored(rel, rules) || (!query.hidden && hiddenPath(rel))) {
+        continue;
+      }
+      const abs = `${query.path}/${rel}`;
     let lastMatch = 0;
     let emitted = 0;
     const ring: LineItem[] = [];
-    for await (const item of linesOf(abs)) {
-      if (regex.test(item.text)) {
-        for (const back of ring) {
-          if (back.no > emitted && back.no >= item.no - query.context) {
-            yield { path: rel, line: back.no, text: back.text, kind: "context" };
-            emitted = back.no;
+    try {
+      for await (const item of linesOf(abs)) {
+        if (regex.test(item.text)) {
+          for (const back of ring) {
+            if (back.no > emitted && back.no >= item.no - query.context) {
+              yield { path: rel, line: back.no, text: back.text, kind: "context" };
+              emitted = back.no;
+            }
           }
+          yield { path: rel, line: item.no, text: item.text, kind: "match" };
+          emitted = item.no;
+          lastMatch = item.no;
+        } else if (item.no <= lastMatch + query.context && item.no > emitted) {
+          yield { path: rel, line: item.no, text: item.text, kind: "context" };
+          emitted = item.no;
         }
-        yield { path: rel, line: item.no, text: item.text, kind: "match" };
-        emitted = item.no;
-        lastMatch = item.no;
-      } else if (item.no <= lastMatch + query.context && item.no > emitted) {
-        yield { path: rel, line: item.no, text: item.text, kind: "context" };
-        emitted = item.no;
+        ring.push({ no: item.no, text: item.text });
+        if (ring.length > query.context) {
+          ring.shift();
+        }
       }
-      ring.push({ no: item.no, text: item.text });
-      if (ring.length > query.context) {
-        ring.shift();
-      }
+    } catch {
+      // Unreadable file (permissions, or it vanished mid-scan): skip it, keep searching.
     }
+    }
+  } catch (e) {
+    note.error = `scan stopped early: ${e instanceof Error ? e.message.split("\n")[0] ?? e.message : String(e)}`;
   }
 }
 
-async function* bunFiles(query: SearchQuery, _note: ScanNote): AsyncGenerator<FileRow, void> {
+async function* bunFiles(query: SearchQuery, note: ScanNote): AsyncGenerator<FileRow, void> {
   const rows: FileRow[] = [];
   const rules = readIgnores(query.path);
   const globber = new Bun.Glob(query.glob === "" ? "**/*" : query.glob);
-  for await (const found of globber.scan({ cwd: query.path })) {
-    const rel = norm(found);
-    if (query.signal.aborted) {
-      return;
+  try {
+    for await (const found of globber.scan({ cwd: query.path })) {
+      const rel = norm(found);
+      if (query.signal.aborted) {
+        return;
+      }
+      if (ignored(rel, rules) || (!query.hidden && hiddenPath(rel))) {
+        continue;
+      }
+      rows.push({ path: rel, mtimeMs: mtimeMs(`${query.path}/${rel}`) });
     }
-    if (ignored(rel, rules) || (!query.hidden && hiddenPath(rel))) {
-      continue;
-    }
-    rows.push({ path: rel, mtimeMs: mtimeMs(`${query.path}/${rel}`) });
+  } catch (e) {
+    note.error = `scan stopped early: ${e instanceof Error ? e.message.split("\n")[0] ?? e.message : String(e)}`;
   }
   sortRows(rows);
   for (const row of rows) {

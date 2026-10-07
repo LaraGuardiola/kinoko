@@ -1,6 +1,7 @@
 import { estimateTokens } from "./budget";
-import { makeBackend } from "./search-backends";
+import { makeBackend, smartRegex } from "./search-backends";
 import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Tool, ToolContext } from "../types";
 import type { Backend, Hit, ScanNote, SearchQuery } from "./search-backends";
 
@@ -26,10 +27,9 @@ function boolArg(value: unknown): boolean {
   return value === true;
 }
 
-function queryOf(args: SearchArgs, cwd: string, signal: AbortSignal): SearchQuery {
+function queryOf(args: SearchArgs, path: string, signal: AbortSignal): SearchQuery {
   const pattern = typeof args.pattern === "string" ? args.pattern : "";
-  const rawPath = typeof args.path === "string" ? args.path : ".";
-  const path = rawPath === "." ? cwd : `${cwd}/${rawPath}`;
+  const cwd = path;
   const mode = args.mode === "files" ? "files" : "content";
   const rawGlob = typeof args.glob === "string" ? args.glob : mode === "files" ? pattern : "";
   const glob = globOf(rawGlob);
@@ -145,9 +145,14 @@ async function contentText(backend: Backend, query: SearchQuery): Promise<string
   }
   if (truncated) {
     out.push(`[budget reached after ${matches} matches \u2014 narrow with \`path\`, \`glob\`, or a more specific pattern]`);
+  } else if (order.length === 0) {
+    out.push(`[no matches for \`${query.pattern}\` in ${query.path}]`);
   }
   if (note.timedOut) {
     out.push("[search timed out after 10s]");
+  }
+  if (note.error !== undefined) {
+    out.push(`ERROR: search failed: ${note.error}`);
   }
   return out.join("\n");
 }
@@ -176,23 +181,73 @@ async function filesText(backend: Backend, query: SearchQuery): Promise<string> 
   }
   if (truncated) {
     paths.push(`[budget reached: more files remain \u2014 narrow with \`glob\` or a narrower \`path\`]`);
+  } else if (paths.length === 0) {
+    paths.push(noFilesMatch(query));
   }
   if (note.timedOut) {
-    paths.push("[timed out after 10s]");
+    paths.push("[search timed out after 10s]");
+  }
+  if (note.error !== undefined) {
+    paths.push(`ERROR: search failed: ${note.error}`);
   }
   return paths.join("\n");
 }
 
-async function searchRun(args: SearchArgs, ctx: ToolContext): Promise<string> {
-  if (typeof args.pattern !== "string" || args.pattern === "") {
+/**
+ * An empty file list is where a model gets stuck: it repeats the same call. Say what was looked
+ * for, and point at the mode that would actually search inside files.
+ */
+function noFilesMatch(query: SearchQuery): string {
+  // The raw pattern, not the normalized glob: `**/` is added by us and would look like a glob.
+  if (!looksLikeGlob(query.pattern)) {
+    return `[no files whose NAME matches \`${query.pattern}\` in ${query.path} \u2014 in files mode \`pattern\` is a glob; to search inside files use mode "content"]`;
+  }
+  return `[no files matching \`${query.pattern}\` in ${query.path}]`;
+}
+
+function looksLikeGlob(pattern: string): boolean {
+  return /[*?[\]{}]/.test(pattern);
+}
+
+/** Everything cheap that can refuse the request before a backend is started. */
+function validate(args: SearchArgs, ctx: ToolContext): null | string {
+  const pattern = args.pattern;
+  if (typeof pattern !== "string" || pattern === "") {
     return "ERROR: search: pattern must be a non-empty string";
   }
-  const query = queryOf(args, ctx.cwd, ctx.signal);
-  const backend = await makeBackend();
-  if (query.mode === "files") {
-    return await filesText(backend, query);
+  const mode = args.mode === "files" ? "files" : "content";
+  if (mode === "content" && smartRegex(pattern) === null) {
+    return `ERROR: search: invalid regex pattern ${JSON.stringify(pattern)}`;
   }
-  return await contentText(backend, query);
+  const raw = typeof args.path === "string" && args.path !== "" ? args.path : ".";
+  // resolve() keeps absolute paths and `..` working, instead of gluing them onto the cwd.
+  const path = resolve(ctx.cwd, raw);
+  let dir = false;
+  try {
+    dir = statSync(path).isDirectory();
+  } catch {
+    return `ERROR: search: path not found: ${raw}`;
+  }
+  if (!dir) {
+    return `ERROR: search: not a directory: ${raw} (search walks a directory tree)`;
+  }
+  return null;
+}
+
+async function searchRun(args: SearchArgs, ctx: ToolContext): Promise<string> {
+  const refused = validate(args, ctx);
+  if (refused !== null) {
+    return refused;
+  }
+  const raw = typeof args.path === "string" && args.path !== "" ? args.path : ".";
+  const query = queryOf(args, resolve(ctx.cwd, raw), ctx.signal);
+  const backend = await makeBackend();
+  try {
+    return query.mode === "files" ? await filesText(backend, query) : await contentText(backend, query);
+  } catch (e) {
+    // A tool never crashes the loop, but it should also never hand back an empty string.
+    return `ERROR: search failed: ${e instanceof Error ? e.message.split("\n")[0] ?? e.message : String(e)}`;
+  }
 }
 
 export const searchTool: Tool = {

@@ -1,4 +1,4 @@
-import { expect, test, describe } from "bun:test";
+import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { searchTool } from "./search";
 import { estimateTokens } from "./budget";
@@ -27,6 +27,17 @@ function fixture(tag: string, files: number, lines: number): string {
     writeFileSync(`${dir}/sub/f${String(i).padStart(3, "0")}.txt`, `${body.join("\n")}\n`);
   }
   return dir;
+}
+
+afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
+
+/** Runs the same call on both backends and returns the two answers. */
+async function bothBackends(args: Record<string, unknown>, dir: string): Promise<[string, string]> {
+  const rg = await searchTool.run(args, ctx(dir));
+  process.env.KINOKO_RG_BACKEND = "bun";
+  const bun = await searchTool.run(args, ctx(dir));
+  process.env.KINOKO_RG_BACKEND = "";
+  return [rg, bun];
 }
 
 function rgProcs(): number {
@@ -74,6 +85,52 @@ describe("search tool", () => {
     clearTimeout(timer);
     expect(out.includes("Aborted")).toBe(true);
     expect(rgProcs()).toBe(0);
+  });
+
+  // An empty result must be a sentence, never "": a model cannot tell "nothing matched" from
+  // "the tool broke", and repeats the call until the turn limit.
+  test("search: empty results say so, on both backends, in both modes", async () => {
+    const dir = fixture("empty", 2, 4);
+    const [noHits, noHitsBun] = await bothBackends({ pattern: "zzz-nothing-matches-this" }, dir);
+    expect(noHits).toBe(noHitsBun);
+    expect(noHits).toContain("[no matches for `zzz-nothing-matches-this`");
+    expect(noHits).not.toBe("");
+
+    const [noFiles, noFilesBun] = await bothBackends({ pattern: "*.nothing", mode: "files" }, dir);
+    expect(noFiles).toBe(noFilesBun);
+    expect(noFiles).toContain("[no files matching `*.nothing`");
+
+    // A word handed to files mode is the classic model mistake: say what it looked for.
+    const [word, wordBun] = await bothBackends({ pattern: "needle", mode: "files" }, dir);
+    expect(word).toBe(wordBun);
+    expect(word).toContain("in files mode `pattern` is a glob");
+    expect(word).toContain('use mode "content"');
+  });
+
+  test("search: bad arguments are refused with an error, never a throw", async () => {
+    const dir = fixture("bad", 2, 4);
+    const [badRegex] = await bothBackends({ pattern: "needle(" }, dir);
+    expect(badRegex).toStartWith("ERROR: search: invalid regex pattern");
+    const [missing] = await bothBackends({ pattern: "needle", path: "nope" }, dir);
+    expect(missing).toBe("ERROR: search: path not found: nope");
+    const [missingFiles] = await bothBackends({ pattern: "*.txt", mode: "files", path: "nope" }, dir);
+    expect(missingFiles).toBe("ERROR: search: path not found: nope");
+    // A file is not something to walk (this used to throw ENOTDIR out of the tool).
+    const [notDir, notDirBun] = await bothBackends({ pattern: "needle", path: ".gitignore" }, dir);
+    expect(notDir).toBe(notDirBun);
+    expect(notDir).toStartWith("ERROR: search: not a directory: .gitignore");
+    const [empty] = await bothBackends({ pattern: "" }, dir);
+    expect(empty).toBe("ERROR: search: pattern must be a non-empty string");
+  });
+
+  test("search: an absolute path works, outside the cwd", async () => {
+    const dir = fixture("abs", 3, 6);
+    const [rg, bun] = await bothBackends({ pattern: "needle", path: dir }, dir);
+    expect(rg).toBe(bun);
+    expect(rg).toContain("f000.txt");
+    // A path outside the cwd is honoured too (the old code glued it onto the cwd).
+    const [parent] = await bothBackends({ pattern: "needle", path: `${dir}/sub` }, dir);
+    expect(parent).toContain("f000.txt");
   });
 
   test("search: .gitignore respected by both backends", async () => {

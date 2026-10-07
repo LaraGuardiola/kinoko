@@ -1,4 +1,4 @@
-import { expect, test, describe } from "bun:test";
+import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "node:fs";
 import { defaultTools } from "./registry";
 import type { Tool } from "../types";
@@ -152,8 +152,5 @@ describe("kinoko core tools", () => {
   });
 });
 
-describe("cleanup", () => {
-  test("remove temp root", () => {
-    rmSync(ROOT, { recursive: true, force: true });
-  });
-});
+// afterAll, not a test: a failing run must still take its fixtures with it.
+afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
