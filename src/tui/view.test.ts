@@ -24,6 +24,7 @@ test("live region flows from the top with no filler between panel and input", ()
   expect(region.lines[1]).toContain("type a prompt");
   expect(region.lines[2]).toBe(" IDLE ");
   expect(region.row).toBe(0);
+  expect(region.dropped).toEqual([]);
 });
 
 test("a short viewport keeps the content tail with the editor pinned below it", () => {
@@ -208,4 +209,51 @@ test("wrapAnsi keeps styles across split rows and leaves fitting rows alone", ()
   expect(rows).toHaveLength(3);
   expect(rows[0]).toBe("\x1b[1mboldtextth\x1b[0m");
   expect(rows[1]).toBe("\x1b[1matiswaytoo\x1b[0m");
+});
+
+test("trimmed transcript head is reported as dropped for the scrollback", () => {
+  const region = liveRegion({
+    transcript: [
+      { role: "user", text: "q1" },
+      { role: "assistant", text: "a1" },
+      { role: "user", text: "q2" },
+      { role: "assistant", text: "a2" },
+    ],
+    stream: "",
+    thinking: "",
+    tool: undefined,
+    marker: "",
+    queued: [],
+    editorLines: [""],
+    editorEmpty: false,
+    editorRow: 0,
+    editorCol: 0,
+    status: " IDLE ",
+    viewportRows: 5,
+  });
+
+  // Room for 3 content rows: the live tail keeps a1..a2, q1 moves to the scrollback.
+  expect(region.dropped).toHaveLength(1);
+  expect(stripAnsi(region.dropped[0] ?? "")).toBe("> q1");
+});
+
+test("streaming and queued rows are never reported as dropped", () => {
+  const region = liveRegion({
+    transcript: [{ role: "user", text: "q" }],
+    stream: "line1\nline2\nline3\nline4",
+    thinking: "",
+    tool: undefined,
+    marker: "",
+    queued: [{ kind: "steer", text: "later" }],
+    editorLines: [""],
+    editorEmpty: false,
+    editorRow: 0,
+    editorCol: 0,
+    status: " IDLE ",
+    viewportRows: 4,
+  });
+
+  // Transcript (1) + tail (6) = 7 rows in a 4-row viewport: only the transcript row drops.
+  expect(region.dropped).toHaveLength(1);
+  expect(stripAnsi(region.dropped[0] ?? "")).toBe("> q");
 });

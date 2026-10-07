@@ -56,7 +56,7 @@ interface Harness {
 
 async function harness(
   turns: StreamEvent[][],
-  opts: { tools?: Tool[]; model?: string; pace?: number } = {},
+  opts: { tools?: Tool[]; model?: string; pace?: number; viewportRows?: number; viewportCols?: number } = {},
 ): Promise<Harness> {
   const out: string[] = [];
   const { provider, calls } = scripted(turns, opts.pace ?? 1);
@@ -75,6 +75,8 @@ async function harness(
     write: (text) => out.push(text),
     model: opts.model ?? "test-model",
     contextWindow: 1000,
+    viewportRows: opts.viewportRows,
+    viewportCols: opts.viewportCols,
     session: session,
     rebuild: () => agent,
   });
@@ -115,6 +117,32 @@ describe("TUI app with the agent", () => {
     expect(h.out.join("")).toContain("\x1b[38;5;159m> show me\x1b[0m");
     expect(h.out.join("")).not.toContain("\x1b[48;5");
     expect(h.out.at(-1)).toContain("here is the answer");
+  });
+
+  test("trimmed chats move to the scrollback instead of being lost", async () => {
+    const h = await harness(
+      [
+        [{ type: "text", delta: "answer one" }, { type: "done", stop: "end" }],
+        [{ type: "text", delta: "answer two" }, { type: "done", stop: "end" }],
+      ],
+      { viewportRows: 6, viewportCols: 40 },
+    );
+    h.press("first question\r");
+    await settle(h.agent);
+    h.app.render();
+    h.press("second question\r");
+    await settle(h.agent);
+    h.app.render();
+    // The first exchange no longer fits the live region, but it is still
+    // reachable by scrolling up: it was printed above exactly once.
+    const stripped = h.screen();
+    expect(stripped).toContain("> first question");
+    expect(stripped).toContain("answer one");
+    expect(stripped).toContain("> second question");
+    expect(stripped).toContain("answer two");
+    expect(stripped.indexOf("> first question")).toBeLessThan(stripped.indexOf("> second question"));
+    // The flushed row left the live region, so it was printed above exactly once.
+    expect(stripped.split("> first question")).toHaveLength(2);
   });
 
   test("1. Enter sends the prompt, Esc aborts within 100ms", async () => {

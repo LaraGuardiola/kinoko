@@ -45,29 +45,32 @@ export interface Region {
   lines: string[];
   row: number;
   col: number;
+  /** Transcript head rows cut off by the viewport: the App prints them to the scrollback once. */
+  dropped: string[];
 }
 
 /** The live region: streaming text, the running tool, marker, queued messages, editor, status. */
 export function liveRegion(input: RegionInput): Region {
-  let content: string[] = [];
+  let transcriptRows: string[] = [];
   for (const message of input.transcript) {
     const style = message.role === "user" ? ANSI.user : "";
     const prefix = message.role === "user" ? "> " : "";
     const lines = message.role === "assistant" ? renderMarkdown(message.text).split("\n") : message.text.split("\n");
-    if (message.role === "thinking") content.push(...thinkingBlock(message.text).split("\n"));
-    else content.push(...lines.map((line) => `${style}${prefix}${line}${style ? ANSI.reset : ""}`));
+    if (message.role === "thinking") transcriptRows.push(...thinkingBlock(message.text).split("\n"));
+    else transcriptRows.push(...lines.map((line) => `${style}${prefix}${line}${style ? ANSI.reset : ""}`));
   }
-  if (input.thinking !== "") content.push(...thinkingBlock(input.thinking).split("\n"));
+  let tail: string[] = [];
+  if (input.thinking !== "") tail.push(...thinkingBlock(input.thinking).split("\n"));
   if (input.stream !== "") {
-    content.push(...renderStream(input.stream));
+    tail.push(...renderStream(input.stream));
   }
   if (input.tool !== undefined) {
-    content.push(`${ANSI.dim}● ${input.tool.name} ${input.tool.args} …${ANSI.reset}`);
+    tail.push(`${ANSI.dim}● ${input.tool.name} ${input.tool.args} …${ANSI.reset}`);
   }
-  if (input.marker !== "") content.push(`${ANSI.inverse}${input.marker}${ANSI.reset}`);
+  if (input.marker !== "") tail.push(`${ANSI.inverse}${input.marker}${ANSI.reset}`);
   for (const item of input.queued) {
     const tag = item.kind === "steer" ? "[steer]" : "[follow-up]";
-    content.push(`${ANSI.dim}${tag}${ANSI.reset} ${item.text}`);
+    tail.push(`${ANSI.dim}${tag}${ANSI.reset} ${item.text}`);
   }
   const editor = input.editorLines.map((line) => (line === "" ? "> " : `> ${line}`));
   if (input.editorEmpty) {
@@ -77,18 +80,20 @@ export function liveRegion(input: RegionInput): Region {
   const viewport = input.viewportRows;
   const width = input.viewportCols === undefined ? undefined : Math.max(1, input.viewportCols - 2);
   if (width !== undefined) {
-    content = content.flatMap((line) => wrapAnsi(line, width));
+    transcriptRows = transcriptRows.flatMap((line) => wrapAnsi(line, width));
+    tail = tail.flatMap((line) => wrapAnsi(line, width));
     // The idle hint never holds the cursor, so it can wrap instead of ending in "…".
     if (input.editorEmpty && editor.length > 0) {
       const hint = editor.pop() as string;
       editor.push(...wrapAnsi(hint, width));
     }
   }
+  const content = [...transcriptRows, ...tail];
   if (viewport === undefined || viewport < 2) {
     const rows = [...content];
     const editorStart = rows.length;
     rows.push(...editor, input.status);
-    return region(rows, editorStart + input.editorRow, input.editorCol + 2, input.viewportCols);
+    return { ...region(rows, editorStart + input.editorRow, input.editorCol + 2, input.viewportCols), dropped: [] };
   }
 
   // The region flows downward from the startup panel: content, then the editor
@@ -102,7 +107,11 @@ export function liveRegion(input: RegionInput): Region {
   const visibleContent = contentRoom === 0 ? [] : content.slice(-contentRoom);
   const rows = [...visibleContent, ...visibleEditor, input.status];
   const editorStart = visibleContent.length;
-  return region(rows, editorStart + input.editorRow - editorStartAt, input.editorCol + 2, input.viewportCols);
+  // Rows of the transcript that no longer fit are reported, not hidden: the App
+  // moves them to the scrollback once, so no chat is ever lost to the trim.
+  const visibleTail = Math.min(tail.length, visibleContent.length);
+  const dropped = transcriptRows.slice(0, Math.max(0, transcriptRows.length - (visibleContent.length - visibleTail)));
+  return { ...region(rows, editorStart + input.editorRow - editorStartAt, input.editorCol + 2, input.viewportCols), dropped };
 }
 
 /** Model reasoning is display-only: muted and distinct from the answer. */
@@ -114,7 +123,7 @@ export function thinkingBlock(text: string): string {
 }
 
 /** Keeps a live row inside the terminal margin: terminals wrap a margin write on the next byte. */
-function region(rows: string[], row: number, col: number, width: number | undefined): Region {
+function region(rows: string[], row: number, col: number, width: number | undefined): { lines: string[]; row: number; col: number } {
   if (width === undefined) return { lines: rows, row, col };
   const max = Math.max(1, width - 2);
   return { lines: rows.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max) };

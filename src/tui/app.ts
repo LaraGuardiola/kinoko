@@ -62,6 +62,7 @@ export class App {
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
   #tokens = { input: 0, output: 0, cacheRead: 0 };
   #cost = 0;
+  #flushed = 0; // transcript head rows already moved to the scrollback
 
   constructor(opts: AppOptions) {
     this.#agent = opts.agent;
@@ -357,7 +358,7 @@ export class App {
   #state(): { lines: string[]; row: number; col: number } {
     const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 4);
     const view = this.#editor.view(wrapTo(editorWidth));
-    return liveRegion({
+    const region = liveRegion({
       transcript: this.#transcript,
       stream: this.#stream,
       thinking: this.#thinking,
@@ -372,6 +373,18 @@ export class App {
       viewportRows: this.#viewportRows,
       viewportCols: this.#viewportCols,
     });
+    // Trimmed transcript rows move to the scrollback once, in order, so every
+    // chat stays reachable by scrolling up. The transcript prefix is append-only,
+    // so a running count never prints a row twice.
+    if (region.dropped.length > this.#flushed) {
+      const newly = region.dropped.slice(this.#flushed);
+      this.#flushed = region.dropped.length;
+      const frame = { lines: region.lines, row: region.row, col: region.col };
+      this.#renderer.update(frame);
+      this.#renderer.printAbove(newly.join("\n"));
+      return frame;
+    }
+    return region;
   }
 
   // ---- slash commands ----
