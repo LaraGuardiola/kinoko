@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { liveRegion } from "./view.ts";
+import { liveRegion, wrapAnsi } from "./view.ts";
+
+const stripAnsi = (line: string): string => line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
 
 test("live region fills viewport with editor and status at the active region bottom", () => {
   const region = liveRegion({
@@ -145,4 +147,38 @@ test("completed thinking remains dim and italic in the live transcript", () => {
   });
 
   expect(region.lines[0]).toBe("\x1b[2m\x1b[3mreasoning remains visible\x1b[0m");
+});
+
+test("long transcript rows wrap to the full width instead of ending in an ellipsis", () => {
+  const region = liveRegion({
+    transcript: [{ role: "user", text: "hola ".repeat(30) }],
+    stream: "x ".repeat(50),
+    thinking: "",
+    tool: undefined,
+    marker: "",
+    queued: [],
+    editorLines: [""],
+    editorEmpty: false,
+    editorRow: 0,
+    editorCol: 0,
+    status: " IDLE ",
+    viewportRows: 20,
+    viewportCols: 40,
+  });
+
+  for (const line of region.lines) {
+    expect(stripAnsi(line).length).toBeLessThanOrEqual(38);
+  }
+  expect(region.lines.some((line) => line.includes("…"))).toBe(false);
+  // The user color survives the split across rows.
+  expect(region.lines[0]).toContain("\x1b[38;5;159m");
+  expect(region.lines[1]).toContain("\x1b[38;5;159m");
+});
+
+test("wrapAnsi keeps styles across split rows and leaves fitting rows alone", () => {
+  expect(wrapAnsi("short", 10)).toEqual(["short"]);
+  const rows = wrapAnsi("\x1b[1mboldtextthatiswaytoolong\x1b[0m", 10);
+  expect(rows).toHaveLength(3);
+  expect(rows[0]).toBe("\x1b[1mboldtextth\x1b[0m");
+  expect(rows[1]).toBe("\x1b[1matiswaytoo\x1b[0m");
 });

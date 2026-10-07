@@ -165,3 +165,8 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Added `kinoko-cli.md`: tables of invocations, flags, RPC commands and dev commands, read off `src/main.ts`, `src/rpc.ts`, `src/ext.ts`. No code touched.
 - `bun run check` passes (147 tests, zero warnings).
 - Assumption: "cli commands" = modes, flags, RPC commands and npm scripts; the five agent tools are already tabulated in README.md and were not duplicated.
+
+## TUI transcript width fix — DONE
+- Fixed: long transcript rows (user prompts, assistant/stream text, queued, markers) are wrapped to the full terminal width with ANSI colors preserved across split rows, instead of being clipped with a "…" ellipsis. `clipAnsi` no longer cuts rows that already fit (a trailing reset used to trigger the ellipsis), remaining only as a safety net for truly overlong rows. The idle hint wraps instead of clipping too; editor rows and cursor math are untouched (the editor was already wrapped by the App).
+- Tests: two new tests in `src/tui/view.test.ts` (full-width wrap with no ellipsis + style-preserving `wrapAnsi`). `bun run check` passes (149 tests, zero warnings).
+- Build: rebuilt `kinoko-out/kinoko` and installed it at `~/.local/bin/kinoko`.
