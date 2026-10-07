@@ -20,6 +20,7 @@ export type AgentEvent =
   | { type: "request_start"; at: number } // epoch ms: TUI shows "reading prompt..." until first_token
   | { type: "first_token"; at: number } // epoch ms of the first delta of any kind
   | { type: "message_delta"; delta: string }
+  | { type: "thinking_delta"; delta: string }
   | { type: "message_end"; message: Message }
   | { type: "tool_start"; call: ToolCall }
   | { type: "tool_output"; call: ToolCall; output: string }
@@ -179,6 +180,8 @@ export class Agent {
         }
         if (ev.type === "text") {
           this.#emit({ type: "message_delta", delta: ev.delta });
+        } else if (ev.type === "thinking") {
+          this.#emit({ type: "thinking_delta", delta: ev.delta });
         } else if (ev.type === "error") {
           if (isContextOverflow(ev.message)) overflow = true;
           else streamEvents.push(ev);

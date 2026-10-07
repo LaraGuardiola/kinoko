@@ -220,6 +220,7 @@ describe("Agent loop with abort, steer and follow-up", () => {
     // Thinking counts as the first token of any kind.
     expect(start!.at!).toBeGreaterThanOrEqual(before);
     expect(first!.at!).toBeGreaterThanOrEqual(start!.at!);
+    expect(seen.filter((e) => e.type === "thinking_delta")).toHaveLength(1);
     expect(agent.messages.at(-1)!.thinking).toBe("hmm");
   });
 });

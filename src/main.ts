@@ -203,19 +203,23 @@ if (tui) {
     write: (text) => term.write(text),
     model: config.model,
     contextWindow: config.contextWindow,
+    viewportRows: term.rows,
+    viewportCols: term.cols,
     session: session,
     onQuit: () => {
       term.stop();
       process.exit(0);
     },
   });
-  term.on({ key: (key) => app.handleKey(key), resize: () => app.render() });
+  term.on({ key: (key) => app.handleKey(key), resize: (cols, rows) => app.resize(cols, rows) });
   const loop = setInterval(() => {
     term.pollKeys(); // a lone Esc waits one frame before it counts
     app.render();
   }, 33);
   term.start();
-  term.write(ansi.hide);
+  // Start the full-height live region at a known terminal origin. Without this, drawing below
+  // the shell prompt can scroll the region and invalidate the renderer's row-relative cursor math.
+  term.write(`${ansi.clearScreen}${ansi.hide}`);
   app.render();
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits

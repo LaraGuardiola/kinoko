@@ -32,6 +32,7 @@ export class Renderer {
   #minInterval: number;
   #now: () => number;
   #drawn: string[] = [];
+  #drawnRow = 0;
   #lastAt = 0;
   #dirty = false;
   #state: RenderState = { lines: [], row: 0, col: 0 };
@@ -80,9 +81,11 @@ export class Renderer {
 
   #draw(): void {
     const lines = this.#state.lines;
-    let out = this.#drawn.length > 0 ? `\x1b[${Math.max(0, this.#drawn.length - 1)}A` : "";
-    for (const line of lines) {
-      out += `${CLEAR_LINE}${line}\n`;
+    let out = this.#drawn.length > 0 && this.#drawnRow > 0 ? `\x1b[${this.#drawnRow}A` : "";
+    for (const [index, line] of lines.entries()) {
+      out += `${CLEAR_LINE}${line}`;
+      // A newline after the bottom row scrolls a full-height live region on every keypress.
+      if (index < lines.length - 1) out += "\n";
     }
     // Anything left from a taller previous frame has to go.
     out += CLEAR_BELOW;
@@ -92,15 +95,19 @@ export class Renderer {
     out += `\x1b[${this.#state.col + 1}G`; // terminals count columns from 1
     this.#write(out);
     this.#drawn = [...lines];
+    this.#drawnRow = this.#state.row;
     this.#dirty = false;
     this.#lastAt = this.#now();
   }
 
   #erase(): void {
     if (this.#drawn.length === 0) return;
-    let out = `\x1b[${this.#drawn.length - 1}A`;
-    for (let row = 0; row < this.#drawn.length; row++) out += `${CLEAR_LINE}\n`;
-    out += `\x1b[${this.#drawn.length - 1}A`;
+    let out = this.#drawnRow > 0 ? `\x1b[${this.#drawnRow}A` : "";
+    for (let row = 0; row < this.#drawn.length; row++) {
+      out += CLEAR_LINE;
+      if (row < this.#drawn.length - 1) out += "\n";
+    }
+    if (this.#drawn.length > 1) out += `\x1b[${this.#drawn.length - 1}A`;
     this.#write(out);
   }
 }

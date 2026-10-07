@@ -10,7 +10,7 @@ import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
 import { renderMarkdown } from "./markdown.ts";
-import { ABORTED, HELP, STREAM_ROWS, liveRegion, oneLine, overflow, statusLine, toolBlock, wrapTo } from "./view.ts";
+import { ABORTED, HELP, STREAM_ROWS, liveRegion, oneLine, overflow, statusLine, thinkingBlock, toolBlock, wrapTo } from "./view.ts";
 import { actionFor } from "./keys.ts";
 import type { QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -26,6 +26,8 @@ export interface AppOptions {
   /** 0-based model id shown in the status line. */
   model: string;
   contextWindow: number;
+  viewportRows?: number;
+  viewportCols?: number;
   session?: Session;
   /** Called by /quit. The demo and the CLI pass the process exit. */
   onQuit?: () => void;
@@ -40,12 +42,15 @@ export class App {
   #editor: Editor;
   #model: string;
   #window: number;
+  #viewportRows: number | undefined;
+  #viewportCols: number | undefined;
   #session: Session | undefined;
   #rebuild: (() => Agent) | undefined;
   #onQuit: (() => void) | undefined;
 
   #running = false;
   #stream = ""; // assistant text still streaming
+  #thinking = ""; // model reasoning, never sent back to the provider
   #tool: ToolView | undefined;
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
@@ -59,6 +64,8 @@ export class App {
     this.#editor = new Editor();
     this.#model = opts.model;
     this.#window = opts.contextWindow;
+    this.#viewportRows = opts.viewportRows;
+    this.#viewportCols = opts.viewportCols;
     this.#session = opts.session;
     this.#rebuild = opts.rebuild;
     this.#onQuit = opts.onQuit;
@@ -79,6 +86,13 @@ export class App {
   render(): void {
     this.#renderer.update(this.#state());
     this.#renderer.frame();
+  }
+
+  /** Updates the available terminal height after a resize. */
+  resize(cols: number, rows: number): void {
+    this.#viewportCols = cols;
+    this.#viewportRows = rows;
+    this.render();
   }
 
   // ---- what the tests and the CLI read ----
@@ -162,15 +176,18 @@ export class App {
     }
     this.#editor.remember(text);
     this.#editor.clear();
-    this.#running = true;
-    this.#stream = "";
     this.#marker = "";
     if (this.#agent.state === "running") {
       // Already running: this is a steer. queue_change updates the queued area.
+      this.#echoUser(text);
       this.#agent.steer(text);
       this.render();
       return;
     }
+    this.#running = true;
+    this.#stream = "";
+    this.#thinking = "";
+    this.#echoUser(text);
     void this.#run(text);
   }
 
@@ -183,10 +200,14 @@ export class App {
     this.#running = true;
     this.#marker = "";
     if (this.#agent.state === "running") {
+      this.#echoUser(text);
       this.#agent.followUp(text);
       this.render();
       return;
     }
+    this.#stream = "";
+    this.#thinking = "";
+    this.#echoUser(text);
     void this.#run(text);
   }
 
@@ -215,6 +236,9 @@ export class App {
     switch (e.type) {
       case "message_delta":
         this.#stream += e.delta;
+        return;
+      case "thinking_delta":
+        this.#thinking += e.delta;
         return;
       case "tool_start":
         this.#tool = {
@@ -260,6 +284,9 @@ export class App {
       this.#tokens.cacheRead += usage.cacheRead ?? 0;
       this.#cost += usage.cost ?? 0;
     }
+    const thinking = message.thinking ?? this.#thinking;
+    if (thinking.trim() !== "") this.#printAbove(thinkingBlock(thinking));
+    this.#thinking = "";
     if (this.#stream.trim() !== "") {
       // Text that no longer fits moves up into the scrollback instead of the region.
       const spilled = overflow(this.#stream);
@@ -280,6 +307,10 @@ export class App {
   #finishRun(reason: RunResult["reason"], dropped: string[] | undefined): void {
     this.#running = false;
     this.#queued = [];
+    if (this.#stream.trim() !== "") {
+      this.#printAbove(renderMarkdown(this.#stream));
+      this.#stream = "";
+    }
     if (dropped !== undefined && dropped.length > 0) {
       // Nothing the user typed is ever lost: it goes back into the editor.
       const back = dropped.join("\n");
@@ -301,23 +332,34 @@ export class App {
   }
 
   #printAbove(text: string): void {
+    this.#renderer.update(this.#state());
     this.#renderer.printAbove(text);
+  }
+
+  #echoUser(text: string): void {
+    const blue = "\x1b[38;5;159m";
+    const reset = "\x1b[0m";
+    this.#printAbove(text.split("\n").map((line) => `${blue} > ${line} ${reset}`).join("\n"));
   }
 
   // ---- the live region ----
 
   #state(): { lines: string[]; row: number; col: number } {
-    const view = this.#editor.view(wrapTo(this.#window));
+    const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 3);
+    const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
       stream: this.#stream,
+      thinking: this.#thinking,
       tool: this.#tool,
       marker: this.#marker,
       queued: this.#queued,
-      editorLines: this.#editor.lines,
+      editorLines: view.lines,
       editorEmpty: this.#editor.empty,
       editorRow: view.row,
       editorCol: view.col,
       status: this.statusLine,
+      viewportRows: this.#viewportRows,
+      viewportCols: this.#viewportCols,
     });
   }
 
@@ -369,4 +411,3 @@ export class App {
     return `fork: head moved from ${head.role} to ${target.role} (${branch.length} -> ${branch.length - 1} messages)`;
   }
 }
-

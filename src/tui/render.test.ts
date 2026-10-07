@@ -22,9 +22,8 @@ describe("tui renderer", () => {
     const { renderer, out, tick } = harness();
     renderer.update({ lines: ["thinking...", "> draft"], row: 1, col: 6 });
     expect(tick(50)).toBe(true);
-    // Two lines cleared and rewritten, then the cursor placed at the end of row 1. It needed no
-    // move up because that row is already the last one written. col is zero-based: ESC[7G.
-    expect(out[0]).toBe("\x1b[2K\rthinking...\n\x1b[2K\r> draft\n\x1b[J\x1b[7G");
+    // The final row has no newline: a full-height region must never scroll during a repaint.
+    expect(out[0]).toBe("\x1b[2K\rthinking...\n\x1b[2K\r> draft\x1b[J\x1b[7G");
     expect(renderer.drawn).toEqual(["thinking...", "> draft"]);
   });
 
@@ -54,7 +53,7 @@ describe("tui renderer", () => {
     renderer.update({ lines: ["one"], row: 0, col: 0 });
     tick(50);
     const second = out[1] ?? "";
-    expect(second.startsWith("\x1b[2A")).toBe(true); // moved up over two old rows
+    expect(second.startsWith("\x1b[2A")).toBe(false); // cursor was already at the region's top row
     expect(second).toContain("\x1b[J"); // and cleared the rest of the screen
   });
 
@@ -99,6 +98,17 @@ describe("tui renderer", () => {
     now = 1;
     renderer.flush();
     expect(out).toHaveLength(2);
+  });
+
+  test("8. a full-height region repaints from its top without scrolling from the editor row", () => {
+    const { renderer, out, tick } = harness();
+    renderer.update({ lines: Array.from({ length: 10 }, (_, i) => `row ${i}`), row: 7, col: 2 });
+    tick(50);
+    renderer.update({ lines: Array.from({ length: 10 }, (_, i) => `row ${i} changed`), row: 7, col: 3 });
+    tick(50);
+    expect(out[1]?.startsWith("\x1b[7A")).toBe(true);
+    expect(out[1]).toContain("row 0 changed");
+    expect(out[1]?.endsWith("\x1b[2A\x1b[4G")).toBe(true);
   });
 });
 

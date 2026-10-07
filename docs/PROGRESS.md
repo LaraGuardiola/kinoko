@@ -112,3 +112,30 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Bugs found by that verification: **rpc mode never exited when stdin closed** (no `onClose` wired, so `process.exit` was never reached), and **`run_end` was emitted before the partial `message_end` on abort** — `#emitPartialAssistant` became async in Phase 9 (it appends to the session) and one call site did not await it, so the event a client paints arrived after the run had already closed. Both fixed, both now covered by tests.
 - Assumptions: rpc replies are `{type:"ok"|"error", id?, text?, detail?, state?}` and events are wrapped as `{type:"event", event:<AgentEvent>}`, so a client can tell them apart without guessing. Closing stdin ends the process with exit 0. Print mode treats "done" as success and everything else (`aborted`, `error`, `limit`) as non-zero.
 - NOT done: `/model` still only reports the model (no models.json yet); no editor-facing rpc client is shipped; the compiled binary is not cross-compiled or signed; editor history is still in-memory.
+
+## TUI layout adjustment — DONE
+- Done: the live conversation remains top-aligned and `liveRegion` fills the available terminal height with blank rows before the editor; the editor/status therefore stay at the bottom. App receives terminal height at startup and updates it on resize.
+- Test: `src/tui/view.test.ts` verifies the transcript begins at the top and editor/status occupy the final rows. `bun run check` passes (138 tests, zero lint warnings).
+- Assumption: the TUI starts at the terminal's current cursor position, as before; viewport filling uses the terminal row count and avoids introducing an alternate screen.
+
+## TUI transcript and cursor fix — DONE
+- Fixed renderer cursor bookkeeping: repaints now return to the live region's actual top row from the editor cursor, avoiding a line of scroll for each keypress in a full-height region.
+- TUI startup now clears the visible screen and homes the cursor before the first frame, giving the full-height renderer a stable origin instead of inheriting the shell prompt's cursor row.
+- Submitted prompts are printed with a gray background, and completed assistant text is preserved in scrollback so exchanges remain visible in order.
+- Tests: renderer full-height repaint regression and app prompt/answer visibility. `bun run check` passes (140 tests, zero lint warnings).
+
+## TUI repaint and message visibility follow-up — DONE
+- Done: the renderer does not emit a newline after its last live row, so a full-height repaint cannot scroll the terminal while typing. Small viewports retain the cursor, editor and status rows, trimming only transient stream/queue rows; wrapped editor rows are now used for layout.
+- Done: every submitted prompt, including a steer or follow-up, is printed into scrollback with a light-blue treatment before the model response.
+- Tests: short-viewport layout and no-final-newline renderer regression. `bun run check` passes (141 tests, zero lint warnings).
+- Assumption: a terminal shorter than two rows cannot show both an editor and status line, so it retains the existing unconstrained rendering fallback.
+
+## TUI terminal-width fix — DONE
+- Fixed: editor wrapping had incorrectly used the model context-window width instead of terminal columns. The App now receives columns on startup and resize, wraps the editor to that width, and clips every live row before the terminal's final column so emulator autowrap cannot scroll the region.
+- Build: rebuilt `kinoko-out/kinoko` and installed it at `~/.local/bin/kinoko`, which is the `kinoko` command on this machine.
+- Tests: `bun run check` passes (142 tests, zero lint warnings).
+
+## TUI visual follow-up — DONE
+- Done: the editor/status anchor at the lower edge of the active upper two-thirds of the terminal, leaving a quiet lower third like Pi while the transcript stays above it. User messages keep their light-blue foreground without a background.
+- Done: the agent now emits `thinking_delta`; streamed and finalized reasoning is rendered dim and italic, never mixed with answer text or sent back to a provider.
+- Build: rebuilt and installed `~/.local/bin/kinoko`. `bun run check` passes (143 tests, zero lint warnings).

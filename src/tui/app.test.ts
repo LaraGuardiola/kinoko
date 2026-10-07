@@ -106,6 +106,14 @@ const slow: Tool = {
 };
 
 describe("TUI app with the agent", () => {
+  test("submitted prompt and completed answer both remain visible in the transcript", async () => {
+    const h = await harness([[{ type: "text", delta: "here is the answer" }, { type: "done", stop: "end" }]]);
+    h.press("show me\r");
+    await settle(h.agent);
+    expect(h.screen()).toContain("> show me");
+    expect(h.screen()).toContain("here is the answer");
+  });
+
   test("1. Enter sends the prompt, Esc aborts within 100ms", async () => {
     const h = await harness(
       [

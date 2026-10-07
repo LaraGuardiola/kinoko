@@ -27,6 +27,7 @@ export interface Tokens {
 
 export interface RegionInput {
   stream: string;
+  thinking: string;
   tool: ToolView | undefined;
   marker: string;
   queued: QueuedView[];
@@ -35,6 +36,8 @@ export interface RegionInput {
   editorRow: number;
   editorCol: number;
   status: string;
+  viewportRows?: number;
+  viewportCols?: number;
 }
 
 export interface Region {
@@ -45,25 +48,83 @@ export interface Region {
 
 /** The live region: streaming text, the running tool, marker, queued messages, editor, status. */
 export function liveRegion(input: RegionInput): Region {
-  const rows: string[] = [];
+  const content: string[] = [];
+  if (input.thinking !== "") content.push(...thinkingBlock(input.thinking).split("\n"));
   if (input.stream !== "") {
-    rows.push(...renderStream(input.stream));
+    content.push(...renderStream(input.stream));
   }
   if (input.tool !== undefined) {
-    rows.push(`${ANSI.dim}● ${input.tool.name} ${input.tool.args} …${ANSI.reset}`);
+    content.push(`${ANSI.dim}● ${input.tool.name} ${input.tool.args} …${ANSI.reset}`);
   }
-  if (input.marker !== "") rows.push(`${ANSI.inverse}${input.marker}${ANSI.reset}`);
+  if (input.marker !== "") content.push(`${ANSI.inverse}${input.marker}${ANSI.reset}`);
   for (const item of input.queued) {
     const tag = item.kind === "steer" ? "[steer]" : "[follow-up]";
-    rows.push(`${ANSI.dim}${tag}${ANSI.reset} ${item.text}`);
+    content.push(`${ANSI.dim}${tag}${ANSI.reset} ${item.text}`);
   }
-  const editorStart = rows.length;
-  for (const line of input.editorLines) rows.push(line === "" ? "> " : `> ${line}`);
+  const editor = input.editorLines.map((line) => (line === "" ? "> " : `> ${line}`));
   if (input.editorEmpty) {
-    rows.push(`${ANSI.dim}type a prompt, enter to send, enter while running to steer${ANSI.reset}`);
+    editor.push(`${ANSI.dim}type a prompt, enter to send, enter while running to steer${ANSI.reset}`);
   }
-  rows.push(input.status); // always the bottom row
-  return { lines: rows, row: editorStart + input.editorRow, col: input.editorCol + 2 };
+
+  const viewport = input.viewportRows;
+  if (viewport === undefined || viewport < 2) {
+    const rows = [...content];
+    const editorStart = rows.length;
+    rows.push(...editor, input.status);
+    return region(rows, editorStart + input.editorRow, input.editorCol + 2, input.viewportCols);
+  }
+
+  // Keep both the cursor and the status visible even when a small terminal cannot fit every draft
+  // or queued row. Content is deliberately the expendable part of the live region.
+  // Pi leaves roughly the bottom third quiet; keep the editor at the lower edge of the active
+  // transcript instead of pinning it to the terminal's physical bottom.
+  const bottomRows = Math.floor(viewport / 3);
+  const activeRows = viewport - bottomRows;
+  const maxEditorRows = activeRows - 1;
+  const editorStartAt = Math.max(0, Math.min(input.editorRow - maxEditorRows + 1, editor.length - maxEditorRows));
+  const visibleEditor = editor.slice(editorStartAt, editorStartAt + maxEditorRows);
+  const contentRows = activeRows - visibleEditor.length - 1;
+  const visibleContent = contentRows === 0 ? [] : content.slice(-contentRows);
+  const rows = [...visibleContent, ...Array.from({ length: contentRows - visibleContent.length }, () => "")];
+  const editorStart = rows.length;
+  rows.push(...visibleEditor, input.status, ...Array.from({ length: bottomRows }, () => ""));
+  return region(rows, editorStart + input.editorRow - editorStartAt, input.editorCol + 2, input.viewportCols);
+}
+
+/** Model reasoning is display-only: muted and distinct from the answer. */
+export function thinkingBlock(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => `${ANSI.dim}${ANSI.italic}${line}${ANSI.reset}`)
+    .join("\n");
+}
+
+/** Keeps a live row inside the terminal margin: terminals wrap a margin write on the next byte. */
+function region(rows: string[], row: number, col: number, width: number | undefined): Region {
+  if (width === undefined) return { lines: rows, row, col };
+  const max = Math.max(1, width - 1);
+  return { lines: rows.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max) };
+}
+
+function clipAnsi(line: string, max: number): string {
+  let out = "";
+  let visible = 0;
+  for (let index = 0; index < line.length;) {
+    if (line.startsWith("\x1b[", index)) {
+      const end = line.slice(index + 2).search(/[@-~]/);
+      if (end >= 0) {
+        const sequenceEnd = index + end + 3;
+        out += line.slice(index, sequenceEnd);
+        index = sequenceEnd;
+        continue;
+      }
+    }
+    if (visible >= max - 1 && index < line.length - 1) return `${out}…${ANSI.reset}`;
+    out += line[index] ?? "";
+    visible++;
+    index++;
+  }
+  return out;
 }
 
 /** Markdown for the streaming tail; keeps only the last rows so the region stays small. */
@@ -126,6 +187,7 @@ const ESC = "\x1b[";
 const ANSI = {
   bold: `${ESC}1m`,
   dim: `${ESC}2m`,
+  italic: `${ESC}3m`,
   reset: `${ESC}0m`,
   inverse: `${ESC}7m`,
 };
