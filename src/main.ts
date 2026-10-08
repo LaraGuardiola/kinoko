@@ -235,8 +235,8 @@ if (tui) {
     app.render();
   }, 33);
   term.start();
-  term.write(`${ansi.clearScreen}${ansi.hide}\n${startup.split("\n").map((line) => ` ${line}`).join("\n")}\n`);
-  app.render();
+  term.write(`${ansi.clearScreen}${ansi.hide}\n`);
+  app.intro(startup);
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
   clearInterval(loop);

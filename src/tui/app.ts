@@ -64,7 +64,7 @@ export class App {
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
-  #tokens = { input: 0, output: 0, cacheRead: 0 };
+  #tokens = { context: 0, input: 0, cacheRead: 0 };
   #cost = 0;
 
   constructor(opts: AppOptions) {
@@ -100,6 +100,11 @@ export class App {
   render(): void {
     this.#renderer.update(this.#state());
     this.#renderer.frame();
+  }
+
+  /** Prints the startup panel above the region; what follows it is spaced like any other block. */
+  intro(text: string): void {
+    this.#print("system", text, false);
   }
 
   /** Updates the available terminal height after a resize. */
@@ -294,8 +299,10 @@ export class App {
   #finishMessage(message: Message): void {
     const usage = message.usage;
     if (usage) {
+      // Every request re-sends the whole conversation, so its `input` already IS the context:
+      // summing them counted the history once per tool round. The latest one is the truth.
+      this.#tokens.context = (usage.input ?? 0) + (usage.output ?? 0);
       this.#tokens.input += usage.input ?? 0;
-      this.#tokens.output += usage.output ?? 0;
       this.#tokens.cacheRead += usage.cacheRead ?? 0;
       this.#cost += usage.cost ?? 0;
     }

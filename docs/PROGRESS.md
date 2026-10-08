@@ -220,3 +220,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - The idle placeholder is gone: an empty editor shows only the block cursor. Dropped the now-unused `editorEmpty` from RegionInput.
 - Place line: path in amanita cream `rgb(238,222,186)`, branch in amanita red.
 - Tests: app-level ESC+CR / CSI 13;2u newline test, place colours. `bun run check` passes (199 tests). Rebuilt and installed `~/.local/bin/kinoko`.
+
+## TUI: token count fix, intro spacing, status margin — DONE
+- Fixed the context counter: the status line summed every request's `input`, but each request re-sends the whole conversation, so a turn with N tool rounds counted the history N times (and showed more than the context window). It now shows the latest request's prompt + output; the cache hit rate stays a session total (cached / sent).
+- The startup panel goes through `App.intro()` (printAbove), so the first prompt gets the usual blank row after "Kinoko can inspect…".
+- Status line starts level with the rows above (`IDLE` / inverse `RUNNING`, no leading space).
+- Checked the fixed prompt cost: system prompt ~990 tokens + tool schemas ~630 (chars/4). Note: `read` is the only tool without an output budget (up to 2000 lines per call).
+- Tests: tool-round context test, intro spacing, status margin. `bun run check` passes (201 tests). Rebuilt and installed `~/.local/bin/kinoko`.

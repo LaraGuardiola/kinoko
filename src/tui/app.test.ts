@@ -294,8 +294,42 @@ describe("TUI app with the agent", () => {
     expect(line).toContain("qwen-local");
     expect(line).toContain("1,240/1,000 tok"); // input + output
     expect(line).toContain("cache 25%");
-    expect(line).toContain("IDLE");
+    expect(line.startsWith("IDLE")).toBe(true); // level with the rows above, no extra margin
     expect(h.screen()).toContain("IDLE");
+  });
+
+  test("8c. context usage is the latest request, not the sum of every tool round", async () => {
+    const h = await harness(
+      [
+        [
+          { type: "tool_call", call: { id: "a", name: "read", args: { path: "x" } } },
+          { type: "done", stop: "tool_use", usage: { input: 1000, output: 50, cacheRead: 0 } },
+        ],
+        [
+          { type: "tool_call", call: { id: "b", name: "read", args: { path: "y" } } },
+          { type: "done", stop: "tool_use", usage: { input: 1100, output: 50, cacheRead: 1000 } },
+        ],
+        [
+          { type: "text", delta: "done" },
+          { type: "done", stop: "end", usage: { input: 1200, output: 100, cacheRead: 1100 } },
+        ],
+      ],
+      { tools: [{ name: "read", description: "", schema: {}, run: async () => "content" }] },
+    );
+    h.press("go\r");
+    await settle(h.agent);
+    // Before the fix this read 3,450 (1,050 + 1,150 + 1,300) for a 1,300-token conversation.
+    expect(h.app.statusLine).toContain("1,300/1,000 tok");
+    // The hit rate stays a session total: 2,100 cached of 3,300 sent.
+    expect(h.app.statusLine).toContain("cache 64%");
+  });
+
+  test("8d. the startup panel is followed by a blank row before the first prompt", async () => {
+    const h = await harness([]);
+    h.app.intro("Ask it to work on a coding task.");
+    h.press("hello\r");
+    await settle(h.agent);
+    expect(h.out.join("").replace(ANSI, "")).toMatch(/ Ask it to work on a coding task\.\r\n[\s\S]*\r \r\n hello\r\n/);
   });
 
   test("8a. Shift+Enter as Zed/VS Code send it (ESC+CR) adds a line instead of sending", async () => {

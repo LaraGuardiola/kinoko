@@ -31,8 +31,10 @@ export interface QueuedView {
 }
 
 export interface Tokens {
+  /** How full the context is: the last request's prompt plus what it generated. */
+  context: number;
+  /** Totals over the session, for the cache hit rate. */
   input: number;
-  output: number;
   cacheRead: number;
 }
 
@@ -241,10 +243,10 @@ export function statusLine(parts: {
   contextWindow: number;
   cost: number;
 }): string {
-  const used = parts.tokens.input + parts.tokens.output;
+  const used = parts.tokens.context;
   const cache = parts.tokens.input > 0 ? Math.round((parts.tokens.cacheRead / parts.tokens.input) * 100) : 0;
   return [
-    parts.running ? `${ANSI.inverse} RUNNING ${ANSI.reset}` : " IDLE ",
+    parts.running ? `${ANSI.inverse}RUNNING${ANSI.reset}` : "IDLE",
     parts.model,
     `${used.toLocaleString("en-US")}/${parts.contextWindow.toLocaleString("en-US")} tok`,
     `cache ${cache}%`,
