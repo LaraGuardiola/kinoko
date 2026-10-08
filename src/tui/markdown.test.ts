@@ -140,6 +140,13 @@ describe("syntax highlighting", () => {
     expect(strip(text)).toBe('const x: Foo = bar(42, "s"); // note');
   });
 
+  test("lowercase built-in types are types too", () => {
+    const { text } = highlightLine("function f(a: string, n: number): boolean {}", "ts");
+    for (const type of ["string", "number", "boolean"]) expect(text).toContain(`${SYNTAX.type}${type}`);
+    expect(highlightLine("let x: i32 = 0;", "rust").text).toContain(`${SYNTAX.type}i32`);
+    expect(highlightLine("def f(a: int) -> str:", "py").text).toContain(`${SYNTAX.type}str`);
+  });
+
   test("a block comment carries over to the next line", () => {
     const first = highlightLine("a /* open", "c");
     expect(first.state.inBlock).toBe(true);

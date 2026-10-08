@@ -33,6 +33,7 @@ interface Spec {
   keywords: Set<string>;
   constants: Set<string>;
   types?: boolean; // Capitalized identifiers are types
+  builtins?: Set<string>; // lowercase type names: string, number, i32, bool...
   caseless?: boolean; // SQL
   hashComment?: "start-or-space"; // shell: `#` only starts a comment at a word boundary
   interpolate?: boolean; // `${expr}` inside backtick strings is code
@@ -50,6 +51,9 @@ const C_LIKE: Spec = {
   ),
   constants: words("true false null undefined nil None NaN Infinity self"),
   types: true,
+  builtins: words(
+    "string number boolean bigint symbol object any unknown never int float double char bool byte short long unsigned signed i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64 str rune uint uint8 uint16 uint32 uint64 int8 int16 int32 int64 float32 float64",
+  ),
   interpolate: true,
 };
 
@@ -64,6 +68,7 @@ const SPECS: Record<string, Spec> = {
     ),
     constants: words("True False None self cls"),
     types: true,
+    builtins: words("int float str bool bytes list dict set tuple object"),
   },
   shell: {
     line: ["#"],
@@ -197,7 +202,7 @@ function tokenize(line: string, spec: Spec, start: HighlightState): { text: stri
       if (spec.keywords.has(key)) color = SYNTAX.keyword;
       else if (spec.constants.has(key)) color = SYNTAX.constant;
       else if (/^\s*\(/.test(after)) color = SYNTAX.fn;
-      else if (spec.types && /^[A-Z]/.test(word)) color = SYNTAX.type;
+      else if (spec.builtins?.has(word) || (spec.types && /^[A-Z]/.test(word))) color = SYNTAX.type;
       else if (prev === ".") color = SYNTAX.property;
       out += paint(color, word);
       i += word.length;

@@ -236,3 +236,4 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Tests: new `markdown.test.ts` (inline, blocks, tables, panes, highlighting) and splitStable cases. `bun run check` passes (216 tests). Rebuilt and installed `~/.local/bin/kinoko`.
 - Note: `app.ts` (484) and `term.ts` (326) were already over the ~300-line guideline before this branch.
 - Round 2: a padding row above the language label; long code lines soft-wrap at token boundaries (after space , ; ( [ {, before a dot) with a hanging indent two columns past the line's own indentation, instead of cutting mid-identifier; only an unbreakable run is cut by column. The language label is the full name ("TypeScript", not "ts") in the top-right corner with a two-column margin. Template literals colour `${expr}` as code (red `${ }`), and shell double-quoted strings colour `$VAR`. 219 tests pass; rebuilt and installed.
+- Lowercase built-in types (string, number, boolean, i32, str…) are coloured as types.
