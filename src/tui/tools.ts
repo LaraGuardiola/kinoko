@@ -19,7 +19,7 @@ export function toolSummary(name: string, args: unknown): string {
   const str = (key: string): string => (typeof a[key] === "string" ? (a[key] as string) : "");
   let main = "";
   if (name === "read" || name === "write" || name === "edit") main = str("path");
-  else if (name === "bash") main = str("cmd");
+  else if (name === "bash") main = str("command") || str("cmd");
   else if (name === "search") main = [str("pattern"), str("path")].filter((part) => part !== "").join(" in ");
   return oneLine(main === "" ? JSON.stringify(a) : main, 100);
 }

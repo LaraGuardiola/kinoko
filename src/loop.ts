@@ -2,7 +2,7 @@
    a time, tools and log appends in order. Parallelism here would be a bug, not a speed-up. */
 import { compactHistory, isContextOverflow, shouldCompact } from "./compact.ts";
 import type { Extensions } from "./ext.ts";
-import { CallGuard, MAX_NUDGES, NUDGE_LENGTH, NUDGE_REPEAT, RepeatGuard, STOP_CALLS, WARN_CALLS, repeatNote } from "./guard.ts";
+import { CallGuard, MAX_NUDGES, NUDGE_EMPTY, NUDGE_LENGTH, NUDGE_REPEAT, RepeatGuard, STOP_CALLS, WARN_CALLS, repeatNote } from "./guard.ts";
 import type { Session } from "./session.ts";
 import type {
   Message,
@@ -241,13 +241,18 @@ export class Agent {
           await this.#push({ id: crypto.randomUUID(), role: "user", content: steer });
           continue;
         }
-        // Cut off (output limit) or looping: the work is not done, so nudge instead of stopping.
-        if (looping || stopReason === "length") {
-          if (this.#nudges >= MAX_NUDGES) {
-            return { reason: "limit", detail: looping ? "the model keeps repeating itself" : "output token limit (maxOutputTokens)" };
-          }
+        // Cut off (output limit), looping, or empty (nothing said, nothing called): the work is not
+        // done, so nudge instead of stopping.
+        const empty = stopReason === "end" && text.trim() === "";
+        if (looping || stopReason === "length" || empty) {
+          const [nudge, why] = looping
+            ? [NUDGE_REPEAT, "the model keeps repeating itself"]
+            : empty
+              ? [NUDGE_EMPTY, "the model keeps replying with nothing"]
+              : [NUDGE_LENGTH, "output token limit (maxOutputTokens)"];
+          if (this.#nudges >= MAX_NUDGES) return { reason: "limit", detail: why };
           this.#nudges++;
-          await this.#push({ id: crypto.randomUUID(), role: "user", content: looping ? NUDGE_REPEAT : NUDGE_LENGTH });
+          await this.#push({ id: crypto.randomUUID(), role: "user", content: nudge });
           continue;
         }
         const followUp = this.#followUpQueue.shift();

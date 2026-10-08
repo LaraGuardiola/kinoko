@@ -27,7 +27,9 @@ export default function (k: Kinoko): void {
 
   k.on("tool_call", (call) => {
     if (call.name !== "bash") return;
-    const cmd = typeof call.args.cmd === "string" ? call.args.cmd : "";
+    // bash takes `command`; `cmd` is still accepted, so a gate must check both.
+    const raw = call.args.command ?? call.args.cmd;
+    const cmd = typeof raw === "string" ? raw : "";
     if (cmd === "") return;
 
     if (HARDLINE.test(cmd)) {

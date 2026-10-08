@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CallGuard, REPEAT_LINES, RepeatGuard } from "./guard.ts";
+import { CallGuard, REPEAT_LINES, REPEAT_RUN, RepeatGuard } from "./guard.ts";
 
 describe("RepeatGuard", () => {
   test("trips when one long line repeats REPEAT_LINES times, across chunk boundaries", () => {
@@ -10,6 +10,13 @@ describe("RepeatGuard", () => {
       // Split mid-line: lines are only counted once complete.
       tripped = guard.push(line.slice(0, 10)) || guard.push(line.slice(10)) || tripped;
     }
+    expect(tripped).toBe(true);
+  });
+
+  test("a short line repeated REPEAT_RUN times in a row trips", () => {
+    const guard = new RepeatGuard();
+    let tripped = false;
+    for (let i = 0; i < REPEAT_RUN; i++) tripped = guard.push('    "strict": true,\n') || tripped;
     expect(tripped).toBe(true);
   });
 

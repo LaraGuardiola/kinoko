@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { MAX_NUDGES, NUDGE_LENGTH, NUDGE_REPEAT, REPEAT_LINES, STOP_CALLS, WARN_CALLS } from "./guard.ts";
+import { MAX_NUDGES, NUDGE_EMPTY, NUDGE_LENGTH, NUDGE_REPEAT, REPEAT_LINES, STOP_CALLS, WARN_CALLS } from "./guard.ts";
 import { Agent, type AgentEvent } from "./loop.ts";
 import type { Provider, StreamEvent } from "./types.ts";
 
@@ -53,6 +53,14 @@ describe("loop guards", () => {
     expect(cutReply.thinking).toBeUndefined();
     expect(cutReply.toolCalls).toBeUndefined();
     expect(agent.messages[2]!.content).toBe(NUDGE_REPEAT);
+  });
+
+  test("an empty reply (a tool call written inside the thinking) is nudged, not taken as done", async () => {
+    const lost: StreamEvent[] = [{ type: "thinking", delta: "<tool_call>\n<function=write>" }, { type: "done", stop: "end" }];
+    const agent = agentWith(scripted([lost, answer]));
+    expect((await agent.prompt("go")).reason).toBe("done");
+    expect(agent.messages[2]!.content).toBe(NUDGE_EMPTY);
+    expect(agent.messages.at(-1)!.content).toBe("done");
   });
 
   test("the same call with the same result is flagged, then stops the run", async () => {

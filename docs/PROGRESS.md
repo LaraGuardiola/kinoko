@@ -266,3 +266,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 - `edit`: "missing path (string)", like write.
 - Tool errors fell from 13 (voxel session, 214 turns) to 2 in this one (66 turns).
 - `bun run check` passes (231 tests; the session #5 mtime flake fired once).
+
+## fix/llm-behaviour, round 4: a run that ended "done" mid-task — DONE
+- Session `a01968e1`: the last reply (#65) never closed its thinking. It looped `"strict": true,` 129 times, then wrote its tool call (`</parameter></function></tool_call>`) inside the thinking. Strata returned it all as reasoning: no text, no call, `stop=end`, so the loop took it as "done". The repeat guard missed it: the line is 15 chars and only lines ≥ 24 chars were counted.
+- `RepeatGuard`: also trips on 12 identical non-empty lines in a row, whatever their length.
+- Loop: a reply with no text and no tool call is nudged (`NUDGE_EMPTY`: a call inside the thinking does not run; close it, then call or say you are done), under the same `MAX_NUDGES` cap.
+- `bash`: the parameter is `command`, the name models expect (the model sent `command` and got "cmd must be a string"); `cmd` is still accepted. `examples/ext/permission-gate.ts` and `plan-mode.ts` read both names. Reading only `cmd` would have let a `command` through the gate unchecked. Tested.
+- Still open: `~/.kinoko/config.json` has `maxOutputTokens: 4096` (reply #10 cut at exactly 4096).
+- `bun run check` passes (233 tests).

@@ -233,6 +233,7 @@ describe("shipped extensions", () => {
     expect(blocked("bash", { cmd: "sudo rm x" })).toContain("denied by permission-gate");
     expect(blocked("bash", { cmd: "chmod 777 /tmp/x" })).toContain("denied by permission-gate");
     expect(blocked("bash", { cmd: "ls -la" })).toBeUndefined();
+    expect(blocked("bash", { command: "rm -rf /" })).toContain("hardline");
     expect(blocked("read", { path: "a.txt" })).toBeUndefined();
 
     process.env.KINOKO_YOLO = "1";
@@ -256,6 +257,7 @@ describe("shipped extensions", () => {
     expect(reason("bash", { cmd: "npm install" })).toContain("plan mode");
     expect(reason("bash", { cmd: "ls -la && rm x" })).toContain("plan mode");
     expect(reason("bash", { cmd: "cat a.txt > b.txt" })).toContain("plan mode");
+    expect(reason("bash", { command: "npm install" })).toContain("plan mode");
     expect(reason("read", { path: "a.txt" })).toBeUndefined();
   });
 

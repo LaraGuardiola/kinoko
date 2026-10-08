@@ -112,7 +112,7 @@ describe("kinoko core tools", () => {
   });
 
   test("bash: no stdin, so a command waiting for input ends instead of hanging", async () => {
-    const out = await pick("bash").run({ cmd: "cat; echo done" }, ctx(fresh("stdin")));
+    const out = await pick("bash").run({ command: "cat; echo done" }, ctx(fresh("stdin")));
     expect(out).toBe("done\n");
   });
 

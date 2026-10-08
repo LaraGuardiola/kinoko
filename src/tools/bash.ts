@@ -7,7 +7,8 @@ const DEFAULT_MAX_TOKENS = 4000;
 const DEFAULT_TIMEOUT_MS = 300_000;
 
 interface BashArgs {
-  cmd?: unknown;
+  command?: unknown;
+  cmd?: unknown; // accepted too: the name used before
   timeout?: unknown;
 }
 
@@ -16,8 +17,9 @@ interface BashArgs {
  * through ctx.onOutput, and kills the WHOLE group on abort or timeout.
  */
 async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
-  const cmd = args.cmd;
-  if (typeof cmd !== "string") return "ERROR: bash: cmd must be a string";
+  // `command` is what models expect (most harnesses use it).
+  const cmd = args.command ?? args.cmd;
+  if (typeof cmd !== "string") return "ERROR: bash: missing command (string)";
   const timeoutMs = typeof args.timeout === "number" && args.timeout > 0 ? Math.trunc(args.timeout) : DEFAULT_TIMEOUT_MS;
 
   // No stdin: a command waiting for input would otherwise wait forever.
@@ -79,10 +81,10 @@ export const bashTool: Tool = {
   schema: {
     type: "object",
     properties: {
-      cmd: { type: "string", description: "shell command" },
+      command: { type: "string", description: "shell command" },
       timeout: { type: "number", description: `kill after N ms (default ${DEFAULT_TIMEOUT_MS})` },
     },
-    required: ["cmd"],
+    required: ["command"],
   },
   run: bashRun,
 };
