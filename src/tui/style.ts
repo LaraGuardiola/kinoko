@@ -27,7 +27,7 @@ export const ANSI = {
  * columns each takes: a wide emoji or CJK character takes two, a combining mark none. Counting a
  * ✅ as one column is what made rows overflow their band.
  */
-function* cells(line: string): Generator<{ text: string; width: number; seq: boolean }> {
+export function* cells(line: string): Generator<{ text: string; width: number; seq: boolean }> {
   for (let index = 0; index < line.length;) {
     if (line.startsWith("\x1b[", index)) {
       const end = line.slice(index + 2).search(/[@-~]/);

@@ -18,6 +18,7 @@ export const SYNTAX = {
   type: rgb(238, 222, 186),
   property: rgb(137, 220, 235),
   variable: rgb(245, 194, 231),
+  interp: rgb(236, 104, 104), // the ${ } around an interpolated expression
   punct: rgb(170, 176, 198),
   plain: rgb(214, 218, 232),
   added: rgb(166, 209, 137),
@@ -34,6 +35,7 @@ interface Spec {
   types?: boolean; // Capitalized identifiers are types
   caseless?: boolean; // SQL
   hashComment?: "start-or-space"; // shell: `#` only starts a comment at a word boundary
+  interpolate?: boolean; // `${expr}` inside backtick strings is code
 }
 
 const words = (text: string): Set<string> => new Set(text.split(" "));
@@ -48,6 +50,7 @@ const C_LIKE: Spec = {
   ),
   constants: words("true false null undefined nil None NaN Infinity self"),
   types: true,
+  interpolate: true,
 };
 
 const SPECS: Record<string, Spec> = {
@@ -143,11 +146,10 @@ function tokenize(line: string, spec: Spec, start: HighlightState): { text: stri
       continue;
     }
     if (state.inString !== undefined) {
-      const end = closing(line, i, state.inString);
-      const stop = end < 0 ? line.length : end + state.inString.length;
-      out += paint(SYNTAX.string, line.slice(i, stop));
-      i = stop;
-      if (end >= 0) state.inString = undefined;
+      const run = stringRun(line, i, state.inString, spec);
+      out += run.text;
+      i = run.stop;
+      if (run.closed) state.inString = undefined;
       continue;
     }
     const lineComment = spec.line.find((c) => rest().startsWith(c));
@@ -163,14 +165,12 @@ function tokenize(line: string, spec: Spec, start: HighlightState): { text: stri
     }
     const quote = spec.quotes.find((q) => rest().startsWith(q));
     if (quote !== undefined) {
-      const end = closing(line, i + quote.length, quote);
-      if (end < 0 && spec.multiline?.includes(quote)) state.inString = quote;
-      const stop = end < 0 ? line.length : end + quote.length;
-      const text = line.slice(i, stop);
-      // A string followed by a colon is a key ({"name": ...}).
-      const isKey = /^\s*:/.test(line.slice(stop)) && spec !== SPECS.shell;
-      out += paint(isKey ? SYNTAX.property : SYNTAX.string, text);
-      i = stop;
+      const run = stringRun(line, i + quote.length, quote, spec, quote);
+      if (!run.closed && spec.multiline?.includes(quote)) state.inString = quote;
+      // A plain string followed by a colon is a key ({"name": ...}).
+      const isKey = quote !== "`" && /^\s*:/.test(line.slice(run.stop)) && spec !== SPECS.shell;
+      out += isKey ? paint(SYNTAX.property, line.slice(i, run.stop)) : run.text;
+      i = run.stop;
       continue;
     }
     const prev = line[i - 1] ?? "";
@@ -221,14 +221,56 @@ function tokenize(line: string, spec: Spec, start: HighlightState): { text: stri
   return { text: out, state };
 }
 
-/** Index of the closing `quote` from `from`, skipping backslash escapes; -1 when not on this line. */
-function closing(line: string, from: number, quote: string): number {
-  for (let i = from; i < line.length; i++) {
+/**
+ * A string's body from `from` up to and including its closing `quote` (or the end of the line),
+ * after `open` (the opening quote, when the string starts on this line).
+ * Interpolations are coloured as what they are: `${expr}` in a template literal is code, and
+ * `$VAR` in a shell double-quoted string is a variable.
+ */
+function stringRun(line: string, from: number, quote: string, spec: Spec, open = ""): { text: string; stop: number; closed: boolean } {
+  let out = "";
+  let chunk = open;
+  let i = from;
+  while (i < line.length) {
     if (line[i] === "\\") {
-      i++;
+      chunk += line.slice(i, i + 2);
+      i += 2;
       continue;
     }
-    if (line.startsWith(quote, i)) return i;
+    if (line.startsWith(quote, i)) {
+      return { text: `${out}${paint(SYNTAX.string, `${chunk}${quote}`)}`, stop: i + quote.length, closed: true };
+    }
+    if (quote === "`" && spec.interpolate && line.startsWith("${", i)) {
+      const close = matchingBrace(line, i + 2);
+      if (close >= 0) {
+        const expr = tokenize(line.slice(i + 2, close), spec, {}).text;
+        out += `${paint(SYNTAX.string, chunk)}${paint(SYNTAX.interp, "${")}${expr}${paint(SYNTAX.interp, "}")}`;
+        chunk = "";
+        i = close + 1;
+        continue;
+      }
+    }
+    if (quote === '"' && spec === SPECS.shell && line[i] === "$") {
+      const variable = /^\$(\{[^}]*\}|[\w@#?*!$-]+)/.exec(line.slice(i));
+      if (variable) {
+        out += `${paint(SYNTAX.string, chunk)}${paint(SYNTAX.variable, variable[0])}`;
+        chunk = "";
+        i += variable[0].length;
+        continue;
+      }
+    }
+    chunk += line[i] ?? "";
+    i++;
+  }
+  return { text: `${out}${paint(SYNTAX.string, chunk)}`, stop: line.length, closed: false };
+}
+
+/** Index of the `}` that closes a brace opened just before `from`; -1 when not on this line. */
+function matchingBrace(line: string, from: number): number {
+  let depth = 1;
+  for (let i = from; i < line.length; i++) {
+    if (line[i] === "{") depth++;
+    else if (line[i] === "}" && --depth === 0) return i;
   }
   return -1;
 }

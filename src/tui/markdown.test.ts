@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderMarkdown } from "./markdown.ts";
 import { highlightLine, SYNTAX } from "./highlight.ts";
+import { languageName } from "./code.ts";
 import { visibleLength } from "./style.ts";
 
 const ESC = String.fromCharCode(27);
@@ -83,9 +84,11 @@ describe("markdown: code blocks", () => {
     expect(out.at(-1)).toBe("after");
     const pane = out.slice(1, -1);
     for (const row of pane) expect(visibleLength(row)).toBe(40);
-    expect(strip(pane[0] ?? "").trim()).toBe("ts");
-    expect(strip(pane[1] ?? "")).toStartWith(" 1  const a = 1;");
-    expect(strip(pane[2] ?? "")).toStartWith(" 2  function f()");
+    // A padding row, then the full language name top right, two columns in from the edge.
+    expect(strip(pane[0] ?? "").trim()).toBe("");
+    expect(strip(pane[1] ?? "")).toMatch(/ {20,}TypeScript {3}$/);
+    expect(strip(pane[2] ?? "")).toStartWith(" 1  const a = 1;");
+    expect(strip(pane[3] ?? "")).toStartWith(" 2  function f()");
     // The panel background is never cut mid-row by a full reset.
     for (const row of pane) expect(row.slice(0, -4)).not.toMatch(new RegExp(`${ESC}\\[0m(?!${ESC}\\[48)`));
   });
@@ -96,16 +99,32 @@ describe("markdown: code blocks", () => {
     expect(out).toContain(`${SYNTAX.keyword}const`);
   });
 
-  test("long code lines wrap inside the pane with an empty gutter", () => {
+  test("a run with no break opportunity is cut by column, with an empty gutter", () => {
     const out = rows(`\`\`\`\n${"x".repeat(50)}\n\`\`\``, 30);
-    expect(out).toHaveLength(4); // label row, two wrapped rows, bottom padding
+    expect(out).toHaveLength(6); // top padding, label row, three cut rows, bottom padding
     for (const row of out) expect(visibleLength(row)).toBe(30);
-    expect(strip(out[2] ?? "")).toStartWith("    x");
+    expect(strip(out[3] ?? "")).toStartWith("      x");
+  });
+
+  test("long lines soft-wrap at token boundaries, hanging under their own indentation", () => {
+    const line = '  const errors = messages.filter(m => m.role === "tool").some(m => m.text.startsWith("E"));';
+    const out = rows(`\`\`\`ts\n${line}\n\`\`\``, 62).map(strip);
+    expect(out[2]?.trimEnd()).toBe(' 1    const errors = messages.filter(m => m.role === "tool")');
+    // The continuation hangs two columns past the line's indentation and starts at the dot.
+    expect(out[3]).toStartWith("        .some(m => m.text");
+    for (const row of out) expect(row.length).toBe(62);
+  });
+
+  test("language labels are full names", () => {
+    expect(languageName("ts")).toBe("TypeScript");
+    expect(languageName("py")).toBe("Python");
+    expect(languageName("sh")).toBe("Shell");
+    expect(languageName("elixir")).toBe("Elixir");
   });
 
   test("a fence still streaming (no closing line) renders what has arrived", () => {
     const out = rows("```py\ndef f():", 30);
-    expect(strip(out[1] ?? "")).toStartWith(" 1  def f():");
+    expect(strip(out[2] ?? "")).toStartWith(" 1  def f():");
   });
 });
 
@@ -137,6 +156,17 @@ describe("syntax highlighting", () => {
     expect(highlightLine("url#anchor", "sh").text).not.toContain(SYNTAX.comment);
     expect(highlightLine("def f(): pass", "python").text).toContain(`${SYNTAX.keyword}def`);
     expect(highlightLine("+added", "diff").text).toBe(`${SYNTAX.added}+added\x1b[39m`);
+  });
+
+  test("interpolations are code: ${expr} in template literals, $VAR in shell double quotes", () => {
+    const { text } = highlightLine("`a ${count} b ${x.f()}`", "ts");
+    expect(text).toContain(`${SYNTAX.interp}\${`);
+    expect(text).toContain(`${SYNTAX.plain}count`);
+    expect(text).toContain(`${SYNTAX.fn}f`);
+    expect(text).toContain(`${SYNTAX.string} b `);
+    expect(strip(text)).toBe("`a ${count} b ${x.f()}`");
+    expect(highlightLine('echo "at $HOME now"', "sh").text).toContain(`${SYNTAX.variable}$HOME`);
+    expect(highlightLine("'no $HOME here'", "sh").text).not.toContain(SYNTAX.variable);
   });
 
   test("an unknown language is plain text", () => {
