@@ -14,6 +14,7 @@ import { ANSI } from "./tui/style.ts";
 import { discoverContext, discoverSkills } from "./context.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { defaultTools } from "./tools/registry.ts";
+import { restoreTracker } from "./tools/restore.ts";
 import { Rpc, serveStdio } from "./rpc.ts";
 
 // CLI spelling -> Config key. Kebab-case is what a human types.
@@ -227,6 +228,10 @@ const agent = new Agent({
   session,
   extensions: ext,
 });
+
+// A resumed session already read or wrote files: those still on disk exactly as it last saw them
+// need no fresh read before a change (the read-before-change record does not survive a restart).
+if (previous) await restoreTracker(agent.messages, cwd);
 
 const startedAt = Date.now();
 

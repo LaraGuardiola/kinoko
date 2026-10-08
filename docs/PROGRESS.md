@@ -342,3 +342,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - A resumed ~53k-token session read its whole prompt once (first request: 53,315 in, 0 cached), then went back to the cache (next: 53,310 of 54,111 cached). Expected: the engine reuses only a byte-identical prefix, and here the prefix had changed (the `web.ts` extension was installed after the session started, and tool schemas render first) or the engine no longer held it.
 - One avoidable cause fixed: the system prompt's date was today's at every start, so a session resumed on a later day changed its very first line and always re-read everything. The date now comes from the session's creation (`meta.created`), resolved before the prompt is built: a new session gets today, a resumed one keeps its own.
 - `bun run check` passes (257 tests).
+
+## Resume keeps read-before-change — DONE
+- After resuming, the model got "you must read this file before changing it" for `hud.ts`, a file it had just written: the read-before-change tracker lives in memory, so a restarted kinoko forgot every file the session had read or written.
+- `src/tools/restore.ts` (`restoreTracker`, called in main.ts on resume): from the session's messages, the last content the model saw of each file (a write's content, each later edit replayed byte for byte, a whole read with its line numbers stripped; partial reads, failed calls and unknown bases teach nothing). A file is marked read only if the disk still holds exactly that (the trailing newline aside, since a read cannot show it); anything changed since still needs a read.
+- On the real resumed session: 44 files touched, 38 trusted again, `hud.ts` among them.
+- Tests: restore.test (write, write then edit, read with blank lines, changed on disk, partial read, missing file, failed calls, edit on an unknown base). `bun run check` passes (259 tests).
