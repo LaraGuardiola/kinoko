@@ -308,5 +308,5 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## TUI: steer echo on delivery, plain run state, two-tone name — DONE
 - A steer (Enter while running) or follow-up (Alt+Enter) no longer prints its blue user line when typed: it shows only in the queued area (`[steer]` / `[follow-up]`) until the loop hands it to the model. New AgentEvent `delivered` (loop `#deliver`: leave the queue, append the user message, emit), and the App echoes it then, so it lands where the model actually read it.
 - Status line: `RUNNING` without the inverse background.
-- Startup panel: `kinoko` letter by letter in amanita red and cream.
+- Startup panel: `kinoko` in amanita red, the version in cream.
 - Tests: app.test (no echo before delivery, exactly one after; no inverse in the status), order.test updated to the new order. `bun run check` passes (239 tests).

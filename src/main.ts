@@ -272,7 +272,7 @@ if (tui) {
 
 function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string }): string {
   return [
-    `${mushroom("kinoko")} v${parts.version}`,
+    `${ANSI.amanita}kinoko${ANSI.reset} ${ANSI.cream}v${parts.version}${ANSI.reset}`,
     "",
     "\x1b[38;5;214m[Capabilities]\x1b[0m",
     `  Context: ${names(parts.context.map((file) => file.path.split("/").at(-1) ?? file.path), "none")}`,
@@ -281,11 +281,6 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
     "",
     "Kinoko can inspect and change this project. Ask it to work on a coding task.",
   ].join("\n");
-}
-
-/** The name in the amanita's colours: red and cream, letter by letter. */
-function mushroom(word: string): string {
-  return [...word].map((c, i) => `${i % 2 === 0 ? ANSI.amanita : ANSI.cream}${c}`).join("") + ANSI.reset;
 }
 
 function names(items: string[], empty: string): string {
