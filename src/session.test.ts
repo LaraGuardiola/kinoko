@@ -169,9 +169,11 @@ describe("session log", () => {
     mkdirSync(CWD, { recursive: true });
     const first = await Session.create({ cwd: CWD, model: "m", home: HOME });
     await first.append({ id: "a", role: "user", content: "first" });
+    // Linux stamps mtimes from a coarse clock (a few ms per tick): two writes microseconds apart
+    // can share one, and then "newest" is a tie. The pause goes BETWEEN them (it used to follow both).
+    await new Promise((r) => setTimeout(r, 25));
     const second = await Session.create({ cwd: CWD, model: "m", home: HOME });
     await second.append({ id: "b", role: "user", content: "second" });
-    await new Promise((r) => setTimeout(r, 10)); // mtime resolution
 
     expect(latestSession(CWD, HOME)).toBe(second.path);
     expect((await Session.load(latestSession(CWD, HOME)!)).view().at(-1)!.content).toBe("second");
