@@ -56,6 +56,19 @@ export class RepeatGuard {
 /** Tracks identical tool calls that keep returning identical results within one run. */
 export class CallGuard {
   #last = new Map<string, { output: string; count: number }>();
+  #failure = { name: "", output: "", count: 0 };
+
+  /**
+   * Records a finished call; returns how many calls of this tool in a row failed with this exact
+   * output, whatever their arguments: varying flags around an unchanged error is a loop too.
+   */
+  failures(call: ToolCall, output: string): number {
+    if (!FAILED.test(output)) return (this.#failure = { name: "", output: "", count: 0 }).count;
+    const f = this.#failure;
+    const count = f.name === call.name && f.output === output ? f.count + 1 : 1;
+    this.#failure = { name: call.name, output, count };
+    return count;
+  }
 
   /** Records a finished call; returns how many times in a row it produced this same output. */
   record(call: ToolCall, output: string): number {
@@ -65,6 +78,17 @@ export class CallGuard {
     this.#last.set(key, { output, count });
     return count;
   }
+}
+
+/** An error in a tool result: ours, a non-zero exit, or a compiler/bundler "error:" line. */
+const FAILED = /^ERROR:|\[exit code \d+\]|\berror\b/i;
+
+/** The note appended to a failure that `count` different calls in a row have all produced. */
+export function sameErrorNote(count: number): string {
+  return (
+    `\n\n[kinoko] The last ${count} calls failed with this exact same output, although you changed the ` +
+    "arguments. What you are changing is not the cause: re-read the error message itself (paths, names)."
+  );
 }
 
 /** The note appended to a tool result that has come back unchanged `count` times. */

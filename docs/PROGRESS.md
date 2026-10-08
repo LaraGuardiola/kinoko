@@ -280,3 +280,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - openai-compat: only the newest assistant turn sends its thinking back (`reasoning_content`), so a cut reply can still continue; older thinking (old drafts) is no longer sent. It also costs far less context. `historyTokens` counts only that one thinking.
 - `edit`: the result shows the edited lines as they are now on disk (2 lines of context, at most 30 per edit, `…` between distant edits), so the real text sits right after the action.
 - `bun run check` passes (233 tests).
+
+## fix/llm-behaviour, round 6: thinking copied verbatim; same error under different flags — DONE
+- Session `58ae57a5`: the thinking of #29 is a byte-for-byte copy of #27's, which was the newest thinking and so the one round 5 sent back. A small model copies its last reasoning, and that makes the loop. Thinking now goes back only when the newest reply was cut by the output limit (`stop: "length"`), the one case where continuing from it helps.
+- The same session ran 7 different `bun build` commands (only the flags changed) that all returned the identical "Could not resolve" error. `CallGuard.failures` counts consecutive identical failures (`ERROR:`, `[exit code N]`, or an `error` word) of one tool whatever its args; from the 3rd it appends a note: the arguments being changed are not the cause, re-read the error itself.
+- Seen, not changed: after the user's steer, the model sometimes reads tool results as the user speaking ("The user is asking about the --config flag"). Strata's chat template renders tool results inside user turns, so pi gets the same rendering.
+- `~/.kinoko/config.json`: `maxOutputTokens` 4096 → 32768 (with the user's permission).
+- `bun run check` passes (234 tests).

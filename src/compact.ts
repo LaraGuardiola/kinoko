@@ -45,9 +45,10 @@ export function messageTokens(m: Message): number {
   return estimateTokens(`${m.role}\n${m.content}${m.toolCalls ? JSON.stringify(m.toolCalls) : ""}`);
 }
 
-/** The history as sent: only the newest assistant turn carries its thinking back. */
+/** The history as sent: only a cut-off newest reply carries its thinking back. */
 export function historyTokens(messages: Message[]): number {
-  const thinking = messages.findLast((m) => m.role === "assistant")?.thinking ?? "";
+  const newest = messages.findLast((m) => m.role === "assistant");
+  const thinking = newest?.stop === "length" ? (newest.thinking ?? "") : "";
   return messages.reduce((sum, m) => sum + messageTokens(m), estimateTokens(thinking));
 }
 

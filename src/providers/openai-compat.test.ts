@@ -132,7 +132,7 @@ describe("openai-compat: truncation, thinking and effort", () => {
     expect(events.at(-1)).toMatchObject({ type: "done", stop: "length" });
   });
 
-  test("only the newest assistant turn sends its thinking back; the request effort overrides the config", async () => {
+  test("thinking goes back only for a newest reply cut by the output limit; the request effort overrides the config", async () => {
     setMode("text");
     const provider = openaiCompat({ baseUrl, apiKey: "k", reasoningEffort: "low" });
     const req: ProviderRequest = {
@@ -141,7 +141,7 @@ describe("openai-compat: truncation, thinking and effort", () => {
         { id: "1", role: "user", content: "hi" },
         { id: "2", role: "assistant", content: "draft", thinking: "an old draft of the file" },
         { id: "3", role: "user", content: "next" },
-        { id: "4", role: "assistant", content: "ok", thinking: "let me see" },
+        { id: "4", role: "assistant", content: "", thinking: "let me see", stop: "length" },
         { id: "5", role: "user", content: "go" },
       ],
       effort: "off",
@@ -149,7 +149,11 @@ describe("openai-compat: truncation, thinking and effort", () => {
     for await (const _ of provider.stream(req)) void _;
     const messages = lastBody.messages as Array<Record<string, unknown>>;
     expect(messages[1]).toEqual({ role: "assistant", content: "draft" });
-    expect(messages[3]).toEqual({ role: "assistant", content: "ok", reasoning_content: "let me see" });
+    expect(messages[3]).toEqual({ role: "assistant", content: "", reasoning_content: "let me see" });
+    // A finished newest reply keeps its thinking to itself: a small model copies it verbatim.
+    const done = { ...req, messages: [...req.messages.slice(0, 3), { id: "4", role: "assistant" as const, content: "ok", thinking: "x" }] };
+    for await (const _ of provider.stream(done)) void _;
+    expect((lastBody.messages as Array<Record<string, unknown>>)[3]).toEqual({ role: "assistant", content: "ok" });
     expect(messages[0]).toEqual({ role: "user", content: "hi" });
     expect(lastBody.reasoning_effort).toBe("off");
   });

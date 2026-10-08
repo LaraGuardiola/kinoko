@@ -2,7 +2,7 @@
    a time, tools and log appends in order. Parallelism here would be a bug, not a speed-up. */
 import { compactHistory, isContextOverflow, shouldCompact } from "./compact.ts";
 import type { Extensions } from "./ext.ts";
-import { CallGuard, MAX_NUDGES, NUDGE_EMPTY, NUDGE_LENGTH, NUDGE_REPEAT, RepeatGuard, STOP_CALLS, WARN_CALLS, repeatNote } from "./guard.ts";
+import { CallGuard, MAX_NUDGES, NUDGE_EMPTY, NUDGE_LENGTH, NUDGE_REPEAT, RepeatGuard, STOP_CALLS, WARN_CALLS, repeatNote, sameErrorNote } from "./guard.ts";
 import type { Session } from "./session.ts";
 import type {
   Message,
@@ -285,7 +285,9 @@ export class Agent {
         // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
         const msg = await this.#runTool(tc);
         const repeats = this.#calls.record(tc, msg.content);
+        const failures = this.#calls.failures(tc, msg.content);
         if (repeats >= WARN_CALLS) msg.content += repeatNote(repeats);
+        else if (failures >= WARN_CALLS) msg.content += sameErrorNote(failures);
         stuck = Math.max(stuck, repeats);
         await this.#push(msg);
       }

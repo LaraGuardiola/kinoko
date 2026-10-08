@@ -209,10 +209,11 @@ function merge(pending: Map<number, Pending>, tc: NonNullable<Delta["tool_calls"
 }
 
 function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
-  // Only the newest assistant turn keeps its thinking: older thinking holds drafts of code that
-  // differ from what was really written, and the model trusts the draft over the tool results.
+  // Thinking goes back only for a reply cut by the output limit, so it can continue where it
+  // stopped. Any other old thinking does harm: it holds drafts that differ from what was really
+  // written, and a small model copies its last reasoning verbatim (a loop).
   const newest = req.messages.findLastIndex((m) => m.role === "assistant");
-  const wired = req.messages.map((m, i) => wire(m, i === newest));
+  const wired = req.messages.map((m, i) => wire(m, i === newest && m.stop === "length"));
   const messages = req.system ? [{ role: "system", content: req.system }, ...wired] : wired;
   return {
     model: req.model,
@@ -229,8 +230,6 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
 
 function wire(m: Message, withThinking: boolean): object {
   if (m.role === "tool") return { role: "tool", content: m.content, tool_call_id: m.toolCallId };
-  // Thinking goes back as the engine sent it (`reasoning_content`), so a reply cut mid-thought
-  // can continue from where it stopped instead of re-deriving it.
   const reasoning = withThinking && m.thinking ? { reasoning_content: m.thinking } : {};
   if (m.toolCalls?.length) {
     return {

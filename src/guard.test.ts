@@ -29,6 +29,17 @@ describe("RepeatGuard", () => {
 });
 
 describe("CallGuard", () => {
+  test("the same error from calls with different arguments is counted; a success resets it", () => {
+    const guard = new CallGuard();
+    const err = 'error: Could not resolve: "../config/test.ts"';
+    expect(guard.failures({ id: "1", name: "bash", args: { command: "bun build a" } }, err)).toBe(1);
+    expect(guard.failures({ id: "2", name: "bash", args: { command: "bun build a --root src" } }, err)).toBe(2);
+    expect(guard.failures({ id: "3", name: "bash", args: { command: "ls" } }, "src")).toBe(0);
+    expect(guard.failures({ id: "4", name: "bash", args: { command: "bun build b" } }, err)).toBe(1);
+    // Repeated empty or successful outputs are never a failure streak.
+    expect(guard.failures({ id: "5", name: "bash", args: { command: "mkdir x" } }, "")).toBe(0);
+  });
+
   test("counts the same call with the same result; a new result resets the count", () => {
     const guard = new CallGuard();
     const call = { id: "1", name: "bash", args: { cmd: "bun test" } };
