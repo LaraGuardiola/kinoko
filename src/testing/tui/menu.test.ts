@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { MENU_ROWS, Menu, ORANGE, filterRoot, listRows, pageRows } from "./menu.ts";
-import type { ListPage } from "./menu.ts";
-import { ROOT, THINKING, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { MENU_ROWS, Menu, ORANGE, filterRoot, listRows, pageRows } from "../../tui/menu.ts";
+import type { ListPage } from "../../tui/menu.ts";
+import { ROOT, THINKING, profileLabel, sessionLines, thinkingPage } from "../../tui/menu-pages.ts";
 
 const strip = (s: string): string => s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
 const items = (n: number) => Array.from({ length: n }, (_, i) => ({ name: `item${i}`, description: `about ${i}` }));

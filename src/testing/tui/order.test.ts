@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { App } from "./app.ts";
+import { App } from "../../tui/app.ts";
 
 // The fake streams below pace themselves one frame at a time on purpose: the order is the test.
 /* oxlint-disable no-await-in-loop */

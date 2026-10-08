@@ -32,7 +32,8 @@ Pi-style: small core, five tools (read, write, edit, bash, search), everything e
 Never disable a rule just to make code pass; fix the code. A disable comment needs a one-line reason.
 
 ## Conventions
-- Tests live next to the code as `*.test.ts` using `bun:test`.
+- Tests live in `src/testing/`, mirroring `src/` (`src/tui/app.ts` → `src/testing/tui/app.test.ts`),
+  as `*.test.ts` using `bun:test`. The one exception is `examples/ext/`: each example ships with its test.
   Use a fake Provider and fake tools for loop tests, and a fake SSE server (`Bun.serve`) for providers.
 - A tool error becomes a tool message "ERROR: ...". It never crashes the loop.
 - User-level files live in `~/.kinoko/` (config, sessions, ext, bin). Project-level in `./.kinoko/`.
@@ -46,4 +47,5 @@ src/tools/         read, write, edit, bash, search, budget, tracker, registry
 src/context.ts     AGENTS.md / skills discovery      src/prompt.ts  system prompt builder
 src/session.ts     append-only JSONL (id + parentId)  src/compact.ts threshold compaction
 src/ext.ts         extension loader + event bus       src/config.ts  layered config
-src/tui/           raw-ANSI renderer, editor, markdown-lite
+src/tui/           raw-ANSI renderer, editor, markdown-lite, slash menu
+src/testing/       the tests, same layout as src/ (src/testing/tui/app.test.ts tests src/tui/app.ts)

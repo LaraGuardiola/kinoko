@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { Renderer } from "./render.ts";
+import { Renderer } from "../../tui/render.ts";
 
 /** Collects every write, with a clock the test drives. */
 function harness(start = 0): { renderer: Renderer; out: string[]; tick: (ms: number) => boolean } {

@@ -1,10 +1,10 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Extensions, loadExtensions } from "./ext.ts";
-import { Agent } from "./loop.ts";
-import type { AgentEvent } from "./loop.ts";
-import type { Message, Provider, StreamEvent, Tool } from "./types.ts";
+import { Extensions, loadExtensions } from "../ext.ts";
+import { Agent } from "../loop.ts";
+import type { AgentEvent } from "../loop.ts";
+import type { Message, Provider, StreamEvent, Tool } from "../types.ts";
 
 const ROOT = `${process.cwd()}/.tmp-ext-test-${process.pid}`;
 const EXAMPLES = `${process.cwd()}/examples/ext`;

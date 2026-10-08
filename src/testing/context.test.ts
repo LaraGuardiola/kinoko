@@ -1,6 +1,6 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { discoverContext, discoverSkills, frontmatter, renderContext, renderSkills } from "./context.ts";
+import { discoverContext, discoverSkills, frontmatter, renderContext, renderSkills } from "../context.ts";
 
 const ROOT = `${process.cwd()}/.tmp-ctx-test-${process.pid}`;
 const HOME = `${ROOT}/home`;

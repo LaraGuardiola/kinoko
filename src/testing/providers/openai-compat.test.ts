@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { listModels, openaiCompat } from "./openai-compat.ts";
-import type { ProviderRequest, StreamEvent } from "../types.ts";
+import { listModels, openaiCompat } from "../../providers/openai-compat.ts";
+import type { ProviderRequest, StreamEvent } from "../../types.ts";
 
 let server: ReturnType<typeof Bun.serve>;
 let mode: "text" | "split-tool" | "length-tool" | "hang" = "text";

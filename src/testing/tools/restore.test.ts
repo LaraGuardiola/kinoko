@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import type { Message } from "../types.ts";
-import { restoreTracker } from "./restore.ts";
-import { checkRead, tracker } from "./tracker.ts";
+import type { Message } from "../../types.ts";
+import { restoreTracker } from "../../tools/restore.ts";
+import { checkRead, tracker } from "../../tools/tracker.ts";
 
 const DIR = `${process.cwd()}/.tmp-restore-test-${process.pid}`;
 afterAll(() => rmSync(DIR, { recursive: true, force: true }));

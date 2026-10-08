@@ -1,8 +1,8 @@
 import { expect, test, describe } from "bun:test";
-import { Rpc } from "./rpc.ts";
-import { Agent } from "./loop.ts";
-import type { RpcReply } from "./rpc.ts";
-import type { StreamEvent, Tool } from "./types.ts";
+import { Rpc } from "../rpc.ts";
+import { Agent } from "../loop.ts";
+import type { RpcReply } from "../rpc.ts";
+import type { StreamEvent, Tool } from "../types.ts";
 
 interface Parsed {
   type: "event" | "ok" | "error";

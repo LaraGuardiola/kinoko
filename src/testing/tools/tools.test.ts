@@ -1,7 +1,7 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "node:fs";
-import { defaultTools } from "./registry";
-import type { Tool } from "../types";
+import { defaultTools } from "../../tools/registry";
+import type { Tool } from "../../types";
 
 const ROOT = `${process.cwd()}/.tmp-tools-test-${process.pid}`;
 

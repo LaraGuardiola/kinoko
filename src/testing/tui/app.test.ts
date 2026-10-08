@@ -1,12 +1,12 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { rmSync } from "node:fs";
-import { App } from "./app.ts";
-import type { ModelsHost } from "./app.ts";
-import type { SavedModel } from "../config.ts";
-import type { Served } from "../providers/openai-compat.ts";
-import { Agent } from "../loop.ts";
-import { Session } from "../session.ts";
-import type { ProviderRequest, StreamEvent, Tool } from "../types.ts";
+import { App } from "../../tui/app.ts";
+import type { ModelsHost } from "../../tui/app.ts";
+import type { SavedModel } from "../../config.ts";
+import type { Served } from "../../providers/openai-compat.ts";
+import { Agent } from "../../loop.ts";
+import { Session } from "../../session.ts";
+import type { ProviderRequest, StreamEvent, Tool } from "../../types.ts";
 
 const ROOT = `${process.cwd()}/.tmp-tui-test-${process.pid}`;
 

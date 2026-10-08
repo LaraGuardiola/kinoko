@@ -1,7 +1,7 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { searchTool } from "./search";
-import { estimateTokens } from "./budget";
+import { searchTool } from "../../tools/search";
+import { estimateTokens } from "../../tools/budget";
 
 const ROOT = `${process.cwd()}/.tmp-search-test-${process.pid}`;
 

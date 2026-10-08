@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import type { Message } from "../types.ts";
-import { replayBlocks } from "./replay.ts";
+import type { Message } from "../../types.ts";
+import { replayBlocks } from "../../tui/replay.ts";
 
 const strip = (s: string): string => s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
 

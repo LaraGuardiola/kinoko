@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { renderMarkdown } from "./markdown.ts";
-import { highlightLine, SYNTAX } from "./highlight.ts";
-import { languageName } from "./code.ts";
-import { visibleLength } from "./style.ts";
+import { renderMarkdown } from "../../tui/markdown.ts";
+import { highlightLine, SYNTAX } from "../../tui/highlight.ts";
+import { languageName } from "../../tui/code.ts";
+import { visibleLength } from "../../tui/style.ts";
 
 const ESC = String.fromCharCode(27);
 const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");

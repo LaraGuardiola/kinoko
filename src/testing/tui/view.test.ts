@@ -1,8 +1,8 @@
 import { expect, test, describe } from "bun:test";
-import { formatBlock, liveRegion, splitStable, STREAM_ROWS, wrapAnsi } from "./view.ts";
-import { pulseDot, pulseLevel, toolBlock, toolFailed, toolSummary } from "./tools.ts";
-import { visibleLength } from "./style.ts";
-import type { RegionInput } from "./view.ts";
+import { formatBlock, liveRegion, splitStable, STREAM_ROWS, wrapAnsi } from "../../tui/view.ts";
+import { pulseDot, pulseLevel, toolBlock, toolFailed, toolSummary } from "../../tui/tools.ts";
+import { visibleLength } from "../../tui/style.ts";
+import type { RegionInput } from "../../tui/view.ts";
 
 const stripAnsi = (line: string): string => line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
 

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { thinkingLabel } from "./config.ts";
+import { thinkingLabel } from "../config.ts";
 
 test("the thinking label: level, budget when one is set, OFF without one", () => {
   expect(thinkingLabel("low", 2048)).toBe("LOW · 2048");

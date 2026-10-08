@@ -383,3 +383,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Switching to a model on llama.cpp kept Strata's 122,880 as the window: only `meta.n_ctx` (Strata) was read. A window too large lets the prompt overflow before compaction triggers. `listModels` now reads it wherever the server puts it: Strata's `meta.n_ctx`, llama.cpp router mode's launch args (`--ctx-size N` / `-c N`), a single-model llama.cpp server's `/props` (`default_generation_settings.n_ctx`). Never `n_ctx_train` (the training size, not what the server allocated). Live: the user's router on 8086 reports 65,536 for each of its three models.
 - Picks: a known window is applied on every pick, also within the same endpoint (it was only applied when the endpoint changed). A model picked without one (typed by hand, or served by the engine in use) asks its endpoint, applies the answer, and saves it on the entry; if the endpoint never says, the marker says the window is unknown and which one stands. `Agent.setContextWindow`.
 - Tests: the three server styles and n_ctx_train ignored (openai-compat.test), a saved model learning and keeping its window (app.test). `bun run check` passes (286 tests).
+
+## feat/update-folder-structure: tests in src/testing/ — DONE (branch feat/update-folder-structure)
+- The 28 test files moved from next to the code to `src/testing/`, mirroring `src/` (`src/tui/app.ts` → `src/testing/tui/app.test.ts`), with `git mv` so each keeps its history. Their relative imports were rewritten by resolving each one from the old place and re-expressing it from the new one; nothing else in them depended on their location (the paths they use are data or `process.cwd()`-based).
+- `examples/ext/web.test.ts` stays next to its example: an example is copied to `~/.kinoko/ext/` on its own, and its test travels with it.
+- AGENTS.md: the test-location rule and the architecture map say so.
+- `bun run check` passes (286 tests, the same count as before the move).

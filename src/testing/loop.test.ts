@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
-import { Agent } from "./loop";
-import type { Message, StreamEvent, Provider as RealProvider } from "./types";
+import { Agent } from "../loop";
+import type { Message, StreamEvent, Provider as RealProvider } from "../types";
 
 describe("Agent loop with abort, steer and follow-up", () => {
   test("1. abort() while idle is a no-op; after abort agent is idle <100ms and reusable", async () => {

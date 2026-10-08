@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { openaiCompat } from "./openai-compat.ts";
-import { ThinkSplit } from "./think-split.ts";
-import type { OpenAiCompatOptions } from "./openai-compat.ts";
-import type { ProviderRequest, StreamEvent } from "../types.ts";
+import { openaiCompat } from "../../providers/openai-compat.ts";
+import { ThinkSplit } from "../../providers/think-split.ts";
+import type { OpenAiCompatOptions } from "../../providers/openai-compat.ts";
+import type { ProviderRequest, StreamEvent } from "../../types.ts";
 
 type Emit = (frame: string) => void;
 type Script = (emit: Emit, wait: (ms: number) => Promise<void>) => Promise<void>;
