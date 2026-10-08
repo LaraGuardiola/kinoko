@@ -91,8 +91,9 @@ Events: `session_start`, `context` (rewrite the messages before a request), `bef
 `tool_call` (mutate args, or block), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
 throws is logged and skipped; a blocked call returns its reason to the model instead of running.
 
-`examples/ext/` ships three: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
-`plan-mode.ts` (read-only) and `hello.ts`.
+`examples/ext/` ships four: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
+`plan-mode.ts` (read-only), `web.ts` (`web_search` and `web_fetch`: no API key, Brave, DuckDuckGo
+then Bing, pages turned into readable text) and `hello.ts`.
 
 ## Config layers
 

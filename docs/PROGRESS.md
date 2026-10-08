@@ -310,3 +310,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Status line: `RUNNING` without the inverse background.
 - Startup panel: `kinoko` in amanita red, the version in cream.
 - Tests: app.test (no echo before delivery, exactly one after; no inverse in the status), order.test updated to the new order. `bun run check` passes (239 tests).
+
+## examples/ext/web.ts: web search and fetch, no API key — DONE
+- Two read-only tools. `web_search(query, max?)` scrapes the HTML result pages of Brave Search, then DuckDuckGo, then Bing, and returns the first that answers with results: numbered title, real URL (DuckDuckGo's `uddg=` and Bing's `u=a1<base64url>` redirects decoded), snippet clipped to 300 chars. `web_fetch(url, offset?)` turns a page into readable text (`<main>`/`<article>` when present; scripts, styles, nav, header, footer dropped; headings `#`, list items `-`, entities decoded), JSON and text as-is, binaries refused, 12,000 chars per page with `continue with offset=`.
+- Probed live: DuckDuckGo's HTML page answers 202 (its bot check) after a few queries, and the lite page at once; Bing without cookies matches only the first word of the query (and localizes "bun" to blood urea nitrogen); Mojeek and Startpage refuse; Brave gave the most relevant results, so it goes first.
+- Every request honors the run's AbortSignal, plus a 20 s cap so a silent server cannot hold a run.
+- Tests (`examples/ext/web.test.ts`, no network): the three parsers on fixtures, entity decoding, HTML to text, `web_fetch` against a local `Bun.serve` (page, paging, JSON, binary, 404, non-http, abort), the engine fallback past a 202, and the tool registration. `bun run check` passes (250 tests).
+- Not installed for the user yet (it would change the kinoko vs pi comparison); `cp examples/ext/web.ts ~/.kinoko/ext/` switches it on.
