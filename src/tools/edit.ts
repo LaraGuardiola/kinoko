@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { tracker, checkRead, stateOf } from "./tracker";
+import { checkRead, remember } from "./tracker";
 import type { Tool, ToolContext } from "../types";
 
 interface Range {
@@ -67,56 +67,43 @@ function findAll(hay: string, needle: string): number[] {
   return out;
 }
 
-function lineStarts(text: string): number[] {
-  const starts: number[] = [0];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === "\n") starts.push(i + 1);
-  }
-  return starts;
+/** 1-based line of a char index. */
+function lineOf(text: string, idx: number): number {
+  let n = 1;
+  for (let i = text.indexOf("\n"); i !== -1 && i < idx; i = text.indexOf("\n", i + 1)) n++;
+  return n;
 }
 
-function lineAt(starts: number[], idx: number): number {
-  let lo = 0;
-  let hi = starts.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if ((starts[mid] ?? 0) <= idx) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo;
-}
-
-function lineText(text: string, starts: number[], n: number): string {
-  const from = starts[n] ?? text.length;
-  const hi = n + 1 < starts.length ? (starts[n + 1] ?? text.length) - 1 : text.length;
-  return text.slice(from, hi).trimEnd();
-}
-
-function bigrams(s: string): Set<string> {
-  const set = new Set<string>();
-  for (let i = 0; i + 1 < s.length; i++) set.add(s.slice(i, i + 2));
-  return set;
-}
-
-function overlapScore(needle: string, line: string): number {
-  const target = bigrams(needle);
+/** How many of `line`'s character pairs also appear in `target`. */
+function overlap(target: Set<string>, line: string): number {
   let count = 0;
-  for (const g of bigrams(line)) {
-    if (target.has(g)) count++;
-  }
+  for (let i = 0; i + 1 < line.length; i++) if (target.has(line.slice(i, i + 2))) count++;
   return count;
 }
 
-function hintLines(content: string, old: string, starts: number[]): string {
-  const nold = normalize(old).s;
-  const scored: { n: number; score: number }[] = [];
-  for (let i = 0; i < starts.length; i++) {
-    const score = overlapScore(nold, lineText(content, starts, i));
-    if (score > 0) scored.push({ n: i, score });
+/**
+ * The file text most like `old`, as a window of its size, so the model can copy the real lines
+ * instead of guessing again. Each line of `old` votes for where the window starts.
+ */
+function closest(content: string, old: string): string {
+  const lines = content.split("\n");
+  const want = old.split("\n").slice(0, 20);
+  let best = { score: 0, at: 0 };
+  for (const [i, w] of want.entries()) {
+    const t = w.trim();
+    const target = new Set<string>();
+    for (let k = 0; k + 1 < t.length; k++) target.add(t.slice(k, k + 2));
+    if (target.size < 3) continue; // "}" or a blank line anchors nothing
+    for (const [n, line] of lines.entries()) {
+      const score = overlap(target, line);
+      if (score > best.score) best = { score, at: n - i };
+    }
   }
-  scored.sort((a, b) => b.score - a.score);
-  const top = scored.slice(0, 3);
-  return top.map((s) => `${s.n + 1}: ${lineText(content, starts, s.n).slice(0, 120)}`).join("\n");
+  if (best.score === 0) return "Nothing similar in the file: read it again.";
+  const from = Math.max(0, best.at);
+  const to = Math.min(lines.length, from + want.length);
+  const rows = lines.slice(from, to).map((l, k) => `${from + k + 1}: ${l}`);
+  return `Closest text (lines ${from + 1}-${to}):\n${rows.join("\n")}`;
 }
 
 function fileIsBinary(text: string): boolean {
@@ -131,13 +118,12 @@ async function editRun(args: Record<string, unknown>, ctx: ToolContext): Promise
   if (!await file.exists()) return `ERROR: edit: file not found: ${path}`;
   const content = await file.text();
   if (fileIsBinary(content)) return `ERROR: edit refused: ${path} looks binary`;
-  const err = checkRead(abs);
+  const err = await checkRead(abs, content);
   if (err) return err;
 
   const rawEdits = args.edits;
   if (!Array.isArray(rawEdits)) return "ERROR: edit: edits must be an array of { old, new }";
-  const norm = normalize(content);
-  const starts = lineStarts(content);
+  let norm: Norm | undefined; // built only when an old string does not match byte for byte
   const ranges: Range[] = [];
   for (const raw of rawEdits) {
     if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return "ERROR: edit: each edit must be an object";
@@ -145,34 +131,27 @@ async function editRun(args: Record<string, unknown>, ctx: ToolContext): Promise
     const old = e.old;
     const repl = e.new;
     if (typeof old !== "string" || typeof repl !== "string") return "ERROR: edit: old and new must be strings";
-    const nold = normalize(old).s;
-    if (!nold) return "ERROR: edit: old must not be empty";
-    const hits = findAll(norm.s, nold);
+    if (!old) return "ERROR: edit: old must not be empty";
+    let hits = findAll(content, old);
+    let rangeAt = (h: number): Range => ({ start: h, end: h + old.length, repl });
     if (hits.length === 0) {
-      return `ERROR: edit: not found — "${old}" not found in ${path}. Closest lines:\n${hintLines(content, old, starts)}`;
+      // Fallback: forgive smart quotes, NFKC variants and trailing whitespace.
+      const n = (norm ??= normalize(content));
+      const nold = normalize(old).s;
+      hits = nold ? findAll(n.s, nold) : [];
+      rangeAt = (h) => ({ start: n.map[h] ?? 0, end: (n.map[h + nold.length - 1] ?? content.length) + 1, repl });
     }
+    if (hits.length === 0) return `ERROR: edit: old text not found in ${path}. ${closest(content, old)}`;
     if (hits.length > 1) {
-      const hints: string[] = [];
-      for (let k = 0; k < Math.min(3, hits.length); k++) {
-        const h = hits[k] ?? 0;
-        const orig = norm.map[h] ?? 0;
-        const line = lineAt(starts, orig);
-        hints.push(`${line + 1}: ${lineText(content, starts, line)}`);
-      }
-      return `ERROR: edit: ambiguous — old text matches ${hits.length} times in ${path}; add more context. Closest lines:\n${hints.join("\n")}`;
+      const at = hits.slice(0, 3).map((h) => lineOf(content, rangeAt(h).start));
+      return `ERROR: edit: ambiguous — old text matches ${hits.length} times in ${path} (lines ${at.join(", ")}…); add more context`;
     }
-    const hit = hits[0];
-    if (hit === undefined) continue;
-    const start = norm.map[hit] ?? 0;
-    const end = (norm.map[hit + nold.length - 1] ?? content.length) + 1;
-    ranges.push({ start, end, repl });
+    ranges.push(rangeAt(hits[0]!));
   }
 
   ranges.sort((a, b) => a.start - b.start);
-  let prev: Range | null = null;
-  for (const cur of ranges) {
-    if (prev !== null && prev.start < prev.end) return "ERROR: edit: edits overlap — merge them into one edit";
-    prev = cur;
+  for (let k = 1; k < ranges.length; k++) {
+    if (ranges[k]!.start < ranges[k - 1]!.end) return "ERROR: edit: edits overlap — merge them into one edit";
   }
 
   let out = content;
@@ -182,8 +161,7 @@ async function editRun(args: Record<string, unknown>, ctx: ToolContext): Promise
     out = out.slice(0, r.start) + r.repl + out.slice(r.end);
   }
   await Bun.write(abs, out);
-  const rec = stateOf(abs, out);
-  if (rec) tracker.record(abs, rec);
+  await remember(abs, out);
   return `edited ${path}: ${ranges.length} edit(s) applied`;
 }
 

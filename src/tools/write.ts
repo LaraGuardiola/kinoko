@@ -1,23 +1,21 @@
 import { resolve } from "node:path";
-import { tracker, checkRead, stateOf } from "./tracker";
+import { checkRead, remember } from "./tracker";
 import type { Tool, ToolContext } from "../types";
 
 async function writeRun(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
   const path = args.path;
   const content = args.content;
-  if (typeof path !== "string" || typeof content !== "string") {
-    return "ERROR: write: path and content must be strings";
-  }
+  if (typeof path !== "string") return "ERROR: write: missing path (string)";
+  if (typeof content !== "string") return "ERROR: write: missing content (string)";
   const abs = resolve(ctx.cwd, path);
-  const exists = await Bun.file(abs).exists();
-  if (exists) {
-    const err = checkRead(abs);
+  if (await Bun.file(abs).exists()) {
+    const err = await checkRead(abs);
     if (err) return err;
   }
   await Bun.write(abs, content);
-  const rec = stateOf(abs, content);
-  if (rec) tracker.record(abs, rec);
-  return `wrote ${content.length} chars to ${path}`;
+  await remember(abs, content);
+  const lines = content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
+  return `wrote ${lines} lines (${content.length} chars) to ${path}`;
 }
 
 export const writeTool: Tool = {

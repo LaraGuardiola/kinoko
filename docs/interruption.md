@@ -19,7 +19,7 @@ group), ripgrep, and compaction.
 6. ABORT and queues: on abort, queued messages are NOT run. Emit queue_change and return the dropped
    messages in the run_end event (field `dropped: string[]`) so the UI can put them back into the
    editor. Nothing the user typed is lost.
-7. Read-only tools of one batch run in parallel; non-readOnly tools run sequentially.
+7. Tools of one batch run one at a time, in the order the model called them (a read after a write sees the write).
 8. A thrown tool error becomes a tool message "ERROR: ...", never a crash.
 9. Aborting during compaction leaves the history unchanged (Phase 5).
 

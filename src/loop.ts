@@ -274,10 +274,9 @@ export class Agent {
         if (this.#malformedCount >= 3) return { reason: "error", detail: "unknown tool calls" };
       }
 
-      const ro = valid.filter((tc) => this.#tools.find((t) => t.name === tc.name)!.readOnly);
-      const rw = valid.filter((tc) => !this.#tools.find((t) => t.name === tc.name)!.readOnly);
+      // In the order the model wrote them: [write a, read a] must read the new a.
       let stuck = 0;
-      for (const tc of [...ro, ...rw]) {
+      for (const tc of valid) {
         // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
         const msg = await this.#runTool(tc);
         const repeats = this.#calls.record(tc, msg.content);

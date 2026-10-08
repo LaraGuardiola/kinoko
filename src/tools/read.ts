@@ -1,8 +1,10 @@
 import { resolve } from "node:path";
-import { tracker, stateOf } from "./tracker";
+import { remember } from "./tracker";
 import type { Tool, ToolContext } from "../types";
 
 const DEFAULT_LIMIT = 2000;
+/** ~10k tokens: a bigger read is cut at a line boundary, with the offset to continue from. */
+const MAX_CHARS = 40_000;
 
 function numberArg(raw: unknown, fallback: number): number {
   return typeof raw === "number" && Number.isFinite(raw) ? Math.max(1, Math.trunc(raw)) : fallback;
@@ -32,11 +34,17 @@ async function readRun(args: Record<string, unknown>, ctx: ToolContext): Promise
   const last = Math.min(lines.length, offset + limit - 1);
   const width = String(last).length;
   const out: string[] = [];
-  for (let n = offset; n <= last; n++) {
-    out.push(`${String(n).padStart(width)}: ${lines[n - 1]}`);
+  let chars = 0;
+  let n = offset;
+  for (; n <= last; n++) {
+    const row = `${String(n).padStart(width)}: ${lines[n - 1]}`;
+    if (chars + row.length > MAX_CHARS && n > offset) break;
+    out.push(row);
+    chars += row.length + 1;
   }
-  const rec = stateOf(abs, text);
-  if (rec) tracker.record(abs, rec);
+  await remember(abs, text);
+  // Say when the file goes on, so a partial read is never mistaken for the whole file.
+  if (n <= lines.length) out.push(`[lines ${offset}-${n - 1} of ${lines.length}; continue with offset=${n}]`);
   return out.join("\n");
 }
 

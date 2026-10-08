@@ -247,3 +247,14 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Docs: `docs/engines/strata.md` and `examples/config.strata.json` recommend `maxOutputTokens: 32768`.
 - Tests: `guard.test.ts`, `loop-guards.test.ts` (nudge, nudge cap, cut looping thinking, repeated call), two openai-compat cases. `bun run check` passes (229 tests). `session.test.ts` #5 flaked once more (known mtime flake), passed on rerun.
 - NOT done: the user's `~/.kinoko/config.json` still says `maxOutputTokens: 4096` (user file, not touched). `loop.ts` is now 422 lines (was 393, already over the guideline).
+
+## fix/llm-behaviour, round 2: tool review — DONE
+- Session check: the model's "the environment rewrites my files" was a hallucination; every write landed byte for byte and the edit error showed the real text. But the tools had real bugs feeding that distrust:
+- `edit`: the overlap check compared each range with itself, so EVERY call with 2+ edits failed with "edits overlap" (9 times in the voxel session; the model fell back to heredocs/base64 and blamed the write tool). Fixed; the test only covered a real overlap, now also two separate edits.
+- `edit`: exact `indexOf` first; the per-char NFKC normalization runs only when an old string does not match byte for byte. "not found" no longer echoes the whole `old`; it shows the file window most like it (each line of `old` votes for the start), ready to copy. "ambiguous" gives the line numbers.
+- Loop: tools ran read-only first, so `[write a, read a]` read the old `a`. They now run in the order called (they never ran in parallel anyway). `docs/interruption.md` item 7 updated.
+- `tracker`: no more synchronous whole-file reads (`readFileSync` blocked the event loop on every write/edit). Same mtime = unchanged; the hash is only checked when the mtime moved, using the text the caller already read.
+- `read`: output capped at ~40k chars (~10k tokens) at a line boundary, with `[lines a-b of N; continue with offset=…]` whenever the file goes on.
+- `bash`: stdin is closed (a command waiting for input used to hang forever), utf8 decoding per stream (multi-byte chars split across chunks were mangled), default timeout 300 s.
+- `write`: says which argument is missing; reports lines and chars.
+- `bun run check` passes (231 tests). src net −12 lines.
