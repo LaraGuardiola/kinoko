@@ -5,7 +5,16 @@ Strata exposes the same kind of API as llama.cpp, so Kinoko needs NO new provide
 
 ## Config (`~/.kinoko/config.json` or `./.kinoko/config.json`)
 { "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any", "model": "qwen3.8-flash-next-coder-iq1_m-120k",
-  "contextWindow": 122880, "reasoningEffort": "low", "maxOutputTokens": 8192 }
+  "contextWindow": 122880, "reasoningEffort": "low", "maxOutputTokens": 32768 }
+- `maxOutputTokens` counts thinking too. This model drafts whole files in its thinking, so 4096 or
+  8192 cuts most turns before the tool call (finish_reason "length"). 32768 leaves room; Strata itself
+  has no cap (`n_predict: -1`).
+- `reasoningEffort` reaches the chat template (`reasoning_effort`): no value means **xhigh**, `low`
+  only adds a "keep your thinking brief" hint the model may ignore, `medium` adds nothing, and `off`
+  is the only hard switch (no thinking at all).
+- The template preserves thinking (`preserve_thinking` defaults to true), so Kinoko sends each
+  assistant turn's thinking back as `reasoning_content`; without it every earlier turn renders an
+  empty `<think></think>`.
 - Strata accepts any API key and any model name. This machine runs it on port 8081 (see
   `examples/config.strata.json`).
 - `contextWindow` MUST match the context size chosen in Strata's setup (the installer asks for it).

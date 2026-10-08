@@ -56,7 +56,7 @@ export class App {
   #place = "";
 
   #running = false;
-  // The block being streamed (thinking or answer). Thinking is display-only, never sent back.
+  // The block being streamed (thinking or answer).
   #open: OpenBlock | undefined;
   #thinkingSeen = false; // this message already streamed its thinking
   #printedAny = false; // something is already in the scrollback: every later block gets a blank row above
@@ -288,7 +288,7 @@ export class App {
         this.#marker = "compacted: full prompt re-read expected";
         return;
       case "run_end":
-        this.#finishRun(e.reason, e.dropped);
+        this.#finishRun(e.reason, e.dropped, e.detail);
         return;
       default:
         return;
@@ -331,7 +331,7 @@ export class App {
       .catch(() => undefined);
   }
 
-  #finishRun(reason: RunResult["reason"], dropped: string[] | undefined): void {
+  #finishRun(reason: RunResult["reason"], dropped: string[] | undefined, detail?: string): void {
     this.#refreshPlace();
     this.#running = false;
     this.#queued = [];
@@ -345,6 +345,9 @@ export class App {
       this.#marker = "Interrupted — your queued messages are back in the editor";
     } else if (reason === "aborted") {
       this.#marker = "Interrupted";
+    } else if (reason === "limit" || reason === "error") {
+      // A run that stops on its own must say why, or it looks like the model gave up.
+      this.#marker = `Stopped — ${detail ?? reason}`;
     }
     this.render();
   }

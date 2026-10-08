@@ -158,6 +158,12 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
         await reader.cancel().catch(() => {});
       }
 
+      // Cut by the output limit: a call may still parse (some servers heal partial JSON) yet be
+      // truncated, and a truncated write must never run. The loop asks the model to continue.
+      if (finish === "length") {
+        yield { type: "done", stop: "length", usage };
+        return;
+      }
       // Only now, with the stream fully consumed, are the tool-call args complete.
       let broken = false;
       for (const key of [...pending.keys()].toSorted((a, b) => a - b)) {
@@ -211,7 +217,7 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
     stream: true,
     stream_options: { include_usage: true },
     messages,
-    ...(opts.reasoningEffort ? { reasoning_effort: opts.reasoningEffort } : {}),
+    ...((req.effort ?? opts.reasoningEffort) ? { reasoning_effort: req.effort ?? opts.reasoningEffort } : {}),
     ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
     tools: req.tools.length
       ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }))
@@ -221,10 +227,14 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
 
 function wire(m: Message): object {
   if (m.role === "tool") return { role: "tool", content: m.content, tool_call_id: m.toolCallId };
+  // Thinking goes back as the engine sent it: templates that preserve thinking (Qwen and others)
+  // render it into the prompt, and without it every earlier turn looks like it never thought.
+  const reasoning = m.role === "assistant" && m.thinking ? { reasoning_content: m.thinking } : {};
   if (m.toolCalls?.length) {
     return {
       role: m.role,
       content: m.content,
+      ...reasoning,
       tool_calls: m.toolCalls.map((c) => ({
         id: c.id,
         type: "function",
@@ -232,5 +242,5 @@ function wire(m: Message): object {
       })),
     };
   }
-  return { role: m.role, content: m.content };
+  return { role: m.role, content: m.content, ...reasoning };
 }

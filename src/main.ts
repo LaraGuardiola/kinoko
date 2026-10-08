@@ -116,7 +116,7 @@ function print(agent: Agent): void {
         process.stderr.write(`[compacted: ${e.keep} messages kept verbatim]\n`);
         break;
       case "run_end":
-        process.stderr.write(`[${e.reason}]\n`);
+        process.stderr.write(`[${e.reason}${e.detail ? `: ${e.detail}` : ""}]\n`);
         break;
       default:
         break;

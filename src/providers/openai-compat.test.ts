@@ -3,14 +3,15 @@ import { openaiCompat } from "./openai-compat.ts";
 import type { ProviderRequest, StreamEvent } from "../types.ts";
 
 let server: ReturnType<typeof Bun.serve>;
-let mode: "text" | "split-tool" | "hang" = "text";
+let mode: "text" | "split-tool" | "length-tool" | "hang" = "text";
+let lastBody: Record<string, unknown> = {};
 let baseUrl: string;
 
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
     async fetch(request) {
-      await request.text();
+      lastBody = JSON.parse(await request.text()) as Record<string, unknown>;
       const stream = new ReadableStream<Uint8Array>({
         async start(ctl) {
           const enc = (s: string): void => ctl.enqueue(new TextEncoder().encode(s));
@@ -26,6 +27,12 @@ beforeAll(() => {
             enc(chunk({ tool_calls: [{ index: 0, function: { arguments: 'th":"src/mai' } }] }));
             enc(chunk({ tool_calls: [{ index: 0, function: { arguments: 'n.ts"}' } }] }));
             enc(finishChunk());
+            enc("data: [DONE]\n\n");
+            ctl.close();
+          } else if (mode === "length-tool") {
+            // A server that heals partial JSON: the args parse, but the reply was cut by max_tokens.
+            enc(chunk({ tool_calls: [{ index: 0, id: "call_2", function: { name: "write", arguments: '{"path":"a.ts","content":"half"}' } }] }));
+            enc(`data: ${JSON.stringify({ choices: [{ delta: {}, index: 0, finish_reason: "length" }] })}\n\n`);
             enc("data: [DONE]\n\n");
             ctl.close();
           } else {
@@ -45,7 +52,7 @@ afterAll(() => {
   server?.stop(true);
 });
 
-function setMode(m: "text" | "split-tool" | "hang"): void {
+function setMode(m: "text" | "split-tool" | "length-tool" | "hang"): void {
   mode = m;
 }
 
@@ -115,5 +122,32 @@ describe("openai-compat", () => {
     ac.abort();
     const events = await collect(ac.signal);
     expect(events).toEqual([{ type: "done", stop: "aborted" }]);
+  });
+});
+describe("openai-compat: truncation, thinking and effort", () => {
+  test("a tool call cut by the output limit never runs, even when its JSON parses", async () => {
+    setMode("length-tool");
+    const events = await collect(new AbortController().signal);
+    expect(events.some((e) => e.type === "tool_call")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "done", stop: "length" });
+  });
+
+  test("assistant thinking goes back as reasoning_content; the request effort overrides the config", async () => {
+    setMode("text");
+    const provider = openaiCompat({ baseUrl, apiKey: "k", reasoningEffort: "low" });
+    const req: ProviderRequest = {
+      ...mkReq(new AbortController().signal),
+      messages: [
+        { id: "1", role: "user", content: "hi" },
+        { id: "2", role: "assistant", content: "ok", thinking: "let me see" },
+        { id: "3", role: "user", content: "go" },
+      ],
+      effort: "off",
+    };
+    for await (const _ of provider.stream(req)) void _;
+    const messages = lastBody.messages as Array<Record<string, unknown>>;
+    expect(messages[1]).toEqual({ role: "assistant", content: "ok", reasoning_content: "let me see" });
+    expect(messages[0]).toEqual({ role: "user", content: "hi" });
+    expect(lastBody.reasoning_effort).toBe("off");
   });
 });

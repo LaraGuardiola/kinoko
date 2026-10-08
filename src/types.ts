@@ -21,7 +21,9 @@ export interface Message {
   parentId?: string;
   role: Role;
   content: string;
-  thinking?: string; // display + session logs ONLY: never sent back to a provider
+  // Shown, logged, and sent back where the wire has a field for it (openai-compat `reasoning_content`:
+  // chat templates that preserve thinking render it into the prompt). Anthropic uses `replay` instead.
+  thinking?: string;
   toolCalls?: ToolCall[];
   toolCallId?: string; // toolCallId only on role "tool"
   stop?: StopReason;
@@ -51,6 +53,7 @@ export interface ProviderRequest {
   messages: Message[];
   tools: ToolSpec[];
   signal: AbortSignal;
+  effort?: "off" | "low" | "medium" | "high"; // overrides the provider's configured reasoning effort
 }
 
 export interface Provider {

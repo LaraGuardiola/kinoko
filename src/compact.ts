@@ -42,7 +42,8 @@ export function isSummary(m: Message): boolean {
 }
 
 export function messageTokens(m: Message): number {
-  return estimateTokens(`${m.role}\n${m.content}${m.toolCalls ? JSON.stringify(m.toolCalls) : ""}`);
+  // Thinking counts: providers send it back (reasoning_content, or Anthropic's replayed blocks).
+  return estimateTokens(`${m.role}\n${m.thinking ?? ""}${m.content}${m.toolCalls ? JSON.stringify(m.toolCalls) : ""}`);
 }
 
 export function historyTokens(messages: Message[]): number {
@@ -114,7 +115,9 @@ async function summarize(
   opts: CompactOptions,
 ): Promise<string | undefined> {
   const ask: Message = { id: "compact", role: "user", content: summarizePrompt(toSummarize, previous) };
-  const req = { model: opts.model, system: opts.system, messages: [ask], tools: [], signal: opts.signal };
+  // No thinking: a summary needs none, and a reasoning model could spend the whole output limit
+  // thinking and return no summary at all (then compaction silently never happens).
+  const req = { model: opts.model, system: opts.system, messages: [ask], tools: [], signal: opts.signal, effort: "off" as const };
   let out = "";
   for await (const ev of opts.provider.stream(req)) {
     if (opts.signal.aborted) return undefined;

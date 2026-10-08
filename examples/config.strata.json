@@ -4,5 +4,5 @@
   "model": "qwen3.8-flash-next-coder-iq1_m-120k",
   "contextWindow": 122880,
   "reasoningEffort": "low",
-  "maxOutputTokens": 8192
+  "maxOutputTokens": 32768
 }

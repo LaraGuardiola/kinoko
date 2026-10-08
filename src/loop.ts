@@ -2,6 +2,7 @@
    a time, tools and log appends in order. Parallelism here would be a bug, not a speed-up. */
 import { compactHistory, isContextOverflow, shouldCompact } from "./compact.ts";
 import type { Extensions } from "./ext.ts";
+import { CallGuard, MAX_NUDGES, NUDGE_LENGTH, NUDGE_REPEAT, RepeatGuard, STOP_CALLS, WARN_CALLS, repeatNote } from "./guard.ts";
 import type { Session } from "./session.ts";
 import type {
   Message,
@@ -27,9 +28,10 @@ export type AgentEvent =
   | { type: "tool_end"; call: ToolCall }
   | { type: "queue_change"; steer: string[]; followUp: string[] }
   | { type: "compacted"; keep: number } // head of the history replaced by a summary, tail kept
-  | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[] };
+  | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[]; detail?: string };
 
-export type RunResult = { reason: "done" | "aborted" | "error" | "limit"; dropped?: string[] };
+// `detail` says which limit or error stopped the run, for the UI.
+export type RunResult = { reason: "done" | "aborted" | "error" | "limit"; dropped?: string[]; detail?: string };
 
 export class Agent {
   #state: "idle" | "running" = "idle";
@@ -47,6 +49,8 @@ export class Agent {
   #steerQueue: string[] = [];
   #followUpQueue: string[] = [];
   #malformedCount = 0;
+  #nudges = 0; // cut-off or looping replies in a row, each answered with a nudge
+  #calls = new CallGuard();
   #session: Session | undefined;
   #contextWindow = 0;
   #ext: Extensions | undefined;
@@ -121,10 +125,12 @@ export class Agent {
     this.#turns = 0;
     this.#cost = 0;
     this.#malformedCount = 0;
+    this.#nudges = 0;
+    this.#calls = new CallGuard();
 
     try {
       const result = await this.#run(text);
-      this.#emit({ type: "run_end", reason: result.reason, dropped: result.dropped });
+      this.#emit({ type: "run_end", reason: result.reason, dropped: result.dropped, detail: result.detail });
       this.#ext?.emit("run_end", result);
       return result;
     } finally {
@@ -142,20 +148,22 @@ export class Agent {
       if (this.#abortController!.signal.aborted) {
         return this.#handleAbort();
       }
-      if (this.#turns >= this.#maxTurns) return { reason: "limit" };
-      if (this.#cost >= this.#maxCost) return { reason: "limit" };
+      if (this.#turns >= this.#maxTurns) return { reason: "limit", detail: `turn limit (${this.#maxTurns})` };
+      if (this.#cost >= this.#maxCost) return { reason: "limit", detail: `cost limit ($${this.#maxCost})` };
 
       this.#turns++;
       // Late trigger, before the request that would otherwise not fit.
       if (this.#contextWindow > 0 && shouldCompact(this.#messages, this.#contextWindow)) await this.#compact();
       if (this.#abortController!.signal.aborted) return this.#handleAbort();
 
+      // The turn's own signal lets a loop guard cut this one reply without aborting the run.
+      const turn = new AbortController();
       const req: ProviderRequest = {
         model: this.#model,
         system: this.#system,
         messages: this.#ext ? this.#ext.chain("context", this.#messages) : this.#messages,
         tools: this.#tools,
-        signal: this.#abortController!.signal,
+        signal: AbortSignal.any([this.#abortController!.signal, turn.signal]),
       };
       this.#ext?.emit("before_provider_request", req);
 
@@ -165,6 +173,8 @@ export class Agent {
       let stopReason: StopReason = "end";
       let usage: Usage | undefined;
       let overflow = false;
+      let looping = false;
+      const guards = { text: new RepeatGuard(), thinking: new RepeatGuard() };
 
       // oxlint-disable-next-line no-await-in-loop -- consume SSE frames sequentially to preserve message/tool-call ordering
       for await (const ev of this.#provider.stream(req)) {
@@ -178,10 +188,13 @@ export class Agent {
           firstToken = true;
           this.#emit({ type: "first_token", at: Date.now() });
         }
-        if (ev.type === "text") {
-          this.#emit({ type: "message_delta", delta: ev.delta });
-        } else if (ev.type === "thinking") {
-          this.#emit({ type: "thinking_delta", delta: ev.delta });
+        if (ev.type === "text" || ev.type === "thinking") {
+          this.#emit({ type: ev.type === "text" ? "message_delta" : "thinking_delta", delta: ev.delta });
+          if (guards[ev.type].push(ev.delta)) {
+            looping = true;
+            turn.abort();
+            break;
+          }
         } else if (ev.type === "error") {
           if (isContextOverflow(ev.message)) overflow = true;
           else streamEvents.push(ev);
@@ -201,17 +214,18 @@ export class Agent {
       if (overflow && (await this.#compact())) continue;
 
       const text = joinOf(streamEvents, "text");
-      const toolCalls = callsOf(streamEvents);
+      // A reply cut by a loop guard keeps neither its looping thinking nor its unfinished calls.
+      const toolCalls = looping ? [] : callsOf(streamEvents);
 
       const assistantMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: text,
-        stop: stopReason,
+        stop: looping ? "length" : stopReason,
         usage,
       };
       const thinking = joinOf(streamEvents, "thinking");
-      if (thinking) assistantMsg.thinking = thinking;
+      if (thinking && !looping) assistantMsg.thinking = thinking;
       if (toolCalls.length > 0) assistantMsg.toolCalls = toolCalls;
       const replay = streamEvents.findLast((e) => e.type === "replay");
       if (replay?.type === "replay") assistantMsg.replay = replay.data;
@@ -219,11 +233,21 @@ export class Agent {
       this.#ext?.emit("turn_end", assistantMsg);
       this.#emit({ type: "message_end", message: assistantMsg });
 
+      if (toolCalls.length > 0) this.#nudges = 0;
       if (toolCalls.length === 0) {
         const steer = this.#steerQueue.shift();
         if (steer !== undefined) {
           this.#notifyQueueChange();
           await this.#push({ id: crypto.randomUUID(), role: "user", content: steer });
+          continue;
+        }
+        // Cut off (output limit) or looping: the work is not done, so nudge instead of stopping.
+        if (looping || stopReason === "length") {
+          if (this.#nudges >= MAX_NUDGES) {
+            return { reason: "limit", detail: looping ? "the model keeps repeating itself" : "output token limit (maxOutputTokens)" };
+          }
+          this.#nudges++;
+          await this.#push({ id: crypto.randomUUID(), role: "user", content: looping ? NUDGE_REPEAT : NUDGE_LENGTH });
           continue;
         }
         const followUp = this.#followUpQueue.shift();
@@ -232,8 +256,8 @@ export class Agent {
           await this.#push({ id: crypto.randomUUID(), role: "user", content: followUp });
           continue;
         }
-        const finalReason = stopReason === "aborted" ? "aborted" : stopReason === "length" ? "limit" : stopReason === "error" ? "error" : "done";
-        return { reason: finalReason };
+        const finalReason = stopReason === "aborted" ? "aborted" : stopReason === "error" ? "error" : "done";
+        return finalReason === "error" ? { reason: "error", detail: errorOf(streamEvents) } : { reason: finalReason };
       }
 
       const valid = toolCalls.filter((tc) => this.#tools.some((t) => t.name === tc.name));
@@ -247,25 +271,25 @@ export class Agent {
           content: `ERROR: unknown tool ${tc.name}`,
           toolCallId: tc.id,
         });
-        if (this.#malformedCount >= 3) return { reason: "error" };
+        if (this.#malformedCount >= 3) return { reason: "error", detail: "unknown tool calls" };
       }
 
       const ro = valid.filter((tc) => this.#tools.find((t) => t.name === tc.name)!.readOnly);
       const rw = valid.filter((tc) => !this.#tools.find((t) => t.name === tc.name)!.readOnly);
-      for (const tc of ro) {
+      let stuck = 0;
+      for (const tc of [...ro, ...rw]) {
         // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
         const msg = await this.#runTool(tc);
-        await this.#push(msg);
-      }
-      for (const tc of rw) {
-        // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
-        const msg = await this.#runTool(tc);
+        const repeats = this.#calls.record(tc, msg.content);
+        if (repeats >= WARN_CALLS) msg.content += repeatNote(repeats);
+        stuck = Math.max(stuck, repeats);
         await this.#push(msg);
       }
 
       if (this.#abortController!.signal.aborted) {
         return this.#handleAbort();
       }
+      if (stuck >= STOP_CALLS) return { reason: "limit", detail: `stuck: the same call returned the same result ${stuck} times` };
 
       const steerAfter = this.#steerQueue.shift();
       if (steerAfter !== undefined) {
@@ -386,6 +410,11 @@ function joinOf(events: StreamEvent[], kind: "text" | "thinking"): string {
     if (e.type === kind) out += (e as { delta: string }).delta;
   }
   return out;
+}
+
+function errorOf(events: StreamEvent[]): string | undefined {
+  const err = events.findLast((e) => e.type === "error");
+  return err?.type === "error" ? err.message.slice(0, 200) : undefined;
 }
 
 function callsOf(events: StreamEvent[]): ToolCall[] {

@@ -19,7 +19,7 @@ export const DEFAULTS: Config = {
   baseUrl: "https://api.openai.com/v1",
   apiKey: process.env.KINOKO_API_KEY ?? "",
   model: "gpt-4o-mini",
-  maxTurns: 50,
+  maxTurns: 500, // a long coding task easily needs 100+ tool rounds; Esc is the real brake
   maxCost: 5,
   contextWindow: 128_000,
   maxOutputTokens: 8192,

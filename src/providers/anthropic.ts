@@ -211,7 +211,8 @@ function body(req: ProviderRequest, opts: AnthropicOptions): object {
   const info = modelInfo(req.model);
   const cache = info?.supportsCache !== false;
   const ephemeral = { type: "ephemeral" };
-  const effort = opts.reasoningEffort === "off" ? "low" : opts.reasoningEffort;
+  const wanted = req.effort ?? opts.reasoningEffort;
+  const effort = wanted === "off" ? "low" : wanted;
   const tools = req.tools.map((t, i) => ({
     name: t.name,
     description: t.description,
