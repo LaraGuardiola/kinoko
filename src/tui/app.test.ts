@@ -1,6 +1,9 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { rmSync } from "node:fs";
 import { App } from "./app.ts";
+import type { ModelsHost } from "./app.ts";
+import type { SavedModel } from "../config.ts";
+import type { Served } from "../providers/openai-compat.ts";
 import { Agent } from "../loop.ts";
 import { Session } from "../session.ts";
 import type { ProviderRequest, StreamEvent, Tool } from "../types.ts";
@@ -34,7 +37,10 @@ function scripted(turns: StreamEvent[][], pace = 1): { provider: ProviderLike; c
   };
 }
 
-type ProviderLike = { stream: (req: ProviderRequest) => AsyncIterable<StreamEvent> };
+type ProviderLike = {
+  stream: (req: ProviderRequest) => AsyncIterable<StreamEvent>;
+  models?: (signal: AbortSignal) => Promise<string[]>;
+};
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
 
@@ -48,6 +54,8 @@ interface Harness {
   app: App;
   agent: Agent;
   out: string[];
+  /** Every request the fake engine received, as sent. */
+  calls: () => ProviderRequest[];
   press: (chunk: string) => void;
   /** The text a user would see, with ANSI stripped. */
   screen: () => string;
@@ -63,10 +71,17 @@ async function harness(
     viewportRows?: number;
     viewportCols?: number;
     place?: () => Promise<string>;
+    /** What the fake engine answers to "which models do you serve". */
+    models?: string[];
+    budgets?: boolean;
+    thinkingProfile?: string;
+    modelsHost?: ModelsHost;
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
   const { provider, calls } = scripted(turns, opts.pace ?? 1);
+  const served = opts.models;
+  if (served) provider.models = async () => served;
   // home: ROOT keeps test sessions out of the real ~/.kinoko/sessions.
   const session = await Session.create({ cwd: ROOT, model: opts.model ?? "test-model", home: ROOT });
   const agent = new Agent({
@@ -86,14 +101,18 @@ async function harness(
     viewportRows: opts.viewportRows,
     viewportCols: opts.viewportCols,
     place: opts.place,
+    budgets: opts.budgets,
+    thinkingProfile: opts.thinkingProfile,
+    thinking: "LOW · 2048",
+    models: opts.modelsHost,
     session: session,
     rebuild: () => agent,
   });
-  void calls;
   return {
     app: app,
     agent: agent,
     out: out,
+    calls: calls,
     // `press` mirrors the real loop: keys go in, and a held-back Esc gets its frame.
     press: (chunk: string) => {
       app.feed(chunk);
@@ -499,11 +518,16 @@ describe("TUI app with the agent", () => {
 
   test("12. a slash command typed in the editor is never sent to the model", async () => {
     const h = await harness([[{ type: "text", delta: "hi" }, { type: "done", stop: "end" }]]);
-    h.press("/model\r");
+    h.press("/help\r"); // through the menu: its "help" item runs the command
     await new Promise((r) => setTimeout(r, 10));
-    expect(h.screen()).toContain("model: test-model");
+    expect(h.screen()).toContain("Ctrl-T"); // the keys table
     expect(h.agent.messages).toHaveLength(0); // no run was started
     expect(h.app.editorText).toBe("");
+
+    h.press("/model now\r"); // with an argument the menu is closed: the typed command runs
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.screen()).toContain("model: test-model");
+    expect(h.agent.messages).toHaveLength(0);
 
     h.press("/bogus\r");
     await new Promise((r) => setTimeout(r, 10));
@@ -545,4 +569,257 @@ describe("TUI app with the agent", () => {
     expect(h.app.editorText).toBe("second line draft");
     expect(h.agent.messages[0]?.content).toBe("question");
   });
+});
+
+/** The last full repaint of the live region, ANSI stripped, as rows. */
+function frame(h: Harness): string[] {
+  const paints = h.out.filter((chunk) => chunk.includes("tok"));
+  return (paints.at(-1) ?? "").replace(ANSI, "").split(/\r?\n/).map((row) => row.trim());
+}
+
+describe("slash menu", () => {
+  const UP = "\x1b[A";
+  const DOWN = "\x1b[B";
+  const ESC = "\x1b";
+  // A lone Esc waits one frame (it could start a sequence): `press` then polls it through.
+
+  test("/ opens it between the rule under the input and the place line; typing narrows it", async () => {
+    const h = await harness([], { place: async () => "~/p (main)", viewportRows: 30 });
+    await new Promise((r) => setTimeout(r, 5)); // the place line is read asynchronously
+    h.press("/");
+    await new Promise((r) => setTimeout(r, 40)); // past the paint throttle
+    h.app.render();
+    let rows = frame(h);
+    const rule = rows.lastIndexOf("─".repeat(78));
+    expect(rows[rule + 1]).toStartWith("→ thinking");
+    expect(rows.indexOf("~/p (main)")).toBeGreaterThan(rows.findIndex((r) => r.startsWith("quit")));
+    h.press("th");
+    await new Promise((r) => setTimeout(r, 40)); // past the paint throttle
+    h.app.render();
+    rows = frame(h);
+    expect(rows.some((r) => r.startsWith("→ thinking"))).toBe(true);
+    expect(rows.some((r) => r.startsWith("models"))).toBe(false);
+  });
+
+  test("thinking: pick a profile with the arrows; the next request carries its effort and budget", async () => {
+    const h = await harness([[{ type: "text", delta: "ok" }, { type: "done", stop: "end" }]], { budgets: true, thinkingProfile: "low" });
+    h.press("/thinking\r");
+    expect(h.app.menuPage).toBe("Thinking");
+    h.press(DOWN); // low (current) -> medium
+    h.press("\r");
+    expect(h.app.menuPage).toBeUndefined();
+    expect(h.app.editorText).toBe("");
+    expect(h.app.marker).toBe("thinking: MEDIUM · 4096 from the next request");
+    h.press("go\r");
+    await settle(h.agent);
+    expect(h.calls()[0]).toMatchObject({ effort: "medium", budget: 4096 });
+  });
+
+  test("models: the engine's list loads into the page; the pick is used from the next request", async () => {
+    const h = await harness([[{ type: "text", delta: "ok" }, { type: "done", stop: "end" }]], { models: ["alpha", "beta"] });
+    h.press("/models\r");
+    await new Promise((r) => setTimeout(r, 10));
+    h.press(DOWN);
+    h.press("\r");
+    expect(h.app.statusLine).toContain("beta");
+    h.press("go\r");
+    await settle(h.agent);
+    expect(h.calls()[0]?.model).toBe("beta");
+  });
+
+  test("Esc on a page goes back to the root; Esc on the root closes it and empties the input", async () => {
+    const h = await harness([]);
+    h.press("/session\r");
+    expect(h.app.menuPage).toBe("Session");
+    h.press(ESC);
+    expect(h.app.menuPage).toBeUndefined();
+    expect(h.app.editorText).toBe("/session"); // the root is back, as it was
+    h.press(UP);
+    h.press(ESC);
+    expect(h.app.editorText).toBe("");
+  });
+
+  test("the session page is a table with this session's file and id", async () => {
+    const h = await harness([]);
+    h.press("/session\r");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    const text = frame(h).join("\n");
+    expect(text).toContain("┌");
+    expect(text).toContain(h.session.meta.id);
+  });
+
+  test("Esc with the menu open closes the menu and does not abort the run", async () => {
+    const h = await harness([[{ type: "text", delta: "a" }, { type: "text", delta: "b" }, { type: "done", stop: "end" }]], { pace: 40 });
+    h.press("go\r");
+    await new Promise((r) => setTimeout(r, 10));
+    h.press("/");
+    h.press(ESC);
+    expect(h.agent.state).toBe("running");
+    expect(h.app.editorText).toBe("");
+    await settle(h.agent);
+    expect(h.agent.messages.at(-1)?.stop).toBe("end");
+  });
+});
+
+/** A models host whose other endpoint answers `served`, recording what is connected and saved. */
+function host(served: Served[]) {
+  const remote = scripted([[{ type: "text", delta: "from the remote" }, { type: "done", stop: "end" }]]);
+  const connected: SavedModel[] = [];
+  const saved: SavedModel[] = [];
+  const models: ModelsHost = {
+    endpoint: "http://local:8081/v1",
+    saved: [{ model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" }],
+    connect: (entry) => (connected.push(entry), remote.provider as never),
+    discover: async () => served,
+    save: async (entry) => (saved.push(entry), [entry]),
+    remove: async () => [],
+    fixed: () => false,
+  };
+  return { models, connected, saved, remote };
+}
+
+/** Opens /models and goes down to its last item, "+ add model". */
+async function toAdd(h: Harness): Promise<void> {
+  h.press("/models\r");
+  await new Promise((r) => setTimeout(r, 10));
+  h.press("\x1b[A"); // up from the first item wraps to the last
+  h.press("\r");
+}
+
+describe("adding a model", () => {
+  const ESC = "\x1b";
+
+  test("endpoint, key, then a model the endpoint serves: switched to, saved, used by the next request", async () => {
+    const remote = host([{ id: "remote-coder", contextWindow: 64_000 }]);
+    const h = await harness([], { models: [], modelsHost: remote.models });
+    await toAdd(h);
+    expect(h.app.menuPage).toBe("Add model · 1/3");
+    h.press("127.0.0.1:9999/v1\r");
+    expect(h.app.menuPage).toBe("Add model · 2/3");
+    h.press("sk-secret\r");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.app.menuPage).toBe("Add model · 3/3 · 127.0.0.1:9999");
+    h.press("\r");
+    await new Promise((r) => setTimeout(r, 10));
+    const entry = { model: "remote-coder", baseUrl: "http://127.0.0.1:9999/v1", apiKey: "sk-secret", contextWindow: 64_000 };
+    expect(remote.connected).toEqual([entry]);
+    expect(remote.saved).toEqual([entry]);
+    expect(h.app.statusLine).toContain("remote-coder");
+    expect(h.app.statusLine).toContain("/64,000 tok"); // its own context window
+    h.press("go\r");
+    await settle(h.agent);
+    expect(remote.remote.calls()[0]?.model).toBe("remote-coder");
+  });
+
+  test("an endpoint that cannot list its models asks for the id instead", async () => {
+    const remote = host([]);
+    const h = await harness([], { models: [], modelsHost: remote.models });
+    await toAdd(h);
+    h.press("box:8080\r");
+    h.press("\r"); // no key
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.app.menuPage).toBe("Add model · 3/3 · box:8080");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    expect(frame(h).join("\n")).toContain("did not list its models"); // it answered, with nothing
+    h.press("my-model\r");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(remote.saved).toEqual([{ model: "my-model", baseUrl: "http://box:8080", apiKey: "", contextWindow: undefined }]);
+  });
+
+  test("the key is shown as dots; Esc at any step goes back to the root", async () => {
+    const h = await harness([], { models: [], modelsHost: host([]).models });
+    await toAdd(h);
+    h.press("x\r");
+    h.press("abc");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    expect(frame(h).some((row) => row.includes("API key  •••"))).toBe(true);
+    h.press(ESC);
+    expect(h.app.menuPage).toBeUndefined();
+    expect(h.app.editorText).toBe("/models"); // back on the root, as it was
+  });
+});
+
+describe("removing a saved model", () => {
+  test("Del arms it (shown in red), Del again removes it; the page stays, redrawn; arrows disarm", async () => {
+    const configured: SavedModel = { model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" };
+    const typo: SavedModel = { model: "coder", baseUrl: "http://127.0.0.1:8081/v1", apiKey: "" };
+    const removed: SavedModel[] = [];
+    const models: ModelsHost = {
+      endpoint: configured.baseUrl,
+      saved: [configured, typo],
+      connect: () => scripted([]).provider as never,
+      discover: async () => [],
+      save: async () => [configured],
+      remove: async (entry) => (removed.push(entry), [configured]),
+      fixed: (entry) => entry === configured,
+    };
+    const h = await harness([], { models: [], modelsHost: models });
+    h.press("/models\r");
+    await new Promise((r) => setTimeout(r, 10));
+    // Items: test-model (configured, fixed), coder (removable), + add model.
+    h.press("\x1b[3~"); // Del on the configured one: nothing
+    h.press("\x1b[B"); // down to "coder"
+    h.press("\x1b[3~");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    expect(frame(h).some((row) => row.includes("coder") && row.includes("Del again to remove"))).toBe(true);
+    h.press("\x1b[A"); // moving away disarms...
+    h.press("\x1b[B");
+    h.press("\x1b[3~"); // ...so this Del only arms again
+    expect(removed).toEqual([]);
+    h.press("\x7f"); // Backspace counts as Del too: the second press removes
+    await new Promise((r) => setTimeout(r, 10));
+    expect(removed).toEqual([typo]);
+    expect(h.app.menuPage).toStartWith("Models"); // still on the page, redrawn
+    expect(h.app.marker).toBe("removed coder at 127.0.0.1:8081");
+  });
+});
+
+test("adding a model at an endpoint where nothing answers says so before asking for an id", async () => {
+  const models: ModelsHost = {
+    endpoint: "http://local:8081/v1",
+    saved: [],
+    connect: () => scripted([]).provider as never,
+    discover: async () => {
+      throw new Error("ECONNREFUSED");
+    },
+    save: async (entry) => [entry],
+    remove: async () => [],
+    fixed: () => false,
+  };
+  const h = await harness([], { models: [], modelsHost: models });
+  h.press("/models\r");
+  await new Promise((r) => setTimeout(r, 10));
+  h.press("\x1b[A\r"); // "+ add model"
+  h.press("127.0.0.1:8080/v1\r");
+  h.press("\r");
+  await new Promise((r) => setTimeout(r, 50));
+  h.app.render();
+  expect(frame(h).join("\n")).toContain("Nothing answered at 127.0.0.1:8080: is its server running?");
+});
+
+test("a saved model picked without a known window learns it from its endpoint, and keeps it", async () => {
+  const configured: SavedModel = { model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" };
+  const typed: SavedModel = { model: "small", baseUrl: "http://router:8086/v1", apiKey: "" };
+  const saved: SavedModel[] = [];
+  const models: ModelsHost = {
+    endpoint: configured.baseUrl,
+    saved: [configured, typed],
+    connect: () => scripted([]).provider as never,
+    discover: async () => [{ id: "small", contextWindow: 65_536 }],
+    save: async (entry) => (saved.push(entry), [configured, entry]),
+    remove: async () => [],
+    fixed: (entry) => entry === configured,
+  };
+  const h = await harness([], { models: [], modelsHost: models });
+  expect(h.app.statusLine).toContain("/1,000 tok");
+  h.press("/models\r");
+  await new Promise((r) => setTimeout(r, 10));
+  h.press("\x1b[B\r"); // "small"
+  await new Promise((r) => setTimeout(r, 10));
+  expect(h.app.statusLine).toContain("/65,536 tok");
+  expect(saved).toEqual([{ ...typed, contextWindow: 65_536 }]); // the next pick knows it at once
 });

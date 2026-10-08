@@ -1,12 +1,15 @@
-import { DEFAULTS, loadConfig, thinkingLabel } from "./config.ts";
-import { openaiCompat } from "./providers/openai-compat.ts";
+import { DEFAULTS, loadConfig, loadSavedModels, removeModel, saveModel, thinkingLabel } from "./config.ts";
+import type { SavedModel } from "./config.ts";
+import { listModels, openaiCompat } from "./providers/openai-compat.ts";
 import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
 import { Session, findSession, latestSession } from "./session.ts";
-import { rmSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import { Extensions, loadExtensions } from "./ext.ts";
 import { App } from "./tui/app.ts";
+import { THINKING } from "./tui/menu-pages.ts";
 import { Term } from "./tui/term.ts";
 import { placeLine } from "./tui/place.ts";
 import { ansi } from "./tui/render.ts";
@@ -211,14 +214,23 @@ const system = buildSystemPrompt({
 
 ext.emit("session_start", { cwd: cwd, model: config.model });
 
+const providerOptions = {
+  baseUrl: config.baseUrl,
+  apiKey: config.apiKey,
+  reasoningEffort: config.reasoningEffort,
+  maxOutputTokens: config.maxOutputTokens,
+  thinkingBudget: config.thinkingBudget,
+};
+// The model in the config, as the models menu offers it next to the ones added from the TUI.
+const configured: SavedModel = {
+  model: config.model,
+  baseUrl: config.baseUrl,
+  apiKey: config.apiKey,
+  provider: config.provider,
+  contextWindow: config.contextWindow,
+};
 const agent = new Agent({
-  provider: (config.provider === "anthropic" ? anthropic : openaiCompat)({
-    baseUrl: config.baseUrl,
-    apiKey: config.apiKey,
-    reasoningEffort: config.reasoningEffort,
-    maxOutputTokens: config.maxOutputTokens,
-    thinkingBudget: config.thinkingBudget,
-  }),
+  provider: (config.provider === "anthropic" ? anthropic : openaiCompat)(providerOptions),
   model: config.model,
   system,
   tools: [...defaultTools(), ...ext.tools()],
@@ -245,6 +257,19 @@ if (tui) {
     model: config.model,
     contextWindow: config.contextWindow,
     thinking: thinkingLabel(config.reasoningEffort, config.thinkingBudget),
+    thinkingProfile: THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name,
+    // A configured budget says the engine takes one: then the menu's profiles send theirs.
+    budgets: config.thinkingBudget !== undefined,
+    models: {
+      endpoint: config.baseUrl,
+      saved: [configured, ...(await loadSavedModels())],
+      connect: (entry) => (entry.provider === "anthropic" ? anthropic : openaiCompat)({ ...providerOptions, baseUrl: entry.baseUrl, apiKey: entry.apiKey }),
+      discover: listModels,
+      // The configured model stays first: it is always there to go back to, and cannot be removed.
+      save: async (entry) => [configured, ...(await saveModel(entry))],
+      remove: async (entry) => [configured, ...(await removeModel(entry))],
+      fixed: (entry) => entry.baseUrl === configured.baseUrl && entry.model === configured.model,
+    },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
@@ -313,6 +338,9 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
 function farewell(ended: Session): string {
   if (ended.empty) {
     rmSync(ended.path, { force: true });
+    // And this directory's folder, when that session was all it held.
+    const folder = dirname(ended.path);
+    if (readdirSync(folder).length === 0) rmSync(folder, { recursive: true, force: true });
     return "";
   }
   return `\n${ANSI.dim}resume this session with${ANSI.reset}  ${ANSI.cream}kinoko --session ${ended.meta.id}${ANSI.reset}\n`;

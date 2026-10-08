@@ -57,10 +57,13 @@ export interface ProviderRequest {
   tools: ToolSpec[];
   signal: AbortSignal;
   effort?: "off" | "low" | "medium" | "high"; // overrides the provider's configured reasoning effort
+  budget?: number; // overrides the configured thinking budget (tokens; 0 = no cap)
 }
 
 export interface Provider {
   stream(req: ProviderRequest): AsyncIterable<StreamEvent>;
+  /** The models this endpoint serves, for a picker. Optional: not every engine can say. */
+  models?(signal: AbortSignal): Promise<string[]>;
 }
 
 export interface ToolContext {

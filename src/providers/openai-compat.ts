@@ -95,6 +95,10 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
   const { baseUrl, apiKey } = opts;
 
   return {
+    async models(signal: AbortSignal): Promise<string[]> {
+      return (await listModels(baseUrl, apiKey, signal)).map((m) => m.id);
+    },
+
     async *stream(req: ProviderRequest): AsyncIterable<StreamEvent> {
       if (req.signal.aborted) {
         yield { type: "done", stop: "aborted" };
@@ -203,6 +207,55 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
   };
 }
 
+export interface Served {
+  id: string;
+  /** The context window the server runs it with, when it says. */
+  contextWindow?: number;
+}
+
+interface ListedModel {
+  id?: unknown;
+  meta?: { n_ctx?: unknown };
+  status?: { args?: unknown };
+}
+
+const positive = (n: unknown): number | undefined => (typeof n === "number" && n > 0 ? n : undefined);
+
+/**
+ * The window a model runs with, wherever its server puts it: Strata in `meta.n_ctx`; llama.cpp's
+ * router in the launch args (`--ctx-size N` / `-c N`). Never `n_ctx_train`: that is what the model
+ * was trained on, not what the server allocated, and trusting it would let the prompt overflow.
+ */
+function windowOf(m: ListedModel): number | undefined {
+  const args = Array.isArray(m.status?.args) ? (m.status.args as unknown[]) : [];
+  const at = args.findIndex((a) => a === "--ctx-size" || a === "-c");
+  return positive(m.meta?.n_ctx) ?? (at >= 0 ? positive(Number(args[at + 1])) : undefined);
+}
+
+/** What an OpenAI-compatible endpoint serves (`GET /models`); empty when it will not say. */
+export async function listModels(baseUrl: string, apiKey: string, signal: AbortSignal): Promise<Served[]> {
+  const root = baseUrl.replace(/\/+$/, "");
+  const headers: Record<string, string> = apiKey ? { authorization: `Bearer ${apiKey}` } : {};
+  const res = await fetch(`${root}/models`, { headers, signal });
+  if (!res.ok) return [];
+  const list = (await res.json()) as { data?: ListedModel[] };
+  const served: Served[] = [];
+  for (const m of list.data ?? []) {
+    if (typeof m.id !== "string") continue;
+    const window = windowOf(m);
+    served.push(window ? { id: m.id, contextWindow: window } : { id: m.id });
+  }
+  // A single-model llama.cpp server says its window only in /props (next to /v1, not under it).
+  const only = served.length === 1 ? served[0] : undefined;
+  if (only && only.contextWindow === undefined) {
+    const props = await fetch(`${root.replace(/\/v1$/, "")}/props`, { headers, signal }).catch(() => undefined);
+    const info = props?.ok ? ((await props.json().catch(() => ({}))) as { default_generation_settings?: { n_ctx?: unknown } }) : {};
+    const window = positive(info.default_generation_settings?.n_ctx);
+    if (window) only.contextWindow = window;
+  }
+  return served;
+}
+
 function parseChunk(payload: string): Chunk | undefined {
   try {
     return JSON.parse(payload) as Chunk;
@@ -236,7 +289,12 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
     messages,
     ...((req.effort ?? opts.reasoningEffort) ? { reasoning_effort: req.effort ?? opts.reasoningEffort } : {}),
     ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
-    ...(opts.thinkingBudget ? { reasoning_budget_tokens: opts.thinkingBudget } : {}),
+    // A request's budget wins (0 is "no cap" there, so it is sent); otherwise the configured one.
+    ...(req.budget !== undefined
+      ? { reasoning_budget_tokens: req.budget }
+      : opts.thinkingBudget
+        ? { reasoning_budget_tokens: opts.thinkingBudget }
+        : {}),
     tools: req.tools.length
       ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }))
       : undefined,

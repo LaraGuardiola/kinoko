@@ -68,6 +68,8 @@ export interface RegionInput {
   place?: string;
   /** The thinking level ("LOW · 2048"), set into the right end of the rule above the editor. */
   thinking?: string;
+  /** The slash menu's rows, between the rule under the editor and the place line. */
+  menu?: string[];
   viewportRows?: number;
   viewportCols?: number;
 }
@@ -191,7 +193,7 @@ export function liveRegion(input: RegionInput): Region {
   const rule = `${ANSI.amanita}${"─".repeat(ruleWidth)}${ANSI.reset}`;
   // A blank row keeps the transcript off the input.
   let head = ["", labelledRule(ruleWidth, input.thinking)];
-  let foot = [rule, ...(input.place ? [placeRow(input.place)] : []), input.status];
+  let foot = [rule, ...(input.menu ?? []), ...(input.place ? [placeRow(input.place)] : []), input.status];
 
   const viewport = input.viewportRows;
   const width = input.viewportCols === undefined ? undefined : Math.max(1, input.viewportCols - 2);
@@ -281,20 +283,3 @@ export function statusLine(parts: {
 export function wrapTo(width: number): (line: string) => string[] {
   return (line: string) => (line.length <= width ? [line] : (line.match(new RegExp(`.{1,${width}}`, "g")) ?? [line]));
 }
-
-
-export const HELP = [
-  "kinoko keys",
-  "",
-  "  Enter          send as prompt (idle) / steer (running)",
-  "  Alt+Enter      follow-up (running) / send as prompt (idle), kitty-protocol terminals",
-  "  Esc            abort the run (nothing when idle)",
-  "  Ctrl-C         abort / clear the editor / quit on a second press",
-  "  Ctrl-D         quit when the editor is empty",
-  "  Ctrl-T         expand or collapse tool output",
-  "  Alt+Up         pull the last queued message back into the editor",
-  "  Ctrl-P / N     previous / next history entry",
-  "  Shift+Enter    newline inside the editor (also Ctrl-J, Ctrl-O)",
-  "",
-  "  /help  /model  /compact  /fork  /quit",
-].join("\n");

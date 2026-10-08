@@ -56,6 +56,9 @@ export class Agent {
   #session: Session | undefined;
   #contextWindow = 0;
   #ext: Extensions | undefined;
+  // Set at runtime (the TUI's thinking menu); undefined keeps the provider's configured value.
+  #effort: ProviderRequest["effort"];
+  #budget: number | undefined;
 
   constructor(opts: {
     provider: Provider;
@@ -86,6 +89,37 @@ export class Agent {
 
   get messages(): Message[] {
     return [...this.#messages];
+  }
+
+  get model(): string {
+    return this.#model;
+  }
+
+  /** The next request uses `model` (a run in progress keeps going with it from its next request). */
+  setModel(model: string): void {
+    this.#model = model;
+  }
+
+  /** The context window of the model in use (compaction triggers against it). */
+  setContextWindow(contextWindow: number): void {
+    this.#contextWindow = contextWindow;
+  }
+
+  /** Another endpoint from the next request on (a model added from the TUI); its window too. */
+  setProvider(provider: Provider, contextWindow?: number): void {
+    this.#provider = provider;
+    if (contextWindow !== undefined) this.#contextWindow = contextWindow;
+  }
+
+  /** Thinking for the next requests: effort and a token budget (0 = no cap, undefined = configured). */
+  setThinking(effort: ProviderRequest["effort"], budget: number | undefined): void {
+    this.#effort = effort;
+    this.#budget = budget;
+  }
+
+  /** What the provider can serve, when it can say: an empty list otherwise. */
+  async models(signal: AbortSignal): Promise<string[]> {
+    return (await this.#provider.models?.(signal)) ?? [];
   }
 
   on(listener: (e: AgentEvent) => void): () => void {
@@ -166,6 +200,8 @@ export class Agent {
         messages: this.#ext ? this.#ext.chain("context", this.#messages) : this.#messages,
         tools: this.#tools,
         signal: AbortSignal.any([this.#abortController!.signal, turn.signal]),
+        effort: this.#effort,
+        budget: this.#budget,
       };
       this.#ext?.emit("before_provider_request", req);
 
