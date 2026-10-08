@@ -1,75 +1,181 @@
-// Just enough markdown for a terminal: fenced code blocks, bold and inline code.
-// Callers hand it whole lines (finished blocks, or the live tail of a stream cut at a line boundary).
+// Markdown for a terminal: headings, lists, task lists, quotes, rules, tables, fenced code (as an
+// editor pane, see code.ts) and nested inline styles. Rows come out already wrapped by word to
+// `width`, lists and quotes with a hanging indent.
+//
+// Callers hand it whole lines. A stream is never cut inside a fence or a table (splitStable), so
+// every block here is seen whole or, while it is still streaming, from its start.
+
+import { codeBlock } from "./code.ts";
+import { isTableStart, renderTable } from "./table.ts";
+import { visibleLength, wrapWords } from "./style.ts";
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const BOLD = `${ESC}1m`;
+const ITALIC = `${ESC}3m`;
+const UNDERLINE = `${ESC}4m`;
+const STRIKE = `${ESC}9m`;
 const DIM = `${ESC}2m`;
-const CYAN = `${ESC}36m`;
+const CODE = `${ESC}38;2;137;220;235m`;
+const RED = `${ESC}38;2;232;36;36m`;
+const CREAM = `${ESC}38;2;238;222;186m`;
+const QUOTE = `${ESC}38;2;150;156;182m`;
+const LINK_URL = `${ESC}38;2;120;126;154m`;
 
 export interface MarkdownOptions {
   /** ANSI colour off for plain logs and tests. */
   color?: boolean;
-  /** The text starts inside a ``` fence (the head of that code block was already printed). */
-  inFence?: boolean;
+  /** Columns available; rows are wrapped to it. */
+  width?: number;
 }
 
-/** Renders markdown to ANSI. Fenced blocks are dimmed and keep their text verbatim. */
+/** A fence opener: ``` or ~~~ (three or more), optionally followed by a language. */
+const FENCE = /^\s*(`{3,}|~{3,})\s*([\w+#.-]*)/;
+
 export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string {
   const color = opts.color ?? true;
-  const paint = (code: string, body: string): string => (color ? `${code}${body}${RESET}` : body);
+  const width = Math.max(10, opts.width ?? 80);
+  const style = (code: string, body: string): string => (color ? `${code}${body}${RESET}` : body);
+  const fmt = (line: string, outer = ""): string => (color ? inline(line, outer) : plainInline(line));
   const lines = text.split("\n");
   const out: string[] = [];
 
-  let inFence = opts.inFence ?? false;
-  for (const line of lines) {
-    if (line.trimStart().startsWith("```")) {
-      inFence = !inFence;
-      out.push(paint(DIM, line));
+  for (let i = 0; i < lines.length; ) {
+    const line = lines[i] ?? "";
+
+    const fence = FENCE.exec(line);
+    if (fence) {
+      const marker = fence[1] ?? "```";
+      let end = i + 1;
+      while (end < lines.length && !isClosing(lines[end] ?? "", marker)) end++;
+      out.push(...codeBlock(lines.slice(i + 1, end), { lang: fence[2] ?? "", width, color }));
+      i = end + 1;
       continue;
     }
-    // Inside a fence nothing is inline-formatted: code must stay code.
-    out.push(inFence ? paint(DIM, line) : inline(line, paint));
+
+    if (isTableStart(lines, i)) {
+      let end = i + 2;
+      while (end < lines.length && (lines[end] ?? "").includes("|") && (lines[end] ?? "").trim() !== "") end++;
+      out.push(...renderTable(lines.slice(i, end), width, (cell) => fmt(cell), color));
+      i = end;
+      continue;
+    }
+    i++;
+
+    const heading = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+    if (heading) {
+      const level = heading[1]?.length ?? 1;
+      const look = level === 1 ? `${BOLD}${RED}` : level === 2 ? `${BOLD}${CREAM}` : BOLD;
+      const rows = wrapWords(fmt(heading[2] ?? "", look), width);
+      out.push(...rows.map((row) => style(look, row)));
+      continue;
+    }
+
+    if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      out.push(style(DIM, "─".repeat(width)));
+      continue;
+    }
+
+    const quote = /^\s*>\s?(.*)$/.exec(line);
+    if (quote) {
+      const bar = style(QUOTE, "│ ");
+      const rows = wrapWords(`${bar}${fmt(quote[1] ?? "", `${ITALIC}${QUOTE}`)}`, width, bar);
+      out.push(...rows.map((row) => (color ? `${row.replace(bar, `${bar}${ITALIC}${QUOTE}`)}${RESET}` : row)));
+      continue;
+    }
+
+    const item = /^(\s*)([-*+]|\d{1,9}[.)])\s+(\[[ xX]\]\s+)?(.*)$/.exec(line);
+    if (item) {
+      const indent = " ".repeat(Math.min(12, (item[1] ?? "").length));
+      const marker = item[2] ?? "-";
+      const ordered = /\d/.test(marker);
+      let bullet = ordered ? style(CREAM, marker) : style(RED, "•");
+      const task = item[3]?.trim();
+      if (task !== undefined) bullet = task === "[ ]" ? style(DIM, "☐") : style(RED, "☑");
+      const prefix = `${indent}${bullet} `;
+      const hang = " ".repeat(visibleLength(prefix));
+      out.push(...wrapWords(`${prefix}${fmt(item[4] ?? "")}`, width, hang));
+      continue;
+    }
+
+    out.push(...wrapWords(fmt(line), width));
   }
   return out.join("\n");
 }
 
-/** Bold `**x**` and inline `code`, on one line. */
-function inline(line: string, paint: (code: string, body: string) => string): string {
+/** The marker (``` or ~~~...) when `line` opens a fence. */
+export function fenceOpener(line: string): string | undefined {
+  return FENCE.exec(line)?.[1];
+}
+
+export function isClosing(line: string, marker: string): boolean {
+  const trimmed = line.trim();
+  return trimmed.startsWith(marker) && /^[`~]+$/.test(trimmed) && trimmed[0] === marker[0];
+}
+
+/**
+ * Inline spans, nested: `code`, **bold**, *italic*, _italic_, ~~strike~~, [text](url) and
+ * backslash escapes. `outer` is the style the caller's row is in: every span re-opens it after its
+ * reset, so a span inside a heading keeps the heading's colour.
+ */
+export function inline(text: string, outer = ""): string {
   let out = "";
   let i = 0;
-  while (i < line.length) {
-    const tick = line.indexOf("`", i);
-    const star = line.indexOf("**", i);
-    const next = first(tick, star);
-    if (next < 0) {
-      out += line.slice(i);
-      break;
-    }
-    out += line.slice(i, next);
-    if (next === tick) {
-      const close = line.indexOf("`", next + 1);
-      if (close < 0) {
-        out += line.slice(next);
-        break;
-      }
-      out += paint(CYAN, line.slice(next + 1, close));
-      i = close + 1;
+  const span = (style: string, inner: string): string => `${style}${inline(inner, `${outer}${style}`)}${RESET}${outer}`;
+  while (i < text.length) {
+    const rest = text.slice(i);
+    const ch = text[i] ?? "";
+    if (ch === "\\" && /^\\[\\`*_~[\]()#|>-]/.test(rest)) {
+      out += text[i + 1] ?? "";
+      i += 2;
       continue;
     }
-    const close = line.indexOf("**", next + 2);
-    if (close < 0) {
-      out += line.slice(next);
-      break;
+    if (ch === "`") {
+      const ticks = /^`+/.exec(rest)?.[0] ?? "`";
+      const close = text.indexOf(ticks, i + ticks.length);
+      if (close > 0) {
+        out += `${CODE}${text.slice(i + ticks.length, close).trim()}${RESET}${outer}`;
+        i = close + ticks.length;
+        continue;
+      }
     }
-    out += paint(BOLD, line.slice(next + 2, close));
-    i = close + 2;
+    const link = /^\[([^\]]+)\]\(([^)\s]+)\)/.exec(rest);
+    if (link) {
+      out += `${span(UNDERLINE, link[1] ?? "")}${link[1] === link[2] ? "" : ` ${LINK_URL}(${link[2]})${RESET}${outer}`}`;
+      i += link[0].length;
+      continue;
+    }
+    const strong = /^(\*\*|__)(?=\S)([\s\S]*?\S)\1/.exec(rest);
+    if (strong && (strong[1] === "**" || boundary(text, i, strong[0].length))) {
+      out += span(BOLD, strong[2] ?? "");
+      i += strong[0].length;
+      continue;
+    }
+    const strike = /^~~(?=\S)([\s\S]*?\S)~~/.exec(rest);
+    if (strike) {
+      out += span(STRIKE, strike[1] ?? "");
+      i += strike[0].length;
+      continue;
+    }
+    const em = /^([*_])(?=[^\s*_])([\s\S]*?[^\s\\])\1(?!\1)/.exec(rest);
+    if (em && (em[1] === "*" || boundary(text, i, em[0].length))) {
+      out += span(ITALIC, em[2] ?? "");
+      i += em[0].length;
+      continue;
+    }
+    out += ch;
+    i++;
   }
   return out;
 }
 
-function first(a: number, b: number): number {
-  if (a < 0) return b;
-  if (b < 0) return a;
-  return Math.min(a, b);
+/** `_x_` only counts at word boundaries, so snake_case_names stay as they are. */
+function boundary(text: string, start: number, length: number): boolean {
+  return !/\w/.test(text[start - 1] ?? "") && !/\w/.test(text[start + length] ?? "");
+}
+
+/** The same markup with the markers dropped, for colourless output. */
+function plainInline(text: string): string {
+  const ESCAPE = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
+  return inline(text).replace(ESCAPE, "");
 }

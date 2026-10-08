@@ -227,3 +227,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Status line starts level with the rows above (`IDLE` / inverse `RUNNING`, no leading space).
 - Checked the fixed prompt cost: system prompt ~990 tokens + tool schemas ~630 (chars/4). Note: `read` is the only tool without an output budget (up to 2000 lines per call).
 - Tests: tool-round context test, intro spacing, status margin. `bun run check` passes (201 tests). Rebuilt and installed `~/.local/bin/kinoko`.
+
+## feat/parser: markdown + code panes — DONE (branch feat/parser)
+- `markdown.ts` rewritten: headings (h1 amanita red, h2 cream, rest bold), bullets (red •), numbers, task boxes (☐/☑), nesting, block quotes (│ bar, italic), horizontal rules, tables, fenced code, and nested inline spans (`code`, **bold**, *italic*/_italic_ at word boundaries, ~~strike~~, [links](url), escapes). A span re-opens its parent's style after its reset (bold around `code` stays bold). Rows are wrapped by word (`style.ts` `wrapWords`) with hanging indents for lists/quotes.
+- `table.ts`: box-drawn grid, bold cream header, `:---:` alignment; shrinks the widest columns and word-wraps cells to fit the terminal.
+- `code.ts` + `highlight.ts`: fenced code as an editor pane — own background, language label, line-number gutter, soft-wrapped long lines with empty gutter; data-driven tokenizer (C-like/TS/JS/JSON/Go/Rust…, Python, shell, SQL, YAML/TOML, diff) for keywords, strings, numbers, comments (block comments carry across lines), calls, types, JSON keys, shell variables. Foreground-only escapes, so the pane background never breaks.
+- Streaming: `splitStable` never cuts inside a fence or between table rows, so those render whole (widths, numbering, highlighting); while streaming the region shows their tail, and on close the whole block goes to the scrollback. Removed the now-dead `inFence` plumbing. `formatBlock` keeps a one-entry cache (the region asked for the same block every frame; a 500-line pane costs ~9 ms).
+- Tests: new `markdown.test.ts` (inline, blocks, tables, panes, highlighting) and splitStable cases. `bun run check` passes (216 tests). Rebuilt and installed `~/.local/bin/kinoko`.
+- Note: `app.ts` (484) and `term.ts` (326) were already over the ~300-line guideline before this branch.

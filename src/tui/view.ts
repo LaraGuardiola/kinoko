@@ -6,7 +6,7 @@
 // holds what is still moving: the one block being streamed, the running tool, queued messages,
 // the editor and the status line.
 
-import { renderMarkdown } from "./markdown.ts";
+import { fenceOpener, isClosing, renderMarkdown } from "./markdown.ts";
 import { ANSI, clipAnsi, wrapAnsi } from "./style.ts";
 import { toolHead } from "./tools.ts";
 
@@ -44,8 +44,6 @@ export interface OpenBlock {
   text: string;
   /** A blank row goes before it (it follows another block). */
   gap: boolean;
-  /** The text starts inside a ``` fence (a code block that was cut while streaming). */
-  inFence: boolean;
 }
 
 export interface RegionInput {
@@ -74,10 +72,19 @@ export interface Region {
 }
 
 /** A finished block as terminal rows. Used both for scrollback and for the open block. */
-export function formatBlock(kind: BlockKind, text: string, inFence = false): string {
+export function formatBlock(kind: BlockKind, text: string, width?: number): string {
+  // The region asks for the open block on every frame; markdown with code panes is not free, so
+  // the last answer is kept while the text has not changed.
+  const key = `${kind}\u0000${width ?? ""}\u0000${text}`;
+  if (key !== lastFormat.key) lastFormat = { key, value: formatUncached(kind, text, width) };
+  return lastFormat.value;
+}
+
+let lastFormat = { key: "", value: "" };
+
+function formatUncached(kind: BlockKind, text: string, width?: number): string {
   // A tab advances to a tab stop the width math cannot see: spaces keep the rows honest.
-  const trimmed = inFence ? text.replace(/\n+$/, "") : text.replace(/^\n+|\n+$/g, "");
-  const body = trimmed.replace(/\t/g, "    ");
+  const body = text.replace(/^\n+|\n+$/g, "").replace(/\t/g, "    ");
   if (body === "") return "";
   switch (kind) {
     case "user":
@@ -88,7 +95,7 @@ export function formatBlock(kind: BlockKind, text: string, inFence = false): str
     case "thinking":
       return thinkingBlock(body);
     case "assistant":
-      return renderMarkdown(body, { inFence: inFence });
+      return renderMarkdown(body, { width: width });
     default:
       return body;
   }
@@ -96,45 +103,43 @@ export function formatBlock(kind: BlockKind, text: string, inFence = false): str
 
 /**
  * Streaming text that has grown past STREAM_ROWS: splits it into a part that is stable (moves to
- * the scrollback, once, in order) and the rest (stays live). Cuts at the last paragraph boundary
- * outside a code fence; a paragraph or code block taller than the region is cut by line, and
- * `restInFence` tells the renderer the rest continues inside a fence.
- * Returns undefined while everything still fits.
+ * the scrollback, once, in order) and the rest (stays live). Cuts at the last paragraph boundary;
+ * a paragraph taller than the region is cut by line. Never inside a code fence or a table: those
+ * stay live until they end, so they are always rendered whole (column widths, line numbers,
+ * highlighting). Returns undefined while everything still fits or there is no safe cut.
  */
 export function splitStable(
   text: string,
   cols: number | undefined,
-  startsInFence = false,
   limit = STREAM_ROWS,
-): { commit: string; rest: string; gap: boolean; restInFence: boolean } | undefined {
+): { commit: string; rest: string; gap: boolean } | undefined {
   const width = Math.max(1, (cols ?? 80) - 2);
   const lines = text.split("\n");
   const rowsOf = (line: string): number => Math.max(1, Math.ceil(line.length / width));
   const total = lines.reduce((sum, line) => sum + rowsOf(line), 0);
   if (total <= limit || lines.length < 2) return undefined;
 
-  // inFenceAt[i]: are we inside a ``` fence just before line i?
-  const inFenceAt: boolean[] = [];
-  let fence = startsInFence;
+  // inFence[i]: line i is inside a fence (its body or its closing line).
+  const inFence: boolean[] = [];
+  let marker: string | undefined;
   for (const line of lines) {
-    inFenceAt.push(fence);
-    if (line.trimStart().startsWith("```")) fence = !fence;
+    inFence.push(marker !== undefined);
+    if (marker !== undefined) {
+      if (isClosing(line, marker)) marker = undefined;
+    } else marker = fenceOpener(line);
   }
+  // Two neighbouring rows with pipes are (or are becoming) one table.
+  const cutOk = (cut: number): boolean => !inFence[cut] && !((lines[cut - 1] ?? "").includes("|") && (lines[cut] ?? "").includes("|"));
   const restRows = (from: number): number => lines.slice(from).reduce((sum, line) => sum + rowsOf(line), 0);
 
   // Preferred: everything before the paragraph that is being written now.
   for (let cut = lines.length - 1; cut >= 1; cut--) {
-    if (lines[cut - 1]?.trim() !== "" || inFenceAt[cut]) continue;
+    if (lines[cut - 1]?.trim() !== "" || !cutOk(cut)) continue;
     if (restRows(cut) > limit) break; // the live paragraph alone is too tall: cut by line instead
-    return {
-      commit: lines.slice(0, cut).join("\n").replace(/\n+$/, ""),
-      rest: lines.slice(cut).join("\n"),
-      gap: true,
-      restInFence: false,
-    };
+    return { commit: lines.slice(0, cut).join("\n").replace(/\n+$/, ""), rest: lines.slice(cut).join("\n"), gap: true };
   }
 
-  // Fallback: keep roughly half the region as the live tail.
+  // Fallback: keep roughly half the region as the live tail, moved up past any open block.
   const keep = Math.ceil(limit / 2);
   let cut = lines.length - 1;
   let rows = rowsOf(lines[cut] ?? "");
@@ -142,12 +147,11 @@ export function splitStable(
     cut--;
     rows += rowsOf(lines[cut] ?? "");
   }
-  return {
-    commit: lines.slice(0, cut).join("\n"),
-    rest: lines.slice(cut).join("\n"),
-    gap: false,
-    restInFence: inFenceAt[cut] === true,
-  };
+  while (cut >= 1 && !cutOk(cut)) cut--;
+  if (cut < 1) return undefined;
+  const paragraph = lines[cut - 1]?.trim() === "";
+  const commit = lines.slice(0, cut).join("\n");
+  return { commit: paragraph ? commit.replace(/\n+$/, "") : commit, rest: lines.slice(cut).join("\n"), gap: paragraph };
 }
 
 /** The live region: the open block, the running tool, marker, queued messages, editor, status. */
@@ -155,7 +159,7 @@ export function liveRegion(input: RegionInput): Region {
   let tail: string[] = [];
   const open = input.open;
   if (open !== undefined) {
-    const text = formatBlock(open.kind, open.text, open.inFence);
+    const text = formatBlock(open.kind, open.text, input.viewportCols === undefined ? undefined : input.viewportCols - 2);
     if (text !== "") {
       if (open.gap) tail.push("");
       tail.push(...text.split("\n"));
