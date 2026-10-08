@@ -7,3 +7,6 @@ kinoko-out/
 .probe-*/
 
 pid.txt
+
+# dependencies (bun install restores them)
+node_modules/
