@@ -191,8 +191,12 @@ describe("TUI app with the agent", () => {
     h.press("actually use rg\r"); // steer while the tool runs
     expect(h.app.queued.map((q) => q.kind)).toEqual(["steer"]);
     expect(h.app.queued[0]?.text).toBe("actually use rg");
+    // Only the [steer] line shows it for now: the blue user echo waits until it reaches the model.
+    const echo = "\x1b[38;5;159mactually use rg";
+    expect(h.out.join("")).not.toContain(echo);
 
     await settle(h.agent);
+    expect(h.out.join("").split(echo)).toHaveLength(2); // echoed exactly once, on delivery
     const users = h.agent.messages.filter((m) => m.role === "user").map((m) => m.content);
     expect(users).toEqual(["do the thing", "actually use rg"]);
     // The steer landed after the tool result, not before it.
@@ -297,6 +301,7 @@ describe("TUI app with the agent", () => {
     expect(line).toContain("40 generated");
     expect(line).toContain("cache 25%");
     expect(line.startsWith("IDLE")).toBe(true); // level with the rows above, no extra margin
+    expect(line).not.toContain("\x1b[7m"); // no inverse background on the state
     expect(h.screen()).toContain("IDLE");
   });
 

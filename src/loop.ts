@@ -27,6 +27,7 @@ export type AgentEvent =
   | { type: "tool_output"; call: ToolCall; output: string }
   | { type: "tool_end"; call: ToolCall }
   | { type: "queue_change"; steer: string[]; followUp: string[] }
+  | { type: "delivered"; text: string } // a queued steer/follow-up just reached the model
   | { type: "compacted"; keep: number } // head of the history replaced by a summary, tail kept
   | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[]; detail?: string };
 
@@ -237,8 +238,7 @@ export class Agent {
       if (toolCalls.length === 0) {
         const steer = this.#steerQueue.shift();
         if (steer !== undefined) {
-          this.#notifyQueueChange();
-          await this.#push({ id: crypto.randomUUID(), role: "user", content: steer });
+          await this.#deliver(steer);
           continue;
         }
         // Cut off (output limit), looping, or empty (nothing said, nothing called): the work is not
@@ -257,8 +257,7 @@ export class Agent {
         }
         const followUp = this.#followUpQueue.shift();
         if (followUp !== undefined) {
-          this.#notifyQueueChange();
-          await this.#push({ id: crypto.randomUUID(), role: "user", content: followUp });
+          await this.#deliver(followUp);
           continue;
         }
         const finalReason = stopReason === "aborted" ? "aborted" : stopReason === "error" ? "error" : "done";
@@ -299,11 +298,17 @@ export class Agent {
 
       const steerAfter = this.#steerQueue.shift();
       if (steerAfter !== undefined) {
-        this.#notifyQueueChange();
-        await this.#push({ id: crypto.randomUUID(), role: "user", content: steerAfter });
+        await this.#deliver(steerAfter);
         continue;
       }
     }
+  }
+
+  /** A queued message leaves the queue and becomes the next user message, in that order. */
+  async #deliver(text: string): Promise<void> {
+    this.#notifyQueueChange();
+    await this.#push({ id: crypto.randomUUID(), role: "user", content: text });
+    this.#emit({ type: "delivered", text: text });
   }
 
   /** Appends to the in-memory history and, when a session is open, to the append-only log. */

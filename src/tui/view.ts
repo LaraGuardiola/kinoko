@@ -264,7 +264,7 @@ export function statusLine(parts: {
   const cache = parts.tokens.input > 0 ? Math.round((parts.tokens.cacheRead / parts.tokens.input) * 100) : 0;
   const full = parts.contextWindow > 0 ? ` ${Math.round((used / parts.contextWindow) * 100)}%` : "";
   return [
-    parts.running ? `${ANSI.inverse}RUNNING${ANSI.reset}` : "IDLE",
+    parts.running ? "RUNNING" : "IDLE",
     parts.model,
     `${used.toLocaleString("en-US")}/${parts.contextWindow.toLocaleString("en-US")} tok${full}`,
     `${parts.tokens.output.toLocaleString("en-US")} generated`,

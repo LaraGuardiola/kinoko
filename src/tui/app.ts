@@ -203,8 +203,8 @@ export class App {
     this.#editor.clear();
     this.#marker = "";
     if (this.#agent.state === "running") {
-      // Already running: this is a steer. queue_change updates the queued area.
-      this.#echoUser(text);
+      // Already running: this is a steer. It shows in the queued area until it reaches the model
+      // ("delivered"), and only then joins the transcript.
       this.#agent.steer(text);
       this.render();
       return;
@@ -223,7 +223,6 @@ export class App {
     this.#running = true;
     this.#marker = "";
     if (this.#agent.state === "running") {
-      this.#echoUser(text);
       this.#agent.followUp(text);
       this.render();
       return;
@@ -287,6 +286,9 @@ export class App {
         return;
       case "queue_change":
         this.#syncQueued(e.steer, e.followUp);
+        return;
+      case "delivered":
+        this.#echoUser(e.text);
         return;
       case "compacted":
         this.#marker = "compacted: full prompt re-read expected";

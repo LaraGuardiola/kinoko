@@ -304,3 +304,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## Repeat note for writes — DONE
 - Live session `33effaae`: the model wrote byte-identical content to `spawning.ts` four times (#122-#128) while its plan said "fix the bugs". The call guard fired at the third, but its note ("got this exact result every time") read to the model as "the write tool keeps returning the same content". For a tool that changes files (not `readOnly`) the note now says the arguments were byte-identical, the file already holds exactly that content, and fixing it needs different arguments. Read-only tools keep the old note.
 - `bun run check` passes (239 tests).
+
+## TUI: steer echo on delivery, plain run state, two-tone name — DONE
+- A steer (Enter while running) or follow-up (Alt+Enter) no longer prints its blue user line when typed: it shows only in the queued area (`[steer]` / `[follow-up]`) until the loop hands it to the model. New AgentEvent `delivered` (loop `#deliver`: leave the queue, append the user message, emit), and the App echoes it then, so it lands where the model actually read it.
+- Status line: `RUNNING` without the inverse background.
+- Startup panel: `kinoko` letter by letter in amanita red and cream.
+- Tests: app.test (no echo before delivery, exactly one after; no inverse in the status), order.test updated to the new order. `bun run check` passes (239 tests).

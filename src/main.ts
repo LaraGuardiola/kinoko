@@ -9,6 +9,7 @@ import { App } from "./tui/app.ts";
 import { Term } from "./tui/term.ts";
 import { placeLine } from "./tui/place.ts";
 import { ansi } from "./tui/render.ts";
+import { ANSI } from "./tui/style.ts";
 import { discoverContext, discoverSkills } from "./context.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { defaultTools } from "./tools/registry.ts";
@@ -271,7 +272,7 @@ if (tui) {
 
 function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string }): string {
   return [
-    `kinoko v${parts.version}`,
+    `${mushroom("kinoko")} v${parts.version}`,
     "",
     "\x1b[38;5;214m[Capabilities]\x1b[0m",
     `  Context: ${names(parts.context.map((file) => file.path.split("/").at(-1) ?? file.path), "none")}`,
@@ -280,6 +281,11 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
     "",
     "Kinoko can inspect and change this project. Ask it to work on a coding task.",
   ].join("\n");
+}
+
+/** The name in the amanita's colours: red and cream, letter by letter. */
+function mushroom(word: string): string {
+  return [...word].map((c, i) => `${i % 2 === 0 ? ANSI.amanita : ANSI.cream}${c}`).join("") + ANSI.reset;
 }
 
 function names(items: string[], empty: string): string {

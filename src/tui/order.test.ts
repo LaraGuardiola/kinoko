@@ -132,7 +132,7 @@ describe("blocks come out in the order they happened", () => {
     inOrder(text, ["PARA-0 ", "PARA-5 ", "PARA-11 ", "const v0 = **0**;", "const v24 = **24**;", "THE-END"]);
   });
 
-  test("a steer typed mid-stream lands between what was already streamed and what comes next", async () => {
+  test("a steer typed mid-stream joins the transcript when it reaches the model, not when typed", async () => {
     const vt = new VT(14, 60);
     let release: () => void = noop;
     const gate = new Promise<void>((r) => { release = r; });
@@ -141,6 +141,8 @@ describe("blocks come out in the order they happened", () => {
       await gate;
       emit({ type: "message_delta", delta: "AFTER-STEER" });
       emit({ type: "message_end", message: {} });
+      // The loop hands the steer to the model once the streaming message has ended.
+      emit({ type: "delivered", text: "use rg instead" });
     });
     (agent as unknown as { steer: (t: string) => void }).steer = () => undefined;
     const app = new App({ agent: agent as never, write: (t) => vt.write(t), model: "m", contextWindow: 1000, viewportRows: 13, viewportCols: 60 });
@@ -150,6 +152,6 @@ describe("blocks come out in the order they happened", () => {
     release();
     await new Promise((r) => setTimeout(r, 20));
     app.render();
-    inOrder(vt.all().join("\n"), ["go", "BEFORE-STEER", "use rg instead", "AFTER-STEER"]);
+    inOrder(vt.all().join("\n"), ["go", "BEFORE-STEER", "AFTER-STEER", "use rg instead"]);
   });
 });
