@@ -286,7 +286,7 @@ export class Agent {
         const msg = await this.#runTool(tc);
         const repeats = this.#calls.record(tc, msg.content);
         const failures = this.#calls.failures(tc, msg.content);
-        if (repeats >= WARN_CALLS) msg.content += repeatNote(repeats);
+        if (repeats >= WARN_CALLS) msg.content += repeatNote(repeats, !this.#tools.find((t) => t.name === tc.name)?.readOnly);
         else if (failures >= WARN_CALLS) msg.content += sameErrorNote(failures);
         stuck = Math.max(stuck, repeats);
         await this.#push(msg);

@@ -300,3 +300,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - The rule above the editor carries the thinking level near its right end, bold cream: `──────── LOW · 2048 ──` (`thinkingLabel` in config.ts: effort uppercased, `DEFAULT` when unset, `OFF`, plus the budget when one is set). A plain rule when the terminal is too narrow for it.
 - Tests: status percent and generated total (app.test), labelled rule (view.test), `thinkingLabel` (new config.test). `bun run check` passes (238 tests).
 - Next (asked for later): changing the level from the TUI.
+
+## Repeat note for writes — DONE
+- Live session `33effaae`: the model wrote byte-identical content to `spawning.ts` four times (#122-#128) while its plan said "fix the bugs". The call guard fired at the third, but its note ("got this exact result every time") read to the model as "the write tool keeps returning the same content". For a tool that changes files (not `readOnly`) the note now says the arguments were byte-identical, the file already holds exactly that content, and fixing it needs different arguments. Read-only tools keep the old note.
+- `bun run check` passes (239 tests).

@@ -92,7 +92,14 @@ export function sameErrorNote(count: number): string {
 }
 
 /** The note appended to a tool result that has come back unchanged `count` times. */
-export function repeatNote(count: number): string {
+export function repeatNote(count: number, changesFiles: boolean): string {
+  // For a write/edit "the same result" reads as "the tool echoes my content back": say what it means.
+  if (changesFiles) {
+    return (
+      `\n\n[kinoko] You sent this exact call ${count} times, with byte-identical arguments. Its effect is ` +
+      "already in place: the file holds exactly this content. If it still has bugs, the arguments must change."
+    );
+  }
   return (
     `\n\n[kinoko] You have made this exact call ${count} times and got this exact result every time. ` +
     "Repeating it will not change anything: try a different approach."

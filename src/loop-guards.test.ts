@@ -63,6 +63,19 @@ describe("loop guards", () => {
     expect(agent.messages.at(-1)!.content).toBe("done");
   });
 
+  test("a write repeated with identical content is told its effect is already in place", async () => {
+    const tool = { name: "write", description: "", schema: {}, run: async () => "wrote 3 lines (40 chars) to a.ts" };
+    const call: StreamEvent[] = [
+      { type: "tool_call", call: { id: "w", name: "write", args: { path: "a.ts", content: "same" } } },
+      { type: "done", stop: "tool_use" },
+    ];
+    const agent = agentWith(scripted([call, call, call, answer]), [tool]);
+    await agent.prompt("fix it");
+    const third = agent.messages.filter((m) => m.role === "tool")[WARN_CALLS - 1]!.content;
+    expect(third).toContain("the file holds exactly this content");
+    expect(third).not.toContain("got this exact result");
+  });
+
   test("the same call with the same result is flagged, then stops the run", async () => {
     const tool = { name: "check", description: "", schema: {}, readOnly: true, run: async () => "1 error" };
     const call: StreamEvent[] = [
