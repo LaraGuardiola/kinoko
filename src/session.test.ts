@@ -1,6 +1,6 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, readFileSync } from "node:fs";
-import { Session, latestSession, sessionDir } from "./session.ts";
+import { Session, findSession, latestSession, sessionDir } from "./session.ts";
 import { openaiCompat } from "./providers/openai-compat.ts";
 import { Agent } from "./loop.ts";
 import type { Message, ProviderRequest, StreamEvent, Usage } from "./types.ts";
@@ -194,5 +194,29 @@ describe("session log", () => {
     expect(summary.content).toStartWith("<compacted_summary>");
     const lines = readFileSync(session.path, "utf8").trim().split("\n");
     expect(JSON.parse(lines.at(-1)!).type).toBe("compaction");
+  });
+
+  test("7. --session finds an id, or a prefix only one session has, in this directory only", async () => {
+    const cwd = `${HOME}/resume-here`;
+    const a = await Session.create({ cwd, model: "m", home: HOME });
+    const b = await Session.create({ cwd, model: "m", home: HOME });
+    expect(findSession(cwd, a.meta.id, HOME)).toBe(a.path);
+    expect(findSession(cwd, ` ${b.meta.id}.jsonl `, HOME)).toBe(b.path); // pasted with its extension
+    // A prefix works when it is unique; the empty prefix matches both, so it finds nothing.
+    let unique = 1;
+    while (a.meta.id.slice(0, unique) === b.meta.id.slice(0, unique)) unique++;
+    expect(findSession(cwd, a.meta.id.slice(0, unique), HOME)).toBe(a.path);
+    expect(findSession(cwd, "", HOME)).toBeUndefined();
+    // Sessions are kept per directory: the same id from elsewhere is not found.
+    expect(findSession(`${HOME}/somewhere-else`, a.meta.id, HOME)).toBeUndefined();
+    expect(findSession(cwd, "no-such-session", HOME)).toBeUndefined();
+  });
+
+  test("8. a session is empty until something is said in it", async () => {
+    const session = await Session.create({ cwd: `${HOME}/empty`, model: "m", home: HOME });
+    expect(session.empty).toBe(true);
+    await session.append({ id: "u", role: "user", content: "hi" });
+    expect(session.empty).toBe(false);
+    expect((await Session.load(session.path)).empty).toBe(false);
   });
 });

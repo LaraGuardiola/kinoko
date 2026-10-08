@@ -60,7 +60,10 @@ engine can do.
 ## Sessions, context and compaction
 
 Every message is appended to `~/.kinoko/sessions/<project-hash>/<id>.jsonl` as it is finalized,
-including aborted ones, so `--continue` picks up exactly where you left off.
+including aborted ones. Sessions are kept per directory. When the TUI closes it prints
+`kinoko --session <id>`: run that in the same directory to pick up where you left off (a unique
+prefix of the id works too); the conversation is printed again and the model sees all of it.
+`--continue` takes the directory's newest session. A session nothing was said in is not kept.
 
 Local engines reuse the prompt prefix between requests, and a change near the start costs a full
 re-read (about a minute per 30k tokens). So history is append-only and byte-stable: the system

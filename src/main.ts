@@ -3,7 +3,8 @@ import { openaiCompat } from "./providers/openai-compat.ts";
 import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
-import { Session, latestSession } from "./session.ts";
+import { Session, findSession, latestSession } from "./session.ts";
+import { rmSync } from "node:fs";
 import { Extensions, loadExtensions } from "./ext.ts";
 import { App } from "./tui/app.ts";
 import { Term } from "./tui/term.ts";
@@ -44,12 +45,14 @@ function parseArgs(argv: string[]): {
   prompt?: string;
   flags: Record<string, string>;
   resume: boolean;
+  session?: string;
   mode: "tui" | "print" | "rpc";
   explicitMode: boolean;
 } {
   const flags: Record<string, string> = {};
   let prompt: string | undefined;
   let resume = false;
+  let session: string | undefined;
   // Bare `kinoko` means the interactive mode; `-p` and `--mode` are how you ask for the others.
   let mode: "tui" | "print" | "rpc" = "tui";
   let explicitMode = false;
@@ -82,6 +85,11 @@ function parseArgs(argv: string[]): {
         resume = true;
         continue;
       }
+      if (key === "session") {
+        session = argv[i + 1];
+        i++;
+        continue;
+      }
       const mapped = FLAGS[key];
       if (!mapped) continue;
       const next = argv[i + 1];
@@ -93,7 +101,7 @@ function parseArgs(argv: string[]): {
       prompt = arg;
     }
   }
-  return { prompt, flags, resume, mode, explicitMode };
+  return { prompt, flags, resume, session, mode, explicitMode };
 }
 
 /** Text to stdout, everything else (thinking, tool activity, timing) to stderr. */
@@ -127,7 +135,7 @@ function print(agent: Agent): void {
   });
 }
 
-const { prompt, flags, resume, mode: askedMode, explicitMode } = parseArgs(process.argv.slice(2));
+const { prompt, flags, resume, session: sessionId, mode: askedMode, explicitMode } = parseArgs(process.argv.slice(2));
 // No prompt and no explicit mode: the interactive one, if there is a terminal to draw on.
 const mode = explicitMode || prompt !== undefined ? askedMode : process.stdin.isTTY ? "tui" : "print";
 const tui = mode === "tui";
@@ -189,9 +197,15 @@ const system = buildSystemPrompt({
   skills,
 });
 
-const previous = resume && mode === "print" ? latestSession(cwd) : undefined;
+// Sessions are kept per directory: `--session <id>` (or a unique prefix) is looked up in this
+// directory's sessions only, `--continue` takes its newest one.
+const previous = sessionId !== undefined ? findSession(cwd, sessionId) : resume ? latestSession(cwd) : undefined;
+if (sessionId !== undefined && previous === undefined) {
+  process.stderr.write(`no session "${sessionId}" in ${cwd}: sessions are kept per directory, run kinoko where you started it\n`);
+  process.exit(1);
+}
 const session = previous ? await Session.load(previous) : await Session.create({ cwd, model: config.model });
-if (previous) process.stderr.write(`[resumed ${session.meta.id}]\n`);
+if (previous && !tui) process.stderr.write(`[resumed ${session.meta.id}]\n`);
 ext.emit("session_start", { cwd: cwd, model: config.model });
 
 const agent = new Agent({
@@ -231,6 +245,7 @@ if (tui) {
     session: session,
     onQuit: () => {
       term.stop();
+      process.stdout.write(farewell(session));
       process.exit(0);
     },
   });
@@ -242,6 +257,7 @@ if (tui) {
   term.start();
   term.write(`${ansi.clearScreen}${ansi.hide}\n`);
   app.intro(startup);
+  if (previous) app.replay(agent.messages, `resumed session ${session.meta.id}`);
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
   clearInterval(loop);
@@ -281,6 +297,18 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
     "",
     "Kinoko can inspect and change this project. Ask it to work on a coding task.",
   ].join("\n");
+}
+
+/**
+ * What is left on screen when the TUI closes: the command that resumes this session, ready to
+ * copy. A session nothing was said in is deleted instead: nothing to resume, nothing to keep.
+ */
+function farewell(ended: Session): string {
+  if (ended.empty) {
+    rmSync(ended.path, { force: true });
+    return "";
+  }
+  return `\n${ANSI.dim}resume this session with${ANSI.reset}  ${ANSI.cream}kinoko --session ${ended.meta.id}${ANSI.reset}\n`;
 }
 
 function names(items: string[], empty: string): string {

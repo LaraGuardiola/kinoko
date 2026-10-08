@@ -14,6 +14,7 @@ import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
 import { ABORTED, HELP, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
 import { pulseLevel, toolBlock, toolSummary } from "./tools.ts";
+import { replayBlocks } from "./replay.ts";
 import { actionFor } from "./keys.ts";
 import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -106,6 +107,15 @@ export class App {
   render(): void {
     this.#renderer.update(this.#state());
     this.#renderer.frame();
+  }
+
+  /** A resumed session: its conversation goes to the scrollback, and the context counter is back. */
+  replay(messages: Message[], note: string): void {
+    this.#print("system", note);
+    for (const block of replayBlocks(messages, this.#viewportCols)) this.#print(block.kind, block.text);
+    const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
+    if (usage) this.#tokens.context = usage.input + usage.output;
+    this.render();
   }
 
   /** Prints the startup panel above the region; what follows it is spaced like any other block. */
