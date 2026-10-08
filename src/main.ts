@@ -4,7 +4,8 @@ import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
 import { Session, findSession, latestSession } from "./session.ts";
-import { rmSync } from "node:fs";
+import { readdirSync, rmSync } from "node:fs";
+import { dirname } from "node:path";
 import { Extensions, loadExtensions } from "./ext.ts";
 import { App } from "./tui/app.ts";
 import { THINKING } from "./tui/menu-pages.ts";
@@ -317,6 +318,9 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
 function farewell(ended: Session): string {
   if (ended.empty) {
     rmSync(ended.path, { force: true });
+    // And this directory's folder, when that session was all it held.
+    const folder = dirname(ended.path);
+    if (readdirSync(folder).length === 0) rmSync(folder, { recursive: true, force: true });
     return "";
   }
   return `\n${ANSI.dim}resume this session with${ANSI.reset}  ${ANSI.cream}kinoko --session ${ended.meta.id}${ANSI.reset}\n`;
