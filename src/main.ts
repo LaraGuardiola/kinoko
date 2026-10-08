@@ -185,18 +185,6 @@ if (!config.apiKey) {
   process.exit(1);
 }
 
-// Everything the prompt needs is read once here: the date is frozen and the context never
-// changes, so the bytes before the first user message stay identical for the whole session.
-const context = await discoverContext(cwd);
-const skills = await discoverSkills(cwd);
-const system = buildSystemPrompt({
-  cwd,
-  date: new Date().toISOString().slice(0, 10),
-  tools: [...defaultTools(), ...ext.tools()],
-  context,
-  skills,
-});
-
 // Sessions are kept per directory: `--session <id>` (or a unique prefix) is looked up in this
 // directory's sessions only, `--continue` takes its newest one.
 const previous = sessionId !== undefined ? findSession(cwd, sessionId) : resume ? latestSession(cwd) : undefined;
@@ -206,6 +194,20 @@ if (sessionId !== undefined && previous === undefined) {
 }
 const session = previous ? await Session.load(previous) : await Session.create({ cwd, model: config.model });
 if (previous && !tui) process.stderr.write(`[resumed ${session.meta.id}]\n`);
+
+// Everything the prompt needs is read once here: the date is frozen and the context never
+// changes, so the bytes before the first user message stay identical for the whole session. The
+// date is the session's own: a session resumed the next day keeps its prompt, and the engine's cache.
+const context = await discoverContext(cwd);
+const skills = await discoverSkills(cwd);
+const system = buildSystemPrompt({
+  cwd,
+  date: new Date(session.meta.created).toISOString().slice(0, 10),
+  tools: [...defaultTools(), ...ext.tools()],
+  context,
+  skills,
+});
+
 ext.emit("session_start", { cwd: cwd, model: config.model });
 
 const agent = new Agent({

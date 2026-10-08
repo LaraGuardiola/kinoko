@@ -337,3 +337,8 @@ Deferred, for whenever an Anthropic model is actually needed:
 
 ## Flaky session.test #5 — FIXED
 - "--continue picks the newest session" failed now and then under the full suite. Cause: Linux stamps mtimes from a coarse clock (a few ms per tick), so the two sessions' writes, microseconds apart, could share one mtime and "newest" became a tie decided by readdir order. The test's 10 ms pause sat after both writes, where it does nothing; a 25 ms pause now sits between them. 15/15 isolated runs and 5/5 full `bun run check` runs pass. (It also slipped through the previous commit: that check's exit code was hidden by a pipe.)
+
+## Resume keeps the prompt's date — DONE
+- A resumed ~53k-token session read its whole prompt once (first request: 53,315 in, 0 cached), then went back to the cache (next: 53,310 of 54,111 cached). Expected: the engine reuses only a byte-identical prefix, and here the prefix had changed (the `web.ts` extension was installed after the session started, and tool schemas render first) or the engine no longer held it.
+- One avoidable cause fixed: the system prompt's date was today's at every start, so a session resumed on a later day changed its very first line and always re-read everything. The date now comes from the session's creation (`meta.created`), resolved before the prompt is built: a new session gets today, a resumed one keeps its own.
+- `bun run check` passes (257 tests).
