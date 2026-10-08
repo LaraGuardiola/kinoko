@@ -1,9 +1,9 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, readFileSync } from "node:fs";
-import { Session, findSession, latestSession, sessionDir } from "./session.ts";
-import { openaiCompat } from "./providers/openai-compat.ts";
-import { Agent } from "./loop.ts";
-import type { Message, ProviderRequest, StreamEvent, Usage } from "./types.ts";
+import { Session, findSession, latestSession, sessionDir } from "../session.ts";
+import { openaiCompat } from "../providers/openai-compat.ts";
+import { Agent } from "../loop.ts";
+import type { Message, ProviderRequest, StreamEvent, Usage } from "../types.ts";
 
 const HOME = `${process.cwd()}/.tmp-session-test-${process.pid}`;
 const CWD = `${HOME}/project`;

@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
-import { KeyParser } from "./term.ts";
-import type { Key, KeyName } from "./term.ts";
+import { KeyParser } from "../../tui/term.ts";
+import type { Key, KeyName } from "../../tui/term.ts";
 
 function parse(...chunks: string[]): Key[] {
   const parser = new KeyParser();

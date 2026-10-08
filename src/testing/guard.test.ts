@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { CallGuard, REPEAT_LINES, REPEAT_RUN, RepeatGuard } from "./guard.ts";
+import { CallGuard, REPEAT_LINES, REPEAT_RUN, RepeatGuard } from "../guard.ts";
 
 describe("RepeatGuard", () => {
   test("trips when one long line repeats REPEAT_LINES times, across chunk boundaries", () => {

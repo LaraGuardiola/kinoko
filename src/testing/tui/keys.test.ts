@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
-import { actionFor } from "./keys.ts";
-import type { Key } from "./term.ts";
+import { actionFor } from "../../tui/keys.ts";
+import type { Key } from "../../tui/term.ts";
 
 function key(name: Key["name"], extra: Partial<Key> = {}): Key {
   return { name: name, ...extra };

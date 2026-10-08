@@ -1,7 +1,7 @@
 import { expect, test, describe } from "bun:test";
-import { buildSystemPrompt, personaLines } from "./prompt.ts";
-import type { ContextFile, SkillEntry } from "./context.ts";
-import type { ToolSpec } from "./types.ts";
+import { buildSystemPrompt, personaLines } from "../prompt.ts";
+import type { ContextFile, SkillEntry } from "../context.ts";
+import type { ToolSpec } from "../types.ts";
 
 const INPUT = {
   cwd: "/home/user/project",

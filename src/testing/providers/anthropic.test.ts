@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { anthropic, wire } from "./anthropic.ts";
-import type { Message, ProviderRequest, StreamEvent } from "../types.ts";
+import { anthropic, wire } from "../../providers/anthropic.ts";
+import type { Message, ProviderRequest, StreamEvent } from "../../types.ts";
 
 let server: ReturnType<typeof Bun.serve>;
 let script: string[] = [];

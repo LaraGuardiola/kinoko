@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ArgsWatcher } from "./partial-args.ts";
+import { ArgsWatcher } from "../../providers/partial-args.ts";
 
 describe("watching tool args stream in", () => {
   test("a string field is reported the moment its closing quote arrives, one char at a time", () => {

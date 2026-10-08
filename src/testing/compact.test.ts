@@ -7,9 +7,9 @@ import {
   historyTokens,
   isContextOverflow,
   shouldCompact,
-} from "./compact.ts";
-import { Agent } from "./loop.ts";
-import type { Message, Provider, StreamEvent } from "./types.ts";
+} from "../compact.ts";
+import { Agent } from "../loop.ts";
+import type { Message, Provider, StreamEvent } from "../types.ts";
 
 /** Records what the summarizer was asked, and answers with `text`. */
 function summarizer(text: string, asked: string[] = []): Provider {

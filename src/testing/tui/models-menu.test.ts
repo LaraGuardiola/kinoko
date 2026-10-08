@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { rmSync, statSync } from "node:fs";
-import { loadSavedModels, removeModel, saveModel } from "../config.ts";
-import { endpointOf, hostOf, modelsPage } from "./models-menu.ts";
-import type { ModelChoice } from "./models-menu.ts";
+import { loadSavedModels, removeModel, saveModel } from "../../config.ts";
+import { endpointOf, hostOf, modelsPage } from "../../tui/models-menu.ts";
+import type { ModelChoice } from "../../tui/models-menu.ts";
 
 const HOME = `${process.cwd()}/.tmp-models-test-${process.pid}`;
 afterAll(() => rmSync(HOME, { recursive: true, force: true }));
