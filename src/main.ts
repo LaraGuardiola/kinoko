@@ -7,6 +7,7 @@ import { Session, findSession, latestSession } from "./session.ts";
 import { rmSync } from "node:fs";
 import { Extensions, loadExtensions } from "./ext.ts";
 import { App } from "./tui/app.ts";
+import { THINKING } from "./tui/menu-pages.ts";
 import { Term } from "./tui/term.ts";
 import { placeLine } from "./tui/place.ts";
 import { ansi } from "./tui/render.ts";
@@ -245,6 +246,9 @@ if (tui) {
     model: config.model,
     contextWindow: config.contextWindow,
     thinking: thinkingLabel(config.reasoningEffort, config.thinkingBudget),
+    thinkingProfile: THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name,
+    // A configured budget says the engine takes one: then the menu's profiles send theirs.
+    budgets: config.thinkingBudget !== undefined,
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,

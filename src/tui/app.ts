@@ -15,6 +15,9 @@ import { Renderer } from "./render.ts";
 import { ABORTED, HELP, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
 import { pulseLevel, toolBlock, toolSummary } from "./tools.ts";
 import { replayBlocks } from "./replay.ts";
+import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
+import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
+import { ROOT, modelsPage, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
 import { actionFor } from "./keys.ts";
 import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -32,6 +35,10 @@ export interface AppOptions {
   contextWindow: number;
   /** The thinking level shown on the rule above the editor ("LOW · 2048"). */
   thinking?: string;
+  /** The thinking profile in effect at start (THINKING's name), when the config matches one. */
+  thinkingProfile?: string;
+  /** The engine takes a thinking token budget (Strata's reasoning_budget_tokens): profiles send it. */
+  budgets?: boolean;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
@@ -52,6 +59,9 @@ export class App {
   #model: string;
   #window: number;
   #thinking: string | undefined;
+  #profile: string | undefined;
+  #budgets: boolean;
+  #menu = new Menu();
   #viewportRows: number | undefined;
   #viewportCols: number | undefined;
   #session: Session | undefined;
@@ -83,6 +93,8 @@ export class App {
     this.#model = opts.model;
     this.#window = opts.contextWindow;
     this.#thinking = opts.thinking;
+    this.#profile = opts.thinkingProfile;
+    this.#budgets = opts.budgets ?? false;
     this.#viewportRows = opts.viewportRows;
     this.#viewportCols = opts.viewportCols;
     this.#session = opts.session;
@@ -133,6 +145,11 @@ export class App {
   }
 
   // ---- what the tests and the CLI read ----
+  /** The title of the menu page open on top of the root, if any. */
+  get menuPage(): string | undefined {
+    return this.#menu.page?.title;
+  }
+
   get editorText(): string {
     return this.#editor.text;
   }
@@ -167,6 +184,8 @@ export class App {
   // ---- input ----
 
   handleKey(key: Key): void {
+    // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
+    if (this.#menuKey(key)) return;
     const action = actionFor(key, {
       running: this.#running || this.#agent.state === "running",
       editorEmpty: this.#editor.empty,
@@ -472,6 +491,7 @@ export class App {
       status: this.statusLine,
       place: this.#place,
       thinking: this.#thinking,
+      menu: this.#menuRows(),
       viewportRows: this.#viewportRows,
       viewportCols: this.#viewportCols,
     });
@@ -509,6 +529,100 @@ export class App {
       default:
         return false;
     }
+  }
+
+  // ---- the slash menu ----
+
+  /** The root is open while the editor holds only a slash command being typed. */
+  #rootItems(): MenuItem[] | undefined {
+    if (this.#menu.page !== undefined || !/^\/\S*$/.test(this.#editor.text)) return undefined;
+    return filterRoot(ROOT, this.#editor.text);
+  }
+
+  #menuRows(): string[] {
+    const page = this.#menu.page;
+    if (page) return pageRows(page, this.#menu.index);
+    const items = this.#rootItems() ?? [];
+    this.#menu.clamp(items.length);
+    return items.length === 0 ? [] : listRows(items, this.#menu.index);
+  }
+
+  /** The keys an open menu takes; false hands the key to the rest of the app. */
+  #menuKey(key: Key): boolean {
+    const page = this.#menu.page;
+    const items = page ? [] : (this.#rootItems() ?? []);
+    if (!page && items.length === 0) return false;
+    const count = page?.kind === "list" ? page.items.length : items.length;
+    if ((key.name === "up" || key.name === "down") && !key.alt) {
+      this.#menu.move(key.name === "up" ? -1 : 1, count);
+    } else if (key.name === "escape") {
+      // A page goes back to the root; the root closes, back to an empty input.
+      if (!this.#menu.back()) this.#editor.clear();
+    } else if (key.name === "enter" && !key.alt) {
+      if (page?.kind === "list") {
+        const item = page.items[this.#menu.index];
+        if (item === undefined) return true;
+        this.#closeMenu();
+        page.pick(item);
+      } else if (page) {
+        this.#menu.back();
+      } else {
+        this.#openRoot(items[this.#menu.index]!);
+      }
+    } else if (page === undefined) {
+      this.#menu.close(); // typing narrows the root: start again from its first item
+      return false;
+    } else if (key.name === "ctrl-c") {
+      this.#closeMenu();
+    } // a page takes no typing
+    this.render();
+    return true;
+  }
+
+  #closeMenu(): void {
+    this.#menu.close();
+    this.#editor.clear();
+  }
+
+  #openRoot(item: MenuItem): void {
+    if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
+    else if (item.name === "models") this.#openModels();
+    else if (item.name === "session") this.#menu.open(this.#sessionPage());
+    else {
+      this.#closeMenu();
+      void this.command(`/${item.name}`).then(() => this.render());
+    }
+  }
+
+  #thinkingPage(): ListPage {
+    return thinkingPage(this.#profile, (profile) => {
+      // Only an engine that takes a budget gets one; elsewhere the effort alone is the level.
+      this.#agent.setThinking(profile.effort, this.#budgets ? profile.budget : undefined);
+      this.#profile = profile.name;
+      this.#thinking = profileLabel(profile, this.#budgets);
+      this.#marker = `thinking: ${this.#thinking} from the next request`;
+    });
+  }
+
+  #openModels(): void {
+    const choose = (name: string): void => {
+      this.#agent.setModel(name);
+      this.#model = name;
+      this.#marker = `model: ${name} from the next request`;
+    };
+    this.#menu.open(modelsPage(this.#model, [], "asking the engine…", choose));
+    void this.#agent
+      .models(AbortSignal.timeout(10_000))
+      .then((names) => this.#menu.refresh(modelsPage(this.#model, names, "the engine lists no models", choose)))
+      .catch(() => this.#menu.refresh(modelsPage(this.#model, [], "the engine did not answer with its models", choose)))
+      .finally(() => this.render());
+  }
+
+  #sessionPage(): InfoPage {
+    const s = this.#session;
+    if (s === undefined) return { kind: "info", title: "Session", lines: ["  no session"] };
+    const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#tokens.context, window: this.#window };
+    return { kind: "info", title: "Session", lines: sessionLines(facts, this.#width) };
   }
 
   /** Moves the session head back one message; a fork is only ever a pointer move. */

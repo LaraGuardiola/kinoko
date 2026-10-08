@@ -62,6 +62,11 @@ interface Event {
 
 export function anthropic(opts: AnthropicOptions): Provider {
   return {
+    // The models kinoko knows the window and prices of (models.json): the ones worth picking.
+    async models(): Promise<string[]> {
+      return Object.keys(models);
+    },
+
     async *stream(req: ProviderRequest): AsyncIterable<StreamEvent> {
       if (req.signal.aborted) {
         yield { type: "done", stop: "aborted" };

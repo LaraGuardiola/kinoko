@@ -68,6 +68,8 @@ export interface RegionInput {
   place?: string;
   /** The thinking level ("LOW · 2048"), set into the right end of the rule above the editor. */
   thinking?: string;
+  /** The slash menu's rows, between the rule under the editor and the place line. */
+  menu?: string[];
   viewportRows?: number;
   viewportCols?: number;
 }
@@ -191,7 +193,7 @@ export function liveRegion(input: RegionInput): Region {
   const rule = `${ANSI.amanita}${"─".repeat(ruleWidth)}${ANSI.reset}`;
   // A blank row keeps the transcript off the input.
   let head = ["", labelledRule(ruleWidth, input.thinking)];
-  let foot = [rule, ...(input.place ? [placeRow(input.place)] : []), input.status];
+  let foot = [rule, ...(input.menu ?? []), ...(input.place ? [placeRow(input.place)] : []), input.status];
 
   const viewport = input.viewportRows;
   const width = input.viewportCols === undefined ? undefined : Math.max(1, input.viewportCols - 2);
@@ -296,5 +298,6 @@ export const HELP = [
   "  Ctrl-P / N     previous / next history entry",
   "  Shift+Enter    newline inside the editor (also Ctrl-J, Ctrl-O)",
   "",
+  "  /              open the menu: thinking, models, session, and the commands below",
   "  /help  /model  /compact  /fork  /quit",
 ].join("\n");

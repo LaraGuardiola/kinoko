@@ -34,7 +34,10 @@ function scripted(turns: StreamEvent[][], pace = 1): { provider: ProviderLike; c
   };
 }
 
-type ProviderLike = { stream: (req: ProviderRequest) => AsyncIterable<StreamEvent> };
+type ProviderLike = {
+  stream: (req: ProviderRequest) => AsyncIterable<StreamEvent>;
+  models?: (signal: AbortSignal) => Promise<string[]>;
+};
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g");
 
@@ -48,6 +51,8 @@ interface Harness {
   app: App;
   agent: Agent;
   out: string[];
+  /** Every request the fake engine received, as sent. */
+  calls: () => ProviderRequest[];
   press: (chunk: string) => void;
   /** The text a user would see, with ANSI stripped. */
   screen: () => string;
@@ -63,10 +68,16 @@ async function harness(
     viewportRows?: number;
     viewportCols?: number;
     place?: () => Promise<string>;
+    /** What the fake engine answers to "which models do you serve". */
+    models?: string[];
+    budgets?: boolean;
+    thinkingProfile?: string;
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
   const { provider, calls } = scripted(turns, opts.pace ?? 1);
+  const served = opts.models;
+  if (served) provider.models = async () => served;
   // home: ROOT keeps test sessions out of the real ~/.kinoko/sessions.
   const session = await Session.create({ cwd: ROOT, model: opts.model ?? "test-model", home: ROOT });
   const agent = new Agent({
@@ -86,14 +97,17 @@ async function harness(
     viewportRows: opts.viewportRows,
     viewportCols: opts.viewportCols,
     place: opts.place,
+    budgets: opts.budgets,
+    thinkingProfile: opts.thinkingProfile,
+    thinking: "LOW · 2048",
     session: session,
     rebuild: () => agent,
   });
-  void calls;
   return {
     app: app,
     agent: agent,
     out: out,
+    calls: calls,
     // `press` mirrors the real loop: keys go in, and a held-back Esc gets its frame.
     press: (chunk: string) => {
       app.feed(chunk);
@@ -499,11 +513,16 @@ describe("TUI app with the agent", () => {
 
   test("12. a slash command typed in the editor is never sent to the model", async () => {
     const h = await harness([[{ type: "text", delta: "hi" }, { type: "done", stop: "end" }]]);
-    h.press("/model\r");
+    h.press("/help\r"); // through the menu: its "help" item runs the command
     await new Promise((r) => setTimeout(r, 10));
-    expect(h.screen()).toContain("model: test-model");
+    expect(h.screen()).toContain("kinoko keys");
     expect(h.agent.messages).toHaveLength(0); // no run was started
     expect(h.app.editorText).toBe("");
+
+    h.press("/model now\r"); // with an argument the menu is closed: the typed command runs
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.screen()).toContain("model: test-model");
+    expect(h.agent.messages).toHaveLength(0);
 
     h.press("/bogus\r");
     await new Promise((r) => setTimeout(r, 10));
@@ -544,5 +563,96 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
     expect(h.app.editorText).toBe("second line draft");
     expect(h.agent.messages[0]?.content).toBe("question");
+  });
+});
+
+/** The last full repaint of the live region, ANSI stripped, as rows. */
+function frame(h: Harness): string[] {
+  const paints = h.out.filter((chunk) => chunk.includes("tok"));
+  return (paints.at(-1) ?? "").replace(ANSI, "").split(/\r?\n/).map((row) => row.trim());
+}
+
+describe("slash menu", () => {
+  const UP = "\x1b[A";
+  const DOWN = "\x1b[B";
+  const ESC = "\x1b";
+  // A lone Esc waits one frame (it could start a sequence): `press` then polls it through.
+
+  test("/ opens it between the rule under the input and the place line; typing narrows it", async () => {
+    const h = await harness([], { place: async () => "~/p (main)", viewportRows: 30 });
+    await new Promise((r) => setTimeout(r, 5)); // the place line is read asynchronously
+    h.press("/");
+    await new Promise((r) => setTimeout(r, 40)); // past the paint throttle
+    h.app.render();
+    let rows = frame(h);
+    const rule = rows.lastIndexOf("─".repeat(78));
+    expect(rows[rule + 1]).toStartWith("→ thinking");
+    expect(rows.indexOf("~/p (main)")).toBeGreaterThan(rows.findIndex((r) => r.startsWith("quit")));
+    h.press("th");
+    await new Promise((r) => setTimeout(r, 40)); // past the paint throttle
+    h.app.render();
+    rows = frame(h);
+    expect(rows.some((r) => r.startsWith("→ thinking"))).toBe(true);
+    expect(rows.some((r) => r.startsWith("models"))).toBe(false);
+  });
+
+  test("thinking: pick a profile with the arrows; the next request carries its effort and budget", async () => {
+    const h = await harness([[{ type: "text", delta: "ok" }, { type: "done", stop: "end" }]], { budgets: true, thinkingProfile: "low" });
+    h.press("/thinking\r");
+    expect(h.app.menuPage).toBe("Thinking");
+    h.press(DOWN); // low (current) -> medium
+    h.press("\r");
+    expect(h.app.menuPage).toBeUndefined();
+    expect(h.app.editorText).toBe("");
+    expect(h.app.marker).toBe("thinking: MEDIUM · 4096 from the next request");
+    h.press("go\r");
+    await settle(h.agent);
+    expect(h.calls()[0]).toMatchObject({ effort: "medium", budget: 4096 });
+  });
+
+  test("models: the engine's list loads into the page; the pick is used from the next request", async () => {
+    const h = await harness([[{ type: "text", delta: "ok" }, { type: "done", stop: "end" }]], { models: ["alpha", "beta"] });
+    h.press("/models\r");
+    await new Promise((r) => setTimeout(r, 10));
+    h.press(DOWN);
+    h.press("\r");
+    expect(h.app.statusLine).toContain("beta");
+    h.press("go\r");
+    await settle(h.agent);
+    expect(h.calls()[0]?.model).toBe("beta");
+  });
+
+  test("Esc on a page goes back to the root; Esc on the root closes it and empties the input", async () => {
+    const h = await harness([]);
+    h.press("/session\r");
+    expect(h.app.menuPage).toBe("Session");
+    h.press(ESC);
+    expect(h.app.menuPage).toBeUndefined();
+    expect(h.app.editorText).toBe("/session"); // the root is back, as it was
+    h.press(UP);
+    h.press(ESC);
+    expect(h.app.editorText).toBe("");
+  });
+
+  test("the session page is a table with this session's file and id", async () => {
+    const h = await harness([]);
+    h.press("/session\r");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    const text = frame(h).join("\n");
+    expect(text).toContain("┌");
+    expect(text).toContain(h.session.meta.id);
+  });
+
+  test("Esc with the menu open closes the menu and does not abort the run", async () => {
+    const h = await harness([[{ type: "text", delta: "a" }, { type: "text", delta: "b" }, { type: "done", stop: "end" }]], { pace: 40 });
+    h.press("go\r");
+    await new Promise((r) => setTimeout(r, 10));
+    h.press("/");
+    h.press(ESC);
+    expect(h.agent.state).toBe("running");
+    expect(h.app.editorText).toBe("");
+    await settle(h.agent);
+    expect(h.agent.messages.at(-1)?.stop).toBe("end");
   });
 });

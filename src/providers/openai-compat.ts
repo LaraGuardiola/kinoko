@@ -95,6 +95,16 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
   const { baseUrl, apiKey } = opts;
 
   return {
+    async models(signal: AbortSignal): Promise<string[]> {
+      const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+        headers: { authorization: `Bearer ${apiKey}` },
+        signal,
+      });
+      if (!res.ok) return [];
+      const list = (await res.json()) as { data?: Array<{ id?: unknown }> };
+      return (list.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === "string");
+    },
+
     async *stream(req: ProviderRequest): AsyncIterable<StreamEvent> {
       if (req.signal.aborted) {
         yield { type: "done", stop: "aborted" };
@@ -236,7 +246,12 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
     messages,
     ...((req.effort ?? opts.reasoningEffort) ? { reasoning_effort: req.effort ?? opts.reasoningEffort } : {}),
     ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
-    ...(opts.thinkingBudget ? { reasoning_budget_tokens: opts.thinkingBudget } : {}),
+    // A request's budget wins (0 is "no cap" there, so it is sent); otherwise the configured one.
+    ...(req.budget !== undefined
+      ? { reasoning_budget_tokens: req.budget }
+      : opts.thinkingBudget
+        ? { reasoning_budget_tokens: opts.thinkingBudget }
+        : {}),
     tools: req.tools.length
       ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }))
       : undefined,
