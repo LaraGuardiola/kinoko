@@ -31,10 +31,10 @@ describe("slash menu state", () => {
     const menu = new Menu();
     const loading: ListPage = { kind: "list", title: "Models", items: [], empty: "asking…", pick: () => undefined };
     menu.open(loading);
-    menu.refresh({ ...loading, items: items(2) });
+    menu.refresh(loading, { ...loading, title: "Models", items: items(2) }); // even with a new title
     expect((menu.page as ListPage).items).toHaveLength(2);
     menu.back();
-    menu.refresh({ ...loading, items: items(3) }); // the user left: it must not reopen
+    menu.refresh(loading, { ...loading, items: items(3) }); // the user left: it must not reopen
     expect(menu.page).toBeUndefined();
   });
 

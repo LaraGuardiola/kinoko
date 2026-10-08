@@ -1,3 +1,5 @@
+import { mkdir, writeFile } from "node:fs/promises";
+
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
 
 export type ProviderName = "openai-compat" | "anthropic";
@@ -104,4 +106,41 @@ export async function loadConfig(flags: Record<string, string | undefined> = {})
 export function thinkingLabel(effort: ReasoningEffort | undefined, budget: number | undefined): string {
   const level = (effort ?? "default").toUpperCase();
   return budget && effort !== "off" ? `${level} · ${budget}` : level;
+}
+
+/** A model kinoko can switch to: where it is served and how to reach it. */
+export interface SavedModel {
+  model: string;
+  baseUrl: string;
+  apiKey: string;
+  provider?: ProviderName; // openai-compat when absent
+  contextWindow?: number;
+}
+
+/** Models added from the TUI live in ~/.kinoko/models.json; it holds API keys, so it is 0600. */
+function modelsFile(home: string): string {
+  return `${home}/.kinoko/models.json`;
+}
+
+function isSaved(value: unknown): value is SavedModel {
+  const m = value as Partial<SavedModel> | null;
+  return typeof m?.model === "string" && typeof m.baseUrl === "string" && typeof m.apiKey === "string";
+}
+
+export async function loadSavedModels(home = process.env.HOME ?? ""): Promise<SavedModel[]> {
+  try {
+    const parsed: unknown = await Bun.file(modelsFile(home)).json();
+    return Array.isArray(parsed) ? parsed.filter(isSaved) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Adds (or replaces: same endpoint and model) one entry, and returns the list as now saved. */
+export async function saveModel(entry: SavedModel, home = process.env.HOME ?? ""): Promise<SavedModel[]> {
+  const others = (await loadSavedModels(home)).filter((m) => m.baseUrl !== entry.baseUrl || m.model !== entry.model);
+  const all = [...others, entry];
+  await mkdir(`${home}/.kinoko`, { recursive: true });
+  await writeFile(modelsFile(home), `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 });
+  return all;
 }

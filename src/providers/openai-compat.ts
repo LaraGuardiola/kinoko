@@ -96,13 +96,7 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
 
   return {
     async models(signal: AbortSignal): Promise<string[]> {
-      const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
-        headers: { authorization: `Bearer ${apiKey}` },
-        signal,
-      });
-      if (!res.ok) return [];
-      const list = (await res.json()) as { data?: Array<{ id?: unknown }> };
-      return (list.data ?? []).map((m) => m.id).filter((id): id is string => typeof id === "string");
+      return (await listModels(baseUrl, apiKey, signal)).map((m) => m.id);
     },
 
     async *stream(req: ProviderRequest): AsyncIterable<StreamEvent> {
@@ -211,6 +205,29 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
       else yield { ...stopFor(finish), usage };
     },
   };
+}
+
+export interface Served {
+  id: string;
+  /** The context window, when the endpoint says (llama.cpp and Strata put it in meta.n_ctx). */
+  contextWindow?: number;
+}
+
+/** What an OpenAI-compatible endpoint serves (`GET /models`); empty when it will not say. */
+export async function listModels(baseUrl: string, apiKey: string, signal: AbortSignal): Promise<Served[]> {
+  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
+    headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+    signal,
+  });
+  if (!res.ok) return [];
+  const list = (await res.json()) as { data?: Array<{ id?: unknown; meta?: { n_ctx?: unknown } }> };
+  const served: Served[] = [];
+  for (const m of list.data ?? []) {
+    if (typeof m.id !== "string") continue;
+    const n = m.meta?.n_ctx;
+    served.push(typeof n === "number" && n > 0 ? { id: m.id, contextWindow: n } : { id: m.id });
+  }
+  return served;
 }
 
 function parseChunk(payload: string): Chunk | undefined {

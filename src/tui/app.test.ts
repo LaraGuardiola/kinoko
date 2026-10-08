@@ -1,6 +1,9 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { rmSync } from "node:fs";
 import { App } from "./app.ts";
+import type { ModelsHost } from "./app.ts";
+import type { SavedModel } from "../config.ts";
+import type { Served } from "../providers/openai-compat.ts";
 import { Agent } from "../loop.ts";
 import { Session } from "../session.ts";
 import type { ProviderRequest, StreamEvent, Tool } from "../types.ts";
@@ -72,6 +75,7 @@ async function harness(
     models?: string[];
     budgets?: boolean;
     thinkingProfile?: string;
+    modelsHost?: ModelsHost;
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -100,6 +104,7 @@ async function harness(
     budgets: opts.budgets,
     thinkingProfile: opts.thinkingProfile,
     thinking: "LOW · 2048",
+    models: opts.modelsHost,
     session: session,
     rebuild: () => agent,
   });
@@ -654,5 +659,80 @@ describe("slash menu", () => {
     expect(h.app.editorText).toBe("");
     await settle(h.agent);
     expect(h.agent.messages.at(-1)?.stop).toBe("end");
+  });
+});
+
+/** A models host whose other endpoint answers `served`, recording what is connected and saved. */
+function host(served: Served[]) {
+  const remote = scripted([[{ type: "text", delta: "from the remote" }, { type: "done", stop: "end" }]]);
+  const connected: SavedModel[] = [];
+  const saved: SavedModel[] = [];
+  const models: ModelsHost = {
+    endpoint: "http://local:8081/v1",
+    saved: [{ model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" }],
+    connect: (entry) => (connected.push(entry), remote.provider as never),
+    discover: async () => served,
+    save: async (entry) => (saved.push(entry), [entry]),
+  };
+  return { models, connected, saved, remote };
+}
+
+/** Opens /models and goes down to its last item, "+ add model". */
+async function toAdd(h: Harness): Promise<void> {
+  h.press("/models\r");
+  await new Promise((r) => setTimeout(r, 10));
+  h.press("\x1b[A"); // up from the first item wraps to the last
+  h.press("\r");
+}
+
+describe("adding a model", () => {
+  const ESC = "\x1b";
+
+  test("endpoint, key, then a model the endpoint serves: switched to, saved, used by the next request", async () => {
+    const remote = host([{ id: "remote-coder", contextWindow: 64_000 }]);
+    const h = await harness([], { models: [], modelsHost: remote.models });
+    await toAdd(h);
+    expect(h.app.menuPage).toBe("Add model · 1/3");
+    h.press("127.0.0.1:9999/v1\r");
+    expect(h.app.menuPage).toBe("Add model · 2/3");
+    h.press("sk-secret\r");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.app.menuPage).toBe("Add model · 3/3 · 127.0.0.1:9999");
+    h.press("\r");
+    await new Promise((r) => setTimeout(r, 10));
+    const entry = { model: "remote-coder", baseUrl: "http://127.0.0.1:9999/v1", apiKey: "sk-secret", contextWindow: 64_000 };
+    expect(remote.connected).toEqual([entry]);
+    expect(remote.saved).toEqual([entry]);
+    expect(h.app.statusLine).toContain("remote-coder");
+    expect(h.app.statusLine).toContain("/64,000 tok"); // its own context window
+    h.press("go\r");
+    await settle(h.agent);
+    expect(remote.remote.calls()[0]?.model).toBe("remote-coder");
+  });
+
+  test("an endpoint that cannot list its models asks for the id instead", async () => {
+    const remote = host([]);
+    const h = await harness([], { models: [], modelsHost: remote.models });
+    await toAdd(h);
+    h.press("box:8080\r");
+    h.press("\r"); // no key
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.app.menuPage).toBe("Add model · 3/3 · box:8080");
+    h.press("my-model\r");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(remote.saved).toEqual([{ model: "my-model", baseUrl: "http://box:8080", apiKey: "", contextWindow: undefined }]);
+  });
+
+  test("the key is shown as dots; Esc at any step goes back to the root", async () => {
+    const h = await harness([], { models: [], modelsHost: host([]).models });
+    await toAdd(h);
+    h.press("x\r");
+    h.press("abc");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    expect(frame(h).some((row) => row.includes("API key  •••"))).toBe(true);
+    h.press(ESC);
+    expect(h.app.menuPage).toBeUndefined();
+    expect(h.app.editorText).toBe("/models"); // back on the root, as it was
   });
 });

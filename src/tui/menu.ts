@@ -7,6 +7,8 @@ import { ANSI } from "./style.ts";
 export interface MenuItem {
   name: string;
   description: string;
+  /** Tells apart items whose names can repeat (one model id at two endpoints). */
+  key?: string;
   /** The value in effect now (the current model, the current thinking profile). */
   current?: boolean;
 }
@@ -26,7 +28,18 @@ export interface InfoPage {
   lines: string[];
 }
 
-export type MenuPage = ListPage | InfoPage;
+/** One line of text to type in the menu (an endpoint, a key); Enter hands it over. */
+export interface InputPage {
+  kind: "input";
+  title: string;
+  label: string;
+  hint: string;
+  /** Shown as dots: an API key. */
+  secret?: boolean;
+  submit: (text: string) => void;
+}
+
+export type MenuPage = ListPage | InfoPage | InputPage;
 
 /** The colour of the startup panel's [Capabilities] heading. */
 export const ORANGE = "\x1b[38;5;214m";
@@ -36,6 +49,7 @@ export const MENU_ROWS = 8;
 export class Menu {
   #page: MenuPage | undefined;
   #index = 0;
+  #text = ""; // what is typed on an input page
 
   /** The page open on top of the root, if any. */
   get page(): MenuPage | undefined {
@@ -46,15 +60,31 @@ export class Menu {
     return this.#index;
   }
 
+  get text(): string {
+    return this.#text;
+  }
+
+  /** Typing on an input page: printable text only (a paste may hold a newline). */
+  type(text: string): void {
+    this.#text += text.replace(/[\r\n]/g, "");
+  }
+
+  erase(): void {
+    this.#text = [...this.#text].slice(0, -1).join("");
+  }
+
   open(page: MenuPage): void {
     this.#page = page;
+    this.#text = "";
     this.#index = page.kind === "list" ? Math.max(0, page.items.findIndex((item) => item.current)) : 0;
   }
 
-  /** Swaps the open page's items (a list that finished loading), keeping the selection in range. */
-  refresh(page: ListPage): void {
-    if (this.#page?.kind !== "list" || this.#page.title !== page.title) return;
-    this.open(page);
+  /**
+   * Replaces `from` with `to` (a list that finished loading), only while `from` is still the page
+   * on screen: if the user went back meanwhile, a late answer must not reopen anything.
+   */
+  refresh(from: MenuPage, to: MenuPage): void {
+    if (this.#page === from) this.open(to);
   }
 
   /** Esc: a page goes back to the root (true); at the root there is nothing to go back to (false). */
@@ -105,8 +135,16 @@ export function listRows(items: MenuItem[], selected: number, title?: string, em
   return rows;
 }
 
-/** The open page as rows. */
-export function pageRows(page: MenuPage, selected: number): string[] {
+/** The open page as rows. `text` is what is typed on an input page. */
+export function pageRows(page: MenuPage, selected: number, text = ""): string[] {
   if (page.kind === "list") return listRows(page.items, selected, page.title, page.empty);
+  if (page.kind === "input") {
+    const shown = page.secret ? "•".repeat([...text].length) : text;
+    return [
+      `${ANSI.bold}${ORANGE}${page.title}${ANSI.reset}`,
+      `  ${ORANGE}${page.label}${ANSI.reset}  ${shown}${ANSI.inverse} ${ANSI.reset}`,
+      `  ${ANSI.dim}${page.hint}${ANSI.reset}`,
+    ];
+  }
   return [`${ANSI.bold}${ORANGE}${page.title}${ANSI.reset}`, ...page.lines, `  ${ANSI.dim}Esc to go back${ANSI.reset}`];
 }

@@ -17,7 +17,12 @@ import { pulseLevel, toolBlock, toolSummary } from "./tools.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
-import { ROOT, helpText, modelsPage, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { ROOT, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { endpointOf, endpointPage, hostOf, keyPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
+import type { ModelChoice } from "./models-menu.ts";
+import type { SavedModel } from "../config.ts";
+import type { Served } from "../providers/openai-compat.ts";
+import type { Provider } from "../types.ts";
 import { actionFor } from "./keys.ts";
 import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -39,6 +44,8 @@ export interface AppOptions {
   thinkingProfile?: string;
   /** The engine takes a thinking token budget (Strata's reasoning_budget_tokens): profiles send it. */
   budgets?: boolean;
+  /** Switching endpoints and adding models; without it the models page lists the engine's own only. */
+  models?: ModelsHost;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
@@ -49,6 +56,18 @@ export interface AppOptions {
   onQuit?: () => void;
   /** Rebuilds the agent after /fork moved the session head. */
   rebuild?: () => Agent;
+}
+
+/** What the models page needs from outside the TUI: other endpoints, and somewhere to save them. */
+export interface ModelsHost {
+  /** The endpoint in use at start. */
+  endpoint: string;
+  /** Models to offer besides the engine's own: the configured one, and those added before. */
+  saved: SavedModel[];
+  connect: (entry: SavedModel) => Provider;
+  discover: (baseUrl: string, apiKey: string, signal: AbortSignal) => Promise<Served[]>;
+  /** Saves one entry; answers with the list to offer from now on. */
+  save: (entry: SavedModel) => Promise<SavedModel[]>;
 }
 
 export class App {
@@ -62,6 +81,9 @@ export class App {
   #profile: string | undefined;
   #budgets: boolean;
   #menu = new Menu();
+  #host: ModelsHost | undefined;
+  #endpoint: string;
+  #saved: SavedModel[];
   #viewportRows: number | undefined;
   #viewportCols: number | undefined;
   #session: Session | undefined;
@@ -95,6 +117,9 @@ export class App {
     this.#thinking = opts.thinking;
     this.#profile = opts.thinkingProfile;
     this.#budgets = opts.budgets ?? false;
+    this.#host = opts.models;
+    this.#endpoint = opts.models?.endpoint ?? "";
+    this.#saved = opts.models?.saved ?? [];
     this.#viewportRows = opts.viewportRows;
     this.#viewportCols = opts.viewportCols;
     this.#session = opts.session;
@@ -541,7 +566,7 @@ export class App {
 
   #menuRows(): string[] {
     const page = this.#menu.page;
-    if (page) return pageRows(page, this.#menu.index);
+    if (page) return pageRows(page, this.#menu.index, this.#menu.text);
     const items = this.#rootItems() ?? [];
     this.#menu.clamp(items.length);
     return items.length === 0 ? [] : listRows(items, this.#menu.index);
@@ -553,7 +578,13 @@ export class App {
     const items = page ? [] : (this.#rootItems() ?? []);
     if (!page && items.length === 0) return false;
     const count = page?.kind === "list" ? page.items.length : items.length;
-    if ((key.name === "up" || key.name === "down") && !key.alt) {
+    if (page?.kind === "input" && key.name !== "escape") {
+      // An input page takes the typing; Enter hands the text over (it may open the next step).
+      if (key.name === "char" || key.name === "paste") this.#menu.type(key.char ?? "");
+      else if (key.name === "backspace") this.#menu.erase();
+      else if (key.name === "enter") page.submit(this.#menu.text);
+      else if (key.name === "ctrl-c") this.#closeMenu();
+    } else if ((key.name === "up" || key.name === "down") && !key.alt) {
       this.#menu.move(key.name === "up" ? -1 : 1, count);
     } else if (key.name === "escape") {
       // A page goes back to the root; the root closes, back to an empty input.
@@ -562,8 +593,9 @@ export class App {
       if (page?.kind === "list") {
         const item = page.items[this.#menu.index];
         if (item === undefined) return true;
-        this.#closeMenu();
         page.pick(item);
+        // A pick that opened another page (add model) keeps the menu; any other pick is done.
+        if (this.#menu.page === page) this.#closeMenu();
       } else if (page) {
         this.#menu.back();
       } else {
@@ -605,17 +637,75 @@ export class App {
   }
 
   #openModels(): void {
-    const choose = (name: string): void => {
-      this.#agent.setModel(name);
-      this.#model = name;
-      this.#marker = `model: ${name} from the next request`;
+    const view = (served: string[] | undefined) => ({
+      model: this.#model,
+      endpoint: this.#endpoint,
+      served,
+      saved: this.#saved,
+      canAdd: this.#host !== undefined,
+    });
+    const choose = (choice: ModelChoice): void => {
+      if (choice.kind === "add") this.#addModel();
+      else if (choice.kind === "saved") this.#useModel(choice.entry);
+      else this.#useModel({ model: choice.model, baseUrl: this.#endpoint, apiKey: "" });
     };
-    this.#menu.open(modelsPage(this.#model, [], "asking the engine…", choose));
+    const asking = modelsPage(view(undefined), choose);
+    this.#menu.open(asking);
     void this.#agent
       .models(AbortSignal.timeout(10_000))
-      .then((names) => this.#menu.refresh(modelsPage(this.#model, names, "the engine lists no models", choose)))
-      .catch(() => this.#menu.refresh(modelsPage(this.#model, [], "the engine did not answer with its models", choose)))
+      .catch(() => [])
+      .then((names) => this.#menu.refresh(asking, modelsPage(view(names), choose)))
       .finally(() => this.render());
+  }
+
+  /** Endpoint, then API key, then one of the models it serves (or its id typed by hand). */
+  #addModel(): void {
+    this.#menu.open(
+      endpointPage((typed) => {
+        const baseUrl = endpointOf(typed);
+        if (baseUrl === undefined) return; // nothing typed: stay on this step
+        this.#menu.open(keyPage((apiKey) => this.#discover(baseUrl, apiKey.trim())));
+      }),
+    );
+  }
+
+  #discover(baseUrl: string, apiKey: string): void {
+    const host = hostOf(baseUrl);
+    const keep = (served: Served): void => {
+      const entry: SavedModel = { model: served.id, baseUrl, apiKey, contextWindow: served.contextWindow };
+      this.#closeMenu();
+      this.#useModel(entry);
+      void this.#host
+        ?.save(entry)
+        .then((saved) => {
+          this.#saved = saved;
+          this.#marker = `model: ${entry.model} at ${host}, saved`;
+        })
+        .catch(() => (this.#marker = `model: ${entry.model} at ${host} (could not save it)`))
+        .finally(() => this.render());
+    };
+    const asking = servedPage(host, undefined, keep);
+    this.#menu.open(asking);
+    const byHand = (): void => {
+      this.#menu.refresh(asking, namePage(host, (id) => id.trim() && keep({ id: id.trim() })));
+    };
+    void this.#host
+      ?.discover(baseUrl, apiKey, AbortSignal.timeout(10_000))
+      .then((served) => (served.length > 0 ? this.#menu.refresh(asking, servedPage(host, served, keep)) : byHand()))
+      .catch(byHand)
+      .finally(() => this.render());
+  }
+
+  /** Switches to a model, and to its endpoint when it is served elsewhere. */
+  #useModel(entry: SavedModel): void {
+    if (entry.baseUrl !== this.#endpoint && this.#host) {
+      this.#agent.setProvider(this.#host.connect(entry), entry.contextWindow);
+      this.#endpoint = entry.baseUrl;
+      if (entry.contextWindow) this.#window = entry.contextWindow;
+    }
+    this.#agent.setModel(entry.model);
+    this.#model = entry.model;
+    this.#marker = `model: ${entry.model}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`;
   }
 
   #sessionPage(): InfoPage {

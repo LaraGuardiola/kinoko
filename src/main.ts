@@ -1,5 +1,6 @@
-import { DEFAULTS, loadConfig, thinkingLabel } from "./config.ts";
-import { openaiCompat } from "./providers/openai-compat.ts";
+import { DEFAULTS, loadConfig, loadSavedModels, saveModel, thinkingLabel } from "./config.ts";
+import type { SavedModel } from "./config.ts";
+import { listModels, openaiCompat } from "./providers/openai-compat.ts";
 import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
@@ -213,14 +214,23 @@ const system = buildSystemPrompt({
 
 ext.emit("session_start", { cwd: cwd, model: config.model });
 
+const providerOptions = {
+  baseUrl: config.baseUrl,
+  apiKey: config.apiKey,
+  reasoningEffort: config.reasoningEffort,
+  maxOutputTokens: config.maxOutputTokens,
+  thinkingBudget: config.thinkingBudget,
+};
+// The model in the config, as the models menu offers it next to the ones added from the TUI.
+const configured: SavedModel = {
+  model: config.model,
+  baseUrl: config.baseUrl,
+  apiKey: config.apiKey,
+  provider: config.provider,
+  contextWindow: config.contextWindow,
+};
 const agent = new Agent({
-  provider: (config.provider === "anthropic" ? anthropic : openaiCompat)({
-    baseUrl: config.baseUrl,
-    apiKey: config.apiKey,
-    reasoningEffort: config.reasoningEffort,
-    maxOutputTokens: config.maxOutputTokens,
-    thinkingBudget: config.thinkingBudget,
-  }),
+  provider: (config.provider === "anthropic" ? anthropic : openaiCompat)(providerOptions),
   model: config.model,
   system,
   tools: [...defaultTools(), ...ext.tools()],
@@ -250,6 +260,14 @@ if (tui) {
     thinkingProfile: THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name,
     // A configured budget says the engine takes one: then the menu's profiles send theirs.
     budgets: config.thinkingBudget !== undefined,
+    models: {
+      endpoint: config.baseUrl,
+      saved: [configured, ...(await loadSavedModels())],
+      connect: (entry) => (entry.provider === "anthropic" ? anthropic : openaiCompat)({ ...providerOptions, baseUrl: entry.baseUrl, apiKey: entry.apiKey }),
+      discover: listModels,
+      // The configured model stays first: it is always there to go back to.
+      save: async (entry) => [configured, ...(await saveModel(entry))],
+    },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,

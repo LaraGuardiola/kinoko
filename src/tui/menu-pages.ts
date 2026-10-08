@@ -50,17 +50,6 @@ export function thinkingPage(current: string | undefined, choose: (profile: Thin
   };
 }
 
-/** The models page: what the engine serves, the model in use marked; `empty` while there is none. */
-export function modelsPage(current: string, names: string[], empty: string, pick: (name: string) => void): ListPage {
-  return {
-    kind: "list",
-    title: "Models",
-    items: names.map((name) => ({ name, description: name === current ? "in use" : "", current: name === current })),
-    empty,
-    pick: (item) => pick(item.name),
-  };
-}
-
 export interface SessionFacts {
   path: string;
   id: string;

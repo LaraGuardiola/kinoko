@@ -100,6 +100,12 @@ export class Agent {
     this.#model = model;
   }
 
+  /** Another endpoint from the next request on (a model added from the TUI); its window too. */
+  setProvider(provider: Provider, contextWindow?: number): void {
+    this.#provider = provider;
+    if (contextWindow !== undefined) this.#contextWindow = contextWindow;
+  }
+
   /** Thinking for the next requests: effort and a token budget (0 = no cap, undefined = configured). */
   setThinking(effort: ProviderRequest["effort"], budget: number | undefined): void {
     this.#effort = effort;

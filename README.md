@@ -103,6 +103,10 @@ then Bing, pages turned into readable text) and `hello.ts`.
 Defaults → `~/.kinoko/config.json` → `./.kinoko/config.json` → CLI flags. Kebab-case or camelCase,
 both work (`--max-turns` / `--maxTurns`).
 
+Models added from the TUI (`/models` → `+ add model`: endpoint, API key, then one of the models it
+serves) are kept in `~/.kinoko/models.json` (mode 0600: it holds the keys) and offered next to the
+configured one; picking one switches endpoint and model from the next request.
+
 ```json
 { "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any",
   "model": "qwen3.8-flash-next-coder-iq1_m-120k", "contextWindow": 122880,
