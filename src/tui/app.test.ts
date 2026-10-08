@@ -673,6 +673,8 @@ function host(served: Served[]) {
     connect: (entry) => (connected.push(entry), remote.provider as never),
     discover: async () => served,
     save: async (entry) => (saved.push(entry), [entry]),
+    remove: async () => [],
+    fixed: () => false,
   };
   return { models, connected, saved, remote };
 }
@@ -734,5 +736,41 @@ describe("adding a model", () => {
     h.press(ESC);
     expect(h.app.menuPage).toBeUndefined();
     expect(h.app.editorText).toBe("/models"); // back on the root, as it was
+  });
+});
+
+describe("removing a saved model", () => {
+  test("Del arms it (shown in red), Del again removes it; the page stays, redrawn; arrows disarm", async () => {
+    const configured: SavedModel = { model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" };
+    const typo: SavedModel = { model: "coder", baseUrl: "http://127.0.0.1:8081/v1", apiKey: "" };
+    const removed: SavedModel[] = [];
+    const models: ModelsHost = {
+      endpoint: configured.baseUrl,
+      saved: [configured, typo],
+      connect: () => scripted([]).provider as never,
+      discover: async () => [],
+      save: async () => [configured],
+      remove: async (entry) => (removed.push(entry), [configured]),
+      fixed: (entry) => entry === configured,
+    };
+    const h = await harness([], { models: [], modelsHost: models });
+    h.press("/models\r");
+    await new Promise((r) => setTimeout(r, 10));
+    // Items: test-model (configured, fixed), coder (removable), + add model.
+    h.press("\x1b[3~"); // Del on the configured one: nothing
+    h.press("\x1b[B"); // down to "coder"
+    h.press("\x1b[3~");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    expect(frame(h).some((row) => row.includes("coder") && row.includes("Del again to remove"))).toBe(true);
+    h.press("\x1b[A"); // moving away disarms...
+    h.press("\x1b[B");
+    h.press("\x1b[3~"); // ...so this Del only arms again
+    expect(removed).toEqual([]);
+    h.press("\x7f"); // Backspace counts as Del too: the second press removes
+    await new Promise((r) => setTimeout(r, 10));
+    expect(removed).toEqual([typo]);
+    expect(h.app.menuPage).toStartWith("Models"); // still on the page, redrawn
+    expect(h.app.marker).toBe("removed coder at 127.0.0.1:8081");
   });
 });

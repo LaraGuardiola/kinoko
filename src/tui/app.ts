@@ -68,6 +68,10 @@ export interface ModelsHost {
   discover: (baseUrl: string, apiKey: string, signal: AbortSignal) => Promise<Served[]>;
   /** Saves one entry; answers with the list to offer from now on. */
   save: (entry: SavedModel) => Promise<SavedModel[]>;
+  /** Removes one saved entry; answers with the list to offer from now on. */
+  remove: (entry: SavedModel) => Promise<SavedModel[]>;
+  /** Entries that cannot be removed from the TUI (the configured model). */
+  fixed: (entry: SavedModel) => boolean;
 }
 
 export class App {
@@ -566,7 +570,7 @@ export class App {
 
   #menuRows(): string[] {
     const page = this.#menu.page;
-    if (page) return pageRows(page, this.#menu.index, this.#menu.text);
+    if (page) return pageRows(page, this.#menu.index, this.#menu.text, this.#menu.armed);
     const items = this.#rootItems() ?? [];
     this.#menu.clamp(items.length);
     return items.length === 0 ? [] : listRows(items, this.#menu.index);
@@ -584,7 +588,15 @@ export class App {
       else if (key.name === "backspace") this.#menu.erase();
       else if (key.name === "enter") page.submit(this.#menu.text);
       else if (key.name === "ctrl-c") this.#closeMenu();
+    } else if (page?.kind === "list" && page.remove && (key.name === "delete" || key.name === "backspace")) {
+      // Del twice on a removable item: the first arms it, the second removes it.
+      const item = page.items[this.#menu.index];
+      if (item?.removable && item.key !== undefined) {
+        if (this.#menu.armed === item.key) page.remove(item);
+        else this.#menu.arm(item.key);
+      }
     } else if ((key.name === "up" || key.name === "down") && !key.alt) {
+      this.#menu.arm(undefined); // moving away cancels a pending removal
       this.#menu.move(key.name === "up" ? -1 : 1, count);
     } else if (key.name === "escape") {
       // A page goes back to the root; the root closes, back to an empty input.
@@ -637,24 +649,44 @@ export class App {
   }
 
   #openModels(): void {
-    const view = (served: string[] | undefined) => ({
+    let served: string[] | undefined;
+    const view = () => ({
       model: this.#model,
       endpoint: this.#endpoint,
       served,
       saved: this.#saved,
       canAdd: this.#host !== undefined,
+      fixed: this.#host?.fixed,
     });
     const choose = (choice: ModelChoice): void => {
       if (choice.kind === "add") this.#addModel();
       else if (choice.kind === "saved") this.#useModel(choice.entry);
+      else if (choice.kind === "remove") this.#removeModel(choice.entry, () => modelsPage(view(), choose));
       else this.#useModel({ model: choice.model, baseUrl: this.#endpoint, apiKey: "" });
     };
-    const asking = modelsPage(view(undefined), choose);
+    const asking = modelsPage(view(), choose);
     this.#menu.open(asking);
     void this.#agent
       .models(AbortSignal.timeout(10_000))
       .catch(() => [])
-      .then((names) => this.#menu.refresh(asking, modelsPage(view(names), choose)))
+      .then((names) => {
+        served = names;
+        this.#menu.refresh(asking, modelsPage(view(), choose));
+      })
+      .finally(() => this.render());
+  }
+
+  /** Forgets a saved model; the models page stays open, redrawn without it. */
+  #removeModel(entry: SavedModel, redraw: () => ListPage): void {
+    const page = this.#menu.page;
+    void this.#host
+      ?.remove(entry)
+      .then((saved) => {
+        this.#saved = saved;
+        if (page) this.#menu.refresh(page, redraw());
+        this.#marker = `removed ${entry.model} at ${hostOf(entry.baseUrl)}`;
+      })
+      .catch(() => (this.#marker = `could not remove ${entry.model}`))
       .finally(() => this.render());
   }
 

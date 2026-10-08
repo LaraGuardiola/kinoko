@@ -105,7 +105,8 @@ both work (`--max-turns` / `--maxTurns`).
 
 Models added from the TUI (`/models` → `+ add model`: endpoint, API key, then one of the models it
 serves) are kept in `~/.kinoko/models.json` (mode 0600: it holds the keys) and offered next to the
-configured one; picking one switches endpoint and model from the next request.
+configured one; picking one switches endpoint and model from the next request. Del twice on a saved
+model removes it (the configured one stays).
 
 ```json
 { "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any",

@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { rmSync, statSync } from "node:fs";
-import { loadSavedModels, saveModel } from "../config.ts";
+import { loadSavedModels, removeModel, saveModel } from "../config.ts";
 import { endpointOf, hostOf, modelsPage } from "./models-menu.ts";
 import type { ModelChoice } from "./models-menu.ts";
 
@@ -50,5 +50,18 @@ describe("saved models", () => {
     expect(await loadSavedModels(HOME)).toEqual(all);
     expect(statSync(`${HOME}/.kinoko/models.json`).mode & 0o777).toBe(0o600);
     expect(await loadSavedModels(`${HOME}/nowhere`)).toEqual([]);
+    // Removing takes out only that endpoint's model.
+    expect((await removeModel({ model: "a", baseUrl: "http://x/v1", apiKey: "" }, HOME)).map((m) => m.model)).toEqual(["b"]);
+  });
+
+  test("saved models can be removed, the configured one cannot; the page says how", () => {
+    const configured = { model: "qwen", baseUrl: "http://local:8081/v1", apiKey: "" };
+    const added = { model: "llama", baseUrl: "http://box:8080/v1", apiKey: "" };
+    const page = modelsPage(
+      { model: "qwen", endpoint: "http://local:8081/v1", served: [], saved: [configured, added], canAdd: true, fixed: (e) => e === configured },
+      () => undefined,
+    );
+    expect(page.items.map((i) => [i.name, i.removable ?? false])).toEqual([["qwen", false], ["llama", true], ["+ add model", false]]);
+    expect(page.hint).toBe("Enter to use · Del twice to remove a saved model");
   });
 });

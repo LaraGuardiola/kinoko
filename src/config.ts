@@ -136,11 +136,20 @@ export async function loadSavedModels(home = process.env.HOME ?? ""): Promise<Sa
   }
 }
 
-/** Adds (or replaces: same endpoint and model) one entry, and returns the list as now saved. */
-export async function saveModel(entry: SavedModel, home = process.env.HOME ?? ""): Promise<SavedModel[]> {
-  const others = (await loadSavedModels(home)).filter((m) => m.baseUrl !== entry.baseUrl || m.model !== entry.model);
-  const all = [...others, entry];
+const sameModel = (a: SavedModel, b: SavedModel): boolean => a.baseUrl === b.baseUrl && a.model === b.model;
+
+async function writeSaved(all: SavedModel[], home: string): Promise<SavedModel[]> {
   await mkdir(`${home}/.kinoko`, { recursive: true });
   await writeFile(modelsFile(home), `${JSON.stringify(all, null, 2)}\n`, { mode: 0o600 });
   return all;
+}
+
+/** Adds (or replaces: same endpoint and model) one entry, and returns the list as now saved. */
+export async function saveModel(entry: SavedModel, home = process.env.HOME ?? ""): Promise<SavedModel[]> {
+  return writeSaved([...(await loadSavedModels(home)).filter((m) => !sameModel(m, entry)), entry], home);
+}
+
+/** Removes the entry with this endpoint and model, and returns the list as now saved. */
+export async function removeModel(entry: SavedModel, home = process.env.HOME ?? ""): Promise<SavedModel[]> {
+  return writeSaved((await loadSavedModels(home)).filter((m) => !sameModel(m, entry)), home);
 }

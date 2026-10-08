@@ -5,7 +5,11 @@ import type { SavedModel } from "../config.ts";
 import type { Served } from "../providers/openai-compat.ts";
 import type { InputPage, ListPage, MenuItem } from "./menu.ts";
 
-export type ModelChoice = { kind: "served"; model: string } | { kind: "saved"; entry: SavedModel } | { kind: "add" };
+export type ModelChoice =
+  | { kind: "served"; model: string }
+  | { kind: "saved"; entry: SavedModel }
+  | { kind: "add" }
+  | { kind: "remove"; entry: SavedModel };
 
 export interface ModelsView {
   model: string;
@@ -15,6 +19,8 @@ export interface ModelsView {
   saved: SavedModel[];
   /** Offer "+ add model" (there is somewhere to save it). */
   canAdd: boolean;
+  /** Entries that cannot be removed here (the configured model: it lives in config.json). */
+  fixed?: (entry: SavedModel) => boolean;
 }
 
 export function hostOf(url: string): string {
@@ -45,7 +51,8 @@ export function modelsPage(view: ModelsView, choose: (choice: ModelChoice) => vo
     if (here && view.served?.includes(entry.model)) continue; // already listed above
     choices.set(`saved:${i}`, { kind: "saved", entry });
     const current = here && entry.model === view.model;
-    items.push({ name: entry.model, description: hostOf(entry.baseUrl), current, key: `saved:${i}` });
+    const removable = view.canAdd && !(view.fixed?.(entry) ?? false);
+    items.push({ name: entry.model, description: hostOf(entry.baseUrl), current, key: `saved:${i}`, removable });
   }
   if (view.canAdd) {
     choices.set("add", { kind: "add" });
@@ -60,6 +67,11 @@ export function modelsPage(view: ModelsView, choose: (choice: ModelChoice) => vo
       const choice = item.key === undefined ? undefined : choices.get(item.key);
       if (choice) choose(choice);
     },
+    remove: (item) => {
+      const choice = item.key === undefined ? undefined : choices.get(item.key);
+      if (choice?.kind === "saved" && item.removable) choose({ kind: "remove", entry: choice.entry });
+    },
+    hint: items.some((item) => item.removable) ? "Enter to use · Del twice to remove a saved model" : undefined,
   };
 }
 

@@ -1,4 +1,4 @@
-import { DEFAULTS, loadConfig, loadSavedModels, saveModel, thinkingLabel } from "./config.ts";
+import { DEFAULTS, loadConfig, loadSavedModels, removeModel, saveModel, thinkingLabel } from "./config.ts";
 import type { SavedModel } from "./config.ts";
 import { listModels, openaiCompat } from "./providers/openai-compat.ts";
 import { anthropic, modelInfo } from "./providers/anthropic.ts";
@@ -265,8 +265,10 @@ if (tui) {
       saved: [configured, ...(await loadSavedModels())],
       connect: (entry) => (entry.provider === "anthropic" ? anthropic : openaiCompat)({ ...providerOptions, baseUrl: entry.baseUrl, apiKey: entry.apiKey }),
       discover: listModels,
-      // The configured model stays first: it is always there to go back to.
+      // The configured model stays first: it is always there to go back to, and cannot be removed.
       save: async (entry) => [configured, ...(await saveModel(entry))],
+      remove: async (entry) => [configured, ...(await removeModel(entry))],
+      fixed: (entry) => entry.baseUrl === configured.baseUrl && entry.model === configured.model,
     },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
     viewportRows: Math.max(2, term.rows - 1),

@@ -9,6 +9,8 @@ export interface MenuItem {
   description: string;
   /** Tells apart items whose names can repeat (one model id at two endpoints). */
   key?: string;
+  /** Del (twice) removes it: the page has a `remove` for it. */
+  removable?: boolean;
   /** The value in effect now (the current model, the current thinking profile). */
   current?: boolean;
 }
@@ -20,6 +22,10 @@ export interface ListPage {
   /** What to show while there are no items (still loading, or nothing to list). */
   empty: string;
   pick: (item: MenuItem) => void;
+  /** Removes a `removable` item, after Del was pressed on it twice. */
+  remove?: (item: MenuItem) => void;
+  /** A dim line under the list: what else the keys do here. */
+  hint?: string;
 }
 
 export interface InfoPage {
@@ -50,6 +56,7 @@ export class Menu {
   #page: MenuPage | undefined;
   #index = 0;
   #text = ""; // what is typed on an input page
+  #armed: string | undefined; // the item one more Del removes
 
   /** The page open on top of the root, if any. */
   get page(): MenuPage | undefined {
@@ -64,6 +71,15 @@ export class Menu {
     return this.#text;
   }
 
+  get armed(): string | undefined {
+    return this.#armed;
+  }
+
+  /** The first Del on an item arms it (the second removes it); any other key disarms. */
+  arm(key: string | undefined): void {
+    this.#armed = key;
+  }
+
   /** Typing on an input page: printable text only (a paste may hold a newline). */
   type(text: string): void {
     this.#text += text.replace(/[\r\n]/g, "");
@@ -76,6 +92,7 @@ export class Menu {
   open(page: MenuPage): void {
     this.#page = page;
     this.#text = "";
+    this.#armed = undefined;
     this.#index = page.kind === "list" ? Math.max(0, page.items.findIndex((item) => item.current)) : 0;
   }
 
@@ -120,7 +137,7 @@ export function filterRoot(items: MenuItem[], typed: string): MenuItem[] {
 }
 
 /** A list as rows: the selection marked with an arrow, names in orange, descriptions dimmed. */
-export function listRows(items: MenuItem[], selected: number, title?: string, empty = ""): string[] {
+export function listRows(items: MenuItem[], selected: number, title?: string, empty = "", armed?: string, hint?: string): string[] {
   const rows = title ? [`${ANSI.bold}${ORANGE}${title}${ANSI.reset}`] : [];
   if (items.length === 0) return [...rows, `  ${ANSI.dim}${empty}${ANSI.reset}`];
   const start = Math.min(Math.max(0, selected - Math.floor(MENU_ROWS / 2)), Math.max(0, items.length - MENU_ROWS));
@@ -129,15 +146,18 @@ export function listRows(items: MenuItem[], selected: number, title?: string, em
     const chosen = start + i === selected;
     const name = `${chosen ? ANSI.bold : ""}${ORANGE}${item.name.padEnd(width)}${ANSI.reset}`;
     const mark = item.current ? `${ORANGE}● ${ANSI.reset}` : "";
-    rows.push(`${chosen ? `${ORANGE}→${ANSI.reset} ` : "  "}${name}${mark}${ANSI.dim}${item.description}${ANSI.reset}`);
+    const about = item.key !== undefined && item.key === armed
+      ? `${ANSI.amanita}Del again to remove${ANSI.reset}`
+      : `${ANSI.dim}${item.description}${ANSI.reset}`;
+    rows.push(`${chosen ? `${ORANGE}→${ANSI.reset} ` : "  "}${name}${mark}${about}`);
   }
-  rows.push(`  ${ANSI.dim}(${selected + 1}/${items.length})${ANSI.reset}`);
+  rows.push(`  ${ANSI.dim}(${selected + 1}/${items.length})${hint ? `  ${hint}` : ""}${ANSI.reset}`);
   return rows;
 }
 
-/** The open page as rows. `text` is what is typed on an input page. */
-export function pageRows(page: MenuPage, selected: number, text = ""): string[] {
-  if (page.kind === "list") return listRows(page.items, selected, page.title, page.empty);
+/** The open page as rows. `text` is what is typed on an input page; `armed` the item Del armed. */
+export function pageRows(page: MenuPage, selected: number, text = "", armed?: string): string[] {
+  if (page.kind === "list") return listRows(page.items, selected, page.title, page.empty, armed, page.hint);
   if (page.kind === "input") {
     const shown = page.secret ? "•".repeat([...text].length) : text;
     return [
