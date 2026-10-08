@@ -258,3 +258,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 - `bash`: stdin is closed (a command waiting for input used to hang forever), utf8 decoding per stream (multi-byte chars split across chunks were mangled), default timeout 300 s.
 - `write`: says which argument is missing; reports lines and chars.
 - `bun run check` passes (231 tests). src net −12 lines.
+
+## fix/llm-behaviour, round 3: "the harness rewrites my files" — DONE
+- Traced session `e58094f8` (66 turns, 9 of them suspecting the environment): every write landed exactly as sent and every read matched; Strata does render past tool-call arguments into the prompt (measured: longer args → more prompt tokens). The model sees its own calls and even spots its own typos in them (`color: 'POWERUPS.magnet'`). The cause is the model: what it emits differs from what it meant (1.75-bit quant), and when it reads the file back it does not recognise its own output. Its `_probe.ts` "test" wrote `MARKER = 42`, read `MARKER = 42`, and concluded the harness rewrites files. One trigger came from the harness: a read with `offset: 30` showed only a slice of a file, which the model took for the whole file.
+- `read`: every partial view is labelled (`[lines a-b of N]`, plus `continue with offset=` when more follows).
+- System prompt: one line, files change only through the tools or the user, so when a file differs from memory, trust the tool result.
+- `edit`: "missing path (string)", like write.
+- Tool errors fell from 13 (voxel session, 214 turns) to 2 in this one (66 turns).
+- `bun run check` passes (231 tests; the session #5 mtime flake fired once).

@@ -31,6 +31,7 @@ describe("kinoko core tools", () => {
     expect(out).toBe("1: one\n2: two\n3: three");
     const paged = await r.run({ path: "a.txt", offset: 2, limit: 1 }, ctx(dir));
     expect(paged).toBe("2: two\n[lines 2-2 of 3; continue with offset=3]");
+    expect(await r.run({ path: "a.txt", offset: 3 }, ctx(dir))).toBe("3: three\n[lines 3-3 of 3]");
     writeFileSync(`${dir}/b.bin`, "a\u0000b");
     const bin = await r.run({ path: "b.bin" }, ctx(dir));
     expect(bin).toContain("ERROR");

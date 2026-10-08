@@ -14,6 +14,7 @@ const PERSONA = [
   "- Explore before you edit: read the files you are about to change and the code around them.",
   "- Smallest change that does the job. No drive-by refactors, no unrequested files.",
   "- Say what you found when something contradicts the task, then continue with the best assumption.",
+  "- Files change only through your tools or the user. If a file is not what you remember, your memory is wrong: trust the tool result.",
   "- Stop when the task is done. Do not invent follow-up work.",
 ];
 

@@ -112,7 +112,7 @@ function fileIsBinary(text: string): boolean {
 
 async function editRun(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {
   const path = args.path;
-  if (typeof path !== "string") return "ERROR: edit: path must be a string";
+  if (typeof path !== "string") return "ERROR: edit: missing path (string)";
   const abs = resolve(ctx.cwd, path);
   const file = Bun.file(abs);
   if (!await file.exists()) return `ERROR: edit: file not found: ${path}`;

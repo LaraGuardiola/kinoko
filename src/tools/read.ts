@@ -43,8 +43,9 @@ async function readRun(args: Record<string, unknown>, ctx: ToolContext): Promise
     chars += row.length + 1;
   }
   await remember(abs, text);
-  // Say when the file goes on, so a partial read is never mistaken for the whole file.
-  if (n <= lines.length) out.push(`[lines ${offset}-${n - 1} of ${lines.length}; continue with offset=${n}]`);
+  // Label every partial view, so a slice is never mistaken for the whole file.
+  const more = n <= lines.length ? `; continue with offset=${n}` : "";
+  if (offset > 1 || more) out.push(`[lines ${offset}-${n - 1} of ${lines.length}${more}]`);
   return out.join("\n");
 }
 
