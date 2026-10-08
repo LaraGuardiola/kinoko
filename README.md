@@ -37,6 +37,9 @@ an `AbortSignal`, nothing blocks the event loop, and the keyboard always wins:
 | `Ctrl-P` / `Ctrl-N` | previous / next history entry | same |
 | `Shift+Enter` / `Ctrl-J` / `Ctrl-O` | newline inside the editor | same |
 
+`Alt+Enter` is told apart from `Shift+Enter` only by terminals with the kitty keyboard protocol;
+elsewhere both send ESC+Enter, which kinoko reads as a newline (as Claude Code and pi do).
+
 Queued messages are never lost: abort a run and they come back in the editor with an
 `Interrupted` marker. `docs/interruption.md` is the contract.
 

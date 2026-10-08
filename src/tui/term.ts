@@ -151,8 +151,10 @@ export class KeyParser {
       }
 
       if (rest.startsWith("\x1b\r") || rest.startsWith("\x1b\n")) {
-        // Alt+Enter in the legacy encoding (some terminals are set up to send it for Shift+Enter).
-        keys.push({ name: "enter", alt: true });
+        // ESC+Enter is what terminals are set up to send for Shift+Enter (Zed, VS Code, iTerm with
+        // Claude Code's setup), so it is a newline, as in other TUIs. Alt+Enter sends the same bytes
+        // in the legacy encoding; with the kitty protocol it arrives apart as CSI 13;3u.
+        keys.push({ name: "shift-enter" });
         i += 2;
         continue;
       }

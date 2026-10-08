@@ -413,7 +413,6 @@ export class App {
       markerAlert: this.#marker.startsWith("Interrupted"),
       queued: this.#queued,
       editorLines: view.lines,
-      editorEmpty: this.#editor.empty,
       editorRow: view.row,
       editorCol: view.col,
       status: this.statusLine,

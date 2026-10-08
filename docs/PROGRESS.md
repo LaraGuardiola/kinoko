@@ -214,3 +214,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Band overflow fixed: width math is per terminal column (`style.ts` `charWidth`: wide emoji/CJK = 2, combining = 0, code-point iteration); tabs in transcript blocks expand to 4 spaces.
 - Shift+Enter inserts a newline: Term pushes the kitty keyboard protocol (level 1) on start and pops it on stop; `CSI 13;2u` is Shift+Enter, and the parser understands CSI-u Esc/Ctrl/Alt keys. Ctrl+J (`\n`) is a newline everywhere; legacy `ESC CR` is Alt+Enter (follow-up/submit) as the spec says.
 - `bun run check` passes (197 tests, zero warnings). Rebuilt and installed `~/.local/bin/kinoko`.
+
+## TUI: Shift+Enter for real, no placeholder, coloured path — DONE
+- Root cause: Zed (like VS Code/iTerm set up by Claude Code) sends ESC+CR for Shift+Enter (`~/.config/zed/keymap.json`), and kinoko read ESC+CR as Alt+Enter (submit/follow-up). ESC+CR is now a newline, as in Claude Code and pi; kitty `CSI 13;2u` too. Alt+Enter (follow-up) remains available where the kitty protocol tells it apart (`CSI 13;3u`).
+- The idle placeholder is gone: an empty editor shows only the block cursor. Dropped the now-unused `editorEmpty` from RegionInput.
+- Place line: path in amanita cream `rgb(238,222,186)`, branch in amanita red.
+- Tests: app-level ESC+CR / CSI 13;2u newline test, place colours. `bun run check` passes (199 tests). Rebuilt and installed `~/.local/bin/kinoko`.

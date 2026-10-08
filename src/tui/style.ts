@@ -11,6 +11,8 @@ export const ANSI = {
   user: `${ESC}38;5;159m`,
   // Amanita muscaria red: the input rules and interruptions.
   amanita: `${ESC}38;2;232;36;36m`,
+  // Its cream stem: the working directory.
+  cream: `${ESC}38;2;238;222;186m`,
   // Yellow means "a tool": the dot and the name share it.
   tool: `${ESC}1;38;5;221m`,
   toolDot: `${ESC}38;5;221m`,

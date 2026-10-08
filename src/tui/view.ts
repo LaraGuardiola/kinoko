@@ -56,7 +56,6 @@ export interface RegionInput {
   markerAlert?: boolean;
   queued: QueuedView[];
   editorLines: string[];
-  editorEmpty: boolean;
   editorRow: number;
   editorCol: number;
   status: string;
@@ -173,15 +172,12 @@ export function liveRegion(input: RegionInput): Region {
     tail.push(`${ANSI.dim}${tag}${ANSI.reset} ${item.text}`);
   }
   // The editor sits between two rules, with a block cursor drawn in place (the terminal's own
-  // cursor stays hidden). Empty, it shows the hint as a placeholder under the cursor.
-  const placeholder = input.editorEmpty && input.editorLines.length === 1 && input.editorLines[0] === "";
-  const editor = placeholder
-    ? [`${ANSI.inverse}${HINT[0]}${ANSI.reset}${ANSI.dim}${HINT.slice(1)}${ANSI.reset}`]
-    : input.editorLines.map((line, i) => (i === input.editorRow ? withCursor(line, input.editorCol) : line));
+  // cursor stays hidden).
+  const editor = input.editorLines.map((line, i) => (i === input.editorRow ? withCursor(line, input.editorCol) : line));
   const rule = `${ANSI.amanita}${"─".repeat(Math.max(1, (input.viewportCols ?? 80) - 2))}${ANSI.reset}`;
   // A blank row keeps the transcript off the input.
   let head = ["", rule];
-  let foot = [rule, ...(input.place ? [`${ANSI.dim}${input.place}${ANSI.reset}`] : []), input.status];
+  let foot = [rule, ...(input.place ? [placeRow(input.place)] : []), input.status];
 
   const viewport = input.viewportRows;
   const width = input.viewportCols === undefined ? undefined : Math.max(1, input.viewportCols - 2);
@@ -209,7 +205,12 @@ export function liveRegion(input: RegionInput): Region {
   return region(rows, row, input.editorCol, input.viewportCols);
 }
 
-const HINT = "type a prompt, enter to send, enter while running to steer";
+/** The path in amanita's cream stem, the branch in its red cap. */
+function placeRow(place: string): string {
+  const branch = /^(.*) \(([^)]*)\)$/.exec(place);
+  if (branch === null) return `${ANSI.cream}${place}${ANSI.reset}`;
+  return `${ANSI.cream}${branch[1]}${ANSI.reset} ${ANSI.amanita}(${branch[2]})${ANSI.reset}`;
+}
 
 /** Draws the block cursor over the character at `col` (a space past the end of the line). */
 function withCursor(line: string, col: number): string {
@@ -263,7 +264,7 @@ export const HELP = [
   "kinoko keys",
   "",
   "  Enter          send as prompt (idle) / steer (running)",
-  "  Alt+Enter      follow-up (running) / send as prompt (idle)",
+  "  Alt+Enter      follow-up (running) / send as prompt (idle), kitty-protocol terminals",
   "  Esc            abort the run (nothing when idle)",
   "  Ctrl-C         abort / clear the editor / quit on a second press",
   "  Ctrl-D         quit when the editor is empty",

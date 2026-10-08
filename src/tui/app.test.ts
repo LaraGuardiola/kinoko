@@ -211,7 +211,7 @@ describe("TUI app with the agent", () => {
     h.press("question\r");
     await new Promise((r) => setTimeout(r, 5));
     h.press("restate it"); // type it first
-    h.press("\x1b\r"); // then Alt+Enter, as its own write
+    h.press("\x1b[13;3u"); // then Alt+Enter (kitty protocol), as its own write
     expect(h.app.queued.map((q) => q.kind)).toEqual(["followUp"]);
     expect(h.app.queued[0]?.text).toBe("restate it");
 
@@ -296,6 +296,17 @@ describe("TUI app with the agent", () => {
     expect(line).toContain("cache 25%");
     expect(line).toContain("IDLE");
     expect(h.screen()).toContain("IDLE");
+  });
+
+  test("8a. Shift+Enter as Zed/VS Code send it (ESC+CR) adds a line instead of sending", async () => {
+    const h = await harness([]);
+    h.press("first");
+    h.press("\x1b\r");
+    h.press("second");
+    expect(h.app.editorText).toBe("first\nsecond");
+    expect(h.agent.state).toBe("idle");
+    h.press("\x1b[13;2u"); // the kitty protocol spelling
+    expect(h.app.editorText).toBe("first\nsecond\n");
   });
 
   test("8b. several tool calls in one turn print as separate bands, a blank row between them", async () => {

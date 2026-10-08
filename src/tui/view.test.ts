@@ -13,7 +13,6 @@ function input(over: Partial<RegionInput> = {}): RegionInput {
     marker: "",
     queued: [],
     editorLines: [""],
-    editorEmpty: true,
     editorRow: 0,
     editorCol: 0,
     status: " IDLE ",
@@ -22,24 +21,23 @@ function input(over: Partial<RegionInput> = {}): RegionInput {
 }
 
 describe("live region", () => {
-  test("idle: a blank row, the editor between two rules with the hint as placeholder, the status", () => {
+  test("idle: a blank row, the editor between two red rules with only the cursor, the status", () => {
     const region = liveRegion(input({ viewportRows: 10, viewportCols: 20 }));
     const plain = region.lines.map(stripAnsi);
-    expect(plain).toHaveLength(5);
-    expect(plain[0]).toBe("");
-    expect(plain[1]).toBe("─".repeat(18));
-    expect(plain[2]?.startsWith("type a prompt")).toBe(true);
-    expect(plain[3]).toBe("─".repeat(18));
-    expect(plain[4]).toBe(" IDLE ");
-    // The placeholder's first letter wears the block cursor.
-    expect(region.lines[2]?.startsWith("\x1b[7mt\x1b[0m")).toBe(true);
+    expect(plain).toEqual(["", "─".repeat(18), " ", "─".repeat(18), " IDLE "]);
+    expect(region.lines[2]).toBe("\x1b[7m \x1b[0m");
     expect(region.row).toBe(2);
   });
 
+  test("the path is cream and the branch amanita red", () => {
+    const region = liveRegion(input({ place: "~/p (master)" }));
+    expect(region.lines.at(-2)).toBe("\x1b[38;2;238;222;186m~/p\x1b[0m \x1b[38;2;232;36;36m(master)\x1b[0m");
+  });
+
   test("the block cursor sits on the character under it, or past the end of the line", () => {
-    const mid = liveRegion(input({ editorLines: ["abc"], editorEmpty: false, editorCol: 1 }));
+    const mid = liveRegion(input({ editorLines: ["abc"], editorCol: 1 }));
     expect(mid.lines[2]).toBe("a\x1b[7mb\x1b[0mc");
-    const end = liveRegion(input({ editorLines: ["abc"], editorEmpty: false, editorCol: 3 }));
+    const end = liveRegion(input({ editorLines: ["abc"], editorCol: 3 }));
     expect(end.lines[2]).toBe("abc\x1b[7m \x1b[0m");
   });
 
@@ -77,7 +75,6 @@ describe("live region", () => {
       input({
         open: { kind: "assistant", text: "one\ntwo\nthree\nfour", gap: false, inFence: false },
         editorLines: ["draft"],
-        editorEmpty: false,
         editorCol: 5,
         viewportRows: 6,
       }),
@@ -87,7 +84,7 @@ describe("live region", () => {
   });
 
   test("a tiny viewport drops the chrome but keeps the editor and the status", () => {
-    const region = liveRegion(input({ editorLines: ["x"], editorEmpty: false, editorCol: 1, viewportRows: 3 }));
+    const region = liveRegion(input({ editorLines: ["x"], editorCol: 1, viewportRows: 3 }));
     expect(region.lines.map(stripAnsi)).toEqual(["x ", " IDLE "]);
     expect(region.row).toBe(0);
   });
@@ -102,7 +99,7 @@ describe("live region", () => {
 
   test("clips styled rows before the terminal margin", () => {
     const region = liveRegion(
-      input({ editorLines: ["abcdefgh"], editorEmpty: false, editorCol: 8, viewportRows: 3, viewportCols: 6 }),
+      input({ editorLines: ["abcdefgh"], editorCol: 8, viewportRows: 3, viewportCols: 6 }),
     );
     expect(region.lines[0]).toBe("abc…\x1b[0m");
     expect(region.col).toBe(4);
@@ -112,7 +109,6 @@ describe("live region", () => {
     const region = liveRegion(
       input({
         open: { kind: "assistant", text: "x ".repeat(50), gap: false, inFence: false },
-        editorEmpty: false,
         viewportRows: 20,
         viewportCols: 40,
       }),

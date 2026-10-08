@@ -63,8 +63,9 @@ describe("tui key parser", () => {
     ]);
   });
 
-  test("6. legacy alt+enter stays alt+enter; ctrl+j is the newline key", () => {
-    expect(parse("\x1b\r")).toEqual([{ name: "enter", alt: true }]);
+  test("6. ESC+Enter (what terminals send for Shift+Enter) and ctrl+j are the newline key", () => {
+    expect(names("\x1b\r")).toEqual(["shift-enter"]);
+    expect(names("\x1b\n")).toEqual(["shift-enter"]);
     expect(names("\n")).toEqual(["shift-enter"]);
     expect(names("\r")).toEqual(["enter"]);
   });
