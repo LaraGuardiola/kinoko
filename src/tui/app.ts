@@ -718,13 +718,15 @@ export class App {
     };
     const asking = servedPage(host, undefined, keep);
     this.#menu.open(asking);
-    const byHand = (): void => {
-      this.#menu.refresh(asking, namePage(host, (id) => id.trim() && keep({ id: id.trim() })));
+    // An endpoint that answers but lists nothing, and one that does not answer at all, both lead
+    // to typing the id; only the second is probably a mistake (a wrong port, a server not started).
+    const byHand = (reachable: boolean): void => {
+      this.#menu.refresh(asking, namePage(host, reachable, (id) => id.trim() && keep({ id: id.trim() })));
     };
     void this.#host
       ?.discover(baseUrl, apiKey, AbortSignal.timeout(10_000))
-      .then((served) => (served.length > 0 ? this.#menu.refresh(asking, servedPage(host, served, keep)) : byHand()))
-      .catch(byHand)
+      .then((served) => (served.length > 0 ? this.#menu.refresh(asking, servedPage(host, served, keep)) : byHand(true)))
+      .catch(() => byHand(false))
       .finally(() => this.render());
   }
 

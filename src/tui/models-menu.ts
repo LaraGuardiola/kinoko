@@ -115,12 +115,10 @@ export function servedPage(host: string, served: Served[] | undefined, choose: (
   };
 }
 
-export function namePage(host: string, submit: (text: string) => void): InputPage {
-  return {
-    kind: "input",
-    title: `Add model · 3/3 · ${host}`,
-    label: "Model",
-    hint: `The endpoint did not list its models: type the model id · ${STEPS}`,
-    submit,
-  };
+/** The model id typed by hand. `reachable` false: nothing answered, which is worth saying first. */
+export function namePage(host: string, reachable: boolean, submit: (text: string) => void): InputPage {
+  const why = reachable
+    ? "The endpoint did not list its models: type the model id"
+    : `Nothing answered at ${host}: is its server running? Esc to go back, or type the model id anyway`;
+  return { kind: "input", title: `Add model · 3/3 · ${host}`, label: "Model", hint: `${why} · ${STEPS}`, submit };
 }

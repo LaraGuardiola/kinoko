@@ -374,3 +374,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - On `/models`, Del (or Backspace) on a saved model arms it (its description turns red: "Del again to remove"), a second press removes it from `~/.kinoko/models.json` (`removeModel`) and the page redraws in place; moving the selection disarms. The configured model (from config.json) is not removable here (`ModelsHost.fixed`), so there is always one to go back to. The page's last row says so when anything is removable.
 - Menu: list pages may carry `remove` and a `hint`; items may be `removable`; `Menu.arm` holds the armed item until the selection moves or the page changes.
 - Tests: removeModel, removable flags and the hint (models-menu.test), the two-press flow with a fixed entry ignoring Del, disarm on move, Backspace as Del, the page staying open (app.test). `bun run check` passes (283 tests).
+
+## feat/tui-slash-menu: say when an endpoint does not answer — DONE
+- Adding a model at an endpoint where nothing was running went straight to "type the model id" (that is how a wrong port and a made-up id ended up saved). The id step now tells the two cases apart: an endpoint that answered with no list ("did not list its models"), and one that did not answer at all ("Nothing answered at host: is its server running? Esc to go back, or type the model id anyway").
+- Tests: both hints (app.test). `bun run check` passes (284 tests).

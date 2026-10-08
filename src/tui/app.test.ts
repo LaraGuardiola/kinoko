@@ -720,6 +720,9 @@ describe("adding a model", () => {
     h.press("\r"); // no key
     await new Promise((r) => setTimeout(r, 10));
     expect(h.app.menuPage).toBe("Add model · 3/3 · box:8080");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    expect(frame(h).join("\n")).toContain("did not list its models"); // it answered, with nothing
     h.press("my-model\r");
     await new Promise((r) => setTimeout(r, 10));
     expect(remote.saved).toEqual([{ model: "my-model", baseUrl: "http://box:8080", apiKey: "", contextWindow: undefined }]);
@@ -773,4 +776,27 @@ describe("removing a saved model", () => {
     expect(h.app.menuPage).toStartWith("Models"); // still on the page, redrawn
     expect(h.app.marker).toBe("removed coder at 127.0.0.1:8081");
   });
+});
+
+test("adding a model at an endpoint where nothing answers says so before asking for an id", async () => {
+  const models: ModelsHost = {
+    endpoint: "http://local:8081/v1",
+    saved: [],
+    connect: () => scripted([]).provider as never,
+    discover: async () => {
+      throw new Error("ECONNREFUSED");
+    },
+    save: async (entry) => [entry],
+    remove: async () => [],
+    fixed: () => false,
+  };
+  const h = await harness([], { models: [], modelsHost: models });
+  h.press("/models\r");
+  await new Promise((r) => setTimeout(r, 10));
+  h.press("\x1b[A\r"); // "+ add model"
+  h.press("127.0.0.1:8080/v1\r");
+  h.press("\r");
+  await new Promise((r) => setTimeout(r, 50));
+  h.app.render();
+  expect(frame(h).join("\n")).toContain("Nothing answered at 127.0.0.1:8080: is its server running?");
 });
