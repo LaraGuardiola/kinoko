@@ -356,7 +356,7 @@ export class App {
     if (this.#open !== undefined && this.#open.kind !== kind) this.#closeBlock();
     // Whitespace between two blocks must not open a block of its own.
     if (this.#open === undefined && delta.trim() === "") return;
-    const open = (this.#open ??= { kind: kind, text: "", gap: this.#printedAny, inFence: false });
+    const open = (this.#open ??= { kind: kind, text: "", gap: this.#printedAny });
     open.text += delta;
     this.#spill();
   }
@@ -365,11 +365,11 @@ export class App {
   #spill(): void {
     const open = this.#open;
     if (open === undefined) return;
-    const split = splitStable(open.text, this.#viewportCols, open.inFence);
+    const split = splitStable(open.text, this.#viewportCols);
     if (split === undefined) return;
-    const chunk = formatBlock(open.kind, split.commit, open.inFence);
+    const chunk = formatBlock(open.kind, split.commit, this.#width);
     const gap = open.gap;
-    this.#open = { kind: open.kind, text: split.rest, gap: split.gap, inFence: split.restInFence };
+    this.#open = { kind: open.kind, text: split.rest, gap: split.gap };
     if (chunk !== "") this.#print(open.kind, chunk, gap);
   }
 
@@ -378,7 +378,7 @@ export class App {
     const open = this.#open;
     if (open === undefined) return;
     this.#open = undefined;
-    const text = formatBlock(open.kind, open.text, open.inFence);
+    const text = formatBlock(open.kind, open.text, this.#width);
     if (text !== "") this.#print(open.kind, text, open.gap);
   }
 
@@ -407,6 +407,11 @@ export class App {
   }
 
   // ---- the live region ----
+
+  /** Columns a printed row may take: the renderer keeps a margin on each side. */
+  get #width(): number {
+    return (this.#viewportCols ?? 80) - 2;
+  }
 
   #state(): { lines: string[]; row: number; col: number } {
     // The block cursor may sit one column past the text, plus the renderer's margins.

@@ -54,26 +54,26 @@ describe("live region", () => {
   });
 
   test("the open block renders above the editor, the thinking style is dim italic", () => {
-    const region = liveRegion(input({ open: { kind: "thinking", text: "reasoning", gap: false, inFence: false } }));
+    const region = liveRegion(input({ open: { kind: "thinking", text: "reasoning", gap: false } }));
     expect(region.lines[0]).toBe("\x1b[2m\x1b[3mreasoning\x1b[0m");
-    const answer = liveRegion(input({ open: { kind: "assistant", text: "answer", gap: false, inFence: false } }));
+    const answer = liveRegion(input({ open: { kind: "assistant", text: "answer", gap: false } }));
     expect(answer.lines[0]).toBe("answer");
   });
 
   test("only ONE block is ever open: thinking and answer are never in the region together", () => {
-    const region = liveRegion(input({ open: { kind: "assistant", text: "answer", gap: false, inFence: false } }));
+    const region = liveRegion(input({ open: { kind: "assistant", text: "answer", gap: false } }));
     expect(region.lines.filter((line) => stripAnsi(line) === "reasoning")).toHaveLength(0);
   });
 
   test("a gap puts a blank row before the open block", () => {
-    const region = liveRegion(input({ open: { kind: "assistant", text: "x", gap: true, inFence: false } }));
+    const region = liveRegion(input({ open: { kind: "assistant", text: "x", gap: true } }));
     expect(region.lines.slice(0, 2)).toEqual(["", "x"]);
   });
 
   test("a short viewport keeps the tail of the open block with the editor pinned below it", () => {
     const region = liveRegion(
       input({
-        open: { kind: "assistant", text: "one\ntwo\nthree\nfour", gap: false, inFence: false },
+        open: { kind: "assistant", text: "one\ntwo\nthree\nfour", gap: false },
         editorLines: ["draft"],
         editorCol: 5,
         viewportRows: 6,
@@ -92,7 +92,7 @@ describe("live region", () => {
   test("the region never exceeds the viewport", () => {
     const text = Array.from({ length: 60 }, (_, i) => `row ${i}`).join("\n");
     const region = liveRegion(
-      input({ open: { kind: "assistant", text, gap: false, inFence: false }, queued: [{ kind: "steer", text: "later" }], viewportRows: 8 }),
+      input({ open: { kind: "assistant", text, gap: false }, queued: [{ kind: "steer", text: "later" }], viewportRows: 8 }),
     );
     expect(region.lines.length).toBeLessThanOrEqual(8);
   });
@@ -108,7 +108,7 @@ describe("live region", () => {
   test("long streaming rows wrap to the full width instead of ending in an ellipsis", () => {
     const region = liveRegion(
       input({
-        open: { kind: "assistant", text: "x ".repeat(50), gap: false, inFence: false },
+        open: { kind: "assistant", text: "x ".repeat(50), gap: false },
         viewportRows: 20,
         viewportCols: 40,
       }),
@@ -133,7 +133,7 @@ describe("live region", () => {
   });
 
   test("an interruption sits after a blank row, in the same red as the input rules", () => {
-    const region = liveRegion(input({ open: { kind: "assistant", text: "partial", gap: false, inFence: false }, marker: "Interrupted", markerAlert: true }));
+    const region = liveRegion(input({ open: { kind: "assistant", text: "partial", gap: false }, marker: "Interrupted", markerAlert: true }));
     expect(region.lines.slice(0, 3)).toEqual(["partial", "", "\x1b[38;2;232;36;36mInterrupted\x1b[0m"]);
     expect(region.lines[4]).toStartWith("\x1b[38;2;232;36;36m─");
   });
@@ -171,9 +171,9 @@ describe("formatBlock", () => {
     expect(formatBlock("assistant", "\n \n").trim()).toBe("");
   });
 
-  test("a chunk that starts inside a fence stays code: nothing is inline-formatted", () => {
-    expect(stripAnsi(formatBlock("assistant", "a = **b**", true))).toBe("a = **b**");
-    expect(formatBlock("assistant", "a = **b**", false)).toContain("\x1b[1mb");
+  test("assistant text is wrapped by word to the width it is given", () => {
+    const rows = formatBlock("assistant", "alpha beta gamma delta epsilon", 12).split("\n");
+    expect(rows).toEqual(["alpha beta", "gamma delta", "epsilon"]);
   });
 });
 
@@ -193,28 +193,28 @@ describe("splitStable", () => {
     expect(split?.rest).toBe("live par");
     expect(split?.commit).toBe(done.join("\n\n"));
     expect(split?.gap).toBe(true);
-    expect(split?.restInFence).toBe(false);
   });
 
-  test("a blank line inside a code fence is not a paragraph boundary", () => {
-    const code = Array.from({ length: 20 }, (_, i) => (i === 10 ? "" : `line ${i}`));
+  test("a code block is never cut: it stays live until it closes, whatever its height", () => {
+    const code = Array.from({ length: 30 }, (_, i) => (i === 10 ? "" : `line ${i}`));
     const split = splitStable(["intro", "", "```ts", ...code].join("\n"), 80);
-    // The block is taller than the region, so it is cut by line (no paragraph gap), and the rest
-    // knows it is still inside the fence. The inner blank line was not taken for a paragraph end.
-    expect(split?.gap).toBe(false);
-    expect(split?.restInFence).toBe(true);
-    expect(`${split?.commit}\n${split?.rest}`).toBe(["intro", "", "```ts", ...code].join("\n"));
+    // The blank line inside the fence is not a paragraph end: only the intro may move.
+    expect(split?.commit).toBe("intro");
+    expect(split?.rest.startsWith("```ts")).toBe(true);
+    expect(splitStable(["```ts", ...code].join("\n"), 80)).toBeUndefined();
   });
 
-  test("a block taller than the region is cut by line and remembers it is inside a fence", () => {
-    const lines = ["```ts", ...Array.from({ length: 30 }, (_, i) => `const a${i} = 1;`)];
+  test("after the fence closes, the whole block moves at once", () => {
+    const lines = ["```ts", ...Array.from({ length: 30 }, (_, i) => `const a${i} = 1;`), "```", "", "after"];
     const split = splitStable(lines.join("\n"), 80);
-    expect(split?.restInFence).toBe(true);
-    expect(split?.gap).toBe(false);
-    expect(`${split?.commit}\n${split?.rest}`).toBe(lines.join("\n"));
-    // Cutting again knows the rest already starts inside the fence.
-    const again = splitStable(`${split?.rest}\n${"const z = 2;\n".repeat(30)}`, 80, true);
-    expect(again?.restInFence).toBe(true);
+    expect(split?.rest).toBe("after");
+    expect(split?.commit.endsWith("```")).toBe(true);
+  });
+
+  test("a table is never cut between its rows", () => {
+    const rows = ["| a | b |", "| - | - |", ...Array.from({ length: 30 }, (_, i) => `| ${i} | x |`)];
+    expect(splitStable(["intro", "", ...rows].join("\n"), 80)?.commit).toBe("intro");
+    expect(splitStable(rows.join("\n"), 80)).toBeUndefined();
   });
 
   test("nothing is lost or duplicated across cuts", () => {

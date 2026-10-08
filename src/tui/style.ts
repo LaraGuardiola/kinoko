@@ -27,7 +27,7 @@ export const ANSI = {
  * columns each takes: a wide emoji or CJK character takes two, a combining mark none. Counting a
  * ✅ as one column is what made rows overflow their band.
  */
-function* cells(line: string): Generator<{ text: string; width: number; seq: boolean }> {
+export function* cells(line: string): Generator<{ text: string; width: number; seq: boolean }> {
   for (let index = 0; index < line.length;) {
     if (line.startsWith("\x1b[", index)) {
       const end = line.slice(index + 2).search(/[@-~]/);
@@ -70,6 +70,63 @@ export function wrapAnsi(line: string, max: number): string[] {
   rows.push(cur);
   return rows;
 }
+
+/**
+ * Wraps a styled row at word boundaries; continuation rows start with `indent` (a hanging indent
+ * for list items and quotes). A word longer than a whole row is cut by column.
+ */
+export function wrapWords(line: string, max: number, indent = ""): string[] {
+  if (max < 1 || visibleLength(line) <= max) return [line];
+  const rows: string[] = [];
+  const indentWidth = visibleLength(indent);
+  let cur = "";
+  let width = 0;
+  let active = "";
+  const track = (text: string): void => {
+    for (const seq of text.match(SGR) ?? []) active = seq === ANSI.reset ? "" : active + seq;
+  };
+  const breakRow = (): void => {
+    rows.push(active === "" ? cur.trimEnd() : `${cur.trimEnd()}${ANSI.reset}`);
+    cur = `${indent}${active}`;
+    width = indentWidth;
+  };
+  for (const part of line.split(/( +)/)) {
+    if (part === "") continue;
+    const w = visibleLength(part);
+    if (/^ +$/.test(part)) {
+      // Spaces never start a continuation row, and never push a row over the edge.
+      if (width > indentWidth || rows.length === 0) {
+        if (width + w <= max) {
+          cur += part;
+          width += w;
+        } else breakRow();
+      }
+      continue;
+    }
+    if (width + w > max && width > indentWidth) breakRow();
+    if (width + w > max) {
+      // Longer than a whole row: cut it by column.
+      const pieces = wrapAnsi(`${active}${part}`, max - width);
+      for (const piece of pieces.slice(0, -1)) {
+        cur += piece;
+        track(piece);
+        breakRow();
+      }
+      const last = pieces.at(-1) ?? "";
+      cur += last;
+      width += visibleLength(last);
+      track(last);
+      continue;
+    }
+    cur += part;
+    width += w;
+    track(part);
+  }
+  rows.push(cur);
+  return rows;
+}
+
+const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
 /** Terminal columns a styled row takes. */
 export function visibleLength(line: string): number {

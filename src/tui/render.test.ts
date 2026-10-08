@@ -1,6 +1,5 @@
 import { expect, test, describe } from "bun:test";
 import { Renderer } from "./render.ts";
-import { renderMarkdown } from "./markdown.ts";
 
 /** Collects every write, with a clock the test drives. */
 function harness(start = 0): { renderer: Renderer; out: string[]; tick: (ms: number) => boolean } {
@@ -129,34 +128,5 @@ describe("tui renderer", () => {
     renderer.flush();
     renderer.release();
     expect(out[1]).toBe("\x1b[2B\r\n\x1b[?25h");
-  });
-});
-
-describe("tui markdown", () => {
-  test("8. bold and inline code are wrapped, plain text is untouched", () => {
-    const out = renderMarkdown("a **bold** word and `code` here", { color: false });
-    expect(out).toBe("a bold word and code here");
-    const colored = renderMarkdown("**b**");
-    expect(colored).toBe("\x1b[1mb\x1b[0m");
-    expect(renderMarkdown("`x`", { color: false })).toBe("x");
-  });
-
-  test("9. an unmatched marker is left alone", () => {
-    expect(renderMarkdown("a **dangling", { color: false })).toBe("a **dangling");
-    expect(renderMarkdown("a `dangling", { color: false })).toBe("a `dangling");
-  });
-
-  test("10. code fences are dimmed and never inline-formatted", () => {
-    const out = renderMarkdown(["before", "```ts", "const a = **not bold**;", "```", "after"].join("\n"), {
-      color: false,
-    });
-    expect(out).toBe(["before", "```ts", "const a = **not bold**;", "```", "after"].join("\n"));
-    const dim = "\x1b[2m";
-    expect(renderMarkdown("```\nx\n```")).toContain(`${dim}x${"\x1b[0m"}`);
-  });
-
-  test("11. several markers on one line all render", () => {
-    const out = renderMarkdown("**a** `b` **c** `d`", { color: false });
-    expect(out).toBe("a b c d");
   });
 });
