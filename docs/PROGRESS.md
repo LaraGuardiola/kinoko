@@ -274,3 +274,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - `bash`: the parameter is `command`, the name models expect (the model sent `command` and got "cmd must be a string"); `cmd` is still accepted. `examples/ext/permission-gate.ts` and `plan-mode.ts` read both names. Reading only `cmd` would have let a `command` through the gate unchecked. Tested.
 - Still open: `~/.kinoko/config.json` has `maxOutputTokens: 4096` (reply #10 cut at exactly 4096).
 - `bun run check` passes (233 tests).
+
+## fix/llm-behaviour, round 5: tool results as the only version of a file — DONE
+- Audit of session `2fdb6bee`: replaying every write/edit in memory gives exactly the files on disk (13/13 identical; 11 skipped because bash touched them); every comparable read matched its write. The tools are right. The model said it itself: "the files on disk are different from what I drafted in my thinking". It holds two versions of each file in context (the draft in its thinking, the real call) and trusts the draft.
+- openai-compat: only the newest assistant turn sends its thinking back (`reasoning_content`), so a cut reply can still continue; older thinking (old drafts) is no longer sent. It also costs far less context. `historyTokens` counts only that one thinking.
+- `edit`: the result shows the edited lines as they are now on disk (2 lines of context, at most 30 per edit, `…` between distant edits), so the real text sits right after the action.
+- `bun run check` passes (233 tests).

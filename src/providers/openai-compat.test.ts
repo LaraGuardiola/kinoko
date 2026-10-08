@@ -132,21 +132,24 @@ describe("openai-compat: truncation, thinking and effort", () => {
     expect(events.at(-1)).toMatchObject({ type: "done", stop: "length" });
   });
 
-  test("assistant thinking goes back as reasoning_content; the request effort overrides the config", async () => {
+  test("only the newest assistant turn sends its thinking back; the request effort overrides the config", async () => {
     setMode("text");
     const provider = openaiCompat({ baseUrl, apiKey: "k", reasoningEffort: "low" });
     const req: ProviderRequest = {
       ...mkReq(new AbortController().signal),
       messages: [
         { id: "1", role: "user", content: "hi" },
-        { id: "2", role: "assistant", content: "ok", thinking: "let me see" },
-        { id: "3", role: "user", content: "go" },
+        { id: "2", role: "assistant", content: "draft", thinking: "an old draft of the file" },
+        { id: "3", role: "user", content: "next" },
+        { id: "4", role: "assistant", content: "ok", thinking: "let me see" },
+        { id: "5", role: "user", content: "go" },
       ],
       effort: "off",
     };
     for await (const _ of provider.stream(req)) void _;
     const messages = lastBody.messages as Array<Record<string, unknown>>;
-    expect(messages[1]).toEqual({ role: "assistant", content: "ok", reasoning_content: "let me see" });
+    expect(messages[1]).toEqual({ role: "assistant", content: "draft" });
+    expect(messages[3]).toEqual({ role: "assistant", content: "ok", reasoning_content: "let me see" });
     expect(messages[0]).toEqual({ role: "user", content: "hi" });
     expect(lastBody.reasoning_effort).toBe("off");
   });

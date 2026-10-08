@@ -106,6 +106,10 @@ function closest(content: string, old: string): string {
   return `Closest text (lines ${from + 1}-${to}):\n${rows.join("\n")}`;
 }
 
+/** Lines of context around an edit in its result, and the most shown per edit. */
+const CONTEXT = 2;
+const MAX_SHOWN = 30;
+
 function fileIsBinary(text: string): boolean {
   return text.slice(0, 8192).includes("\u0000");
 }
@@ -162,7 +166,25 @@ async function editRun(args: Record<string, unknown>, ctx: ToolContext): Promise
   }
   await Bun.write(abs, out);
   await remember(abs, out);
-  return `edited ${path}: ${ranges.length} edit(s) applied`;
+  return `edited ${path}: ${ranges.length} edit(s) applied. The file now reads:\n${changed(out, ranges)}`;
+}
+
+/** Lines around each edit as they are now on disk: the result, not the model's memory of it. */
+function changed(out: string, ranges: Range[]): string {
+  const lines = out.split("\n");
+  const rows: string[] = [];
+  let shift = 0;
+  let shown = 0; // last line already printed (1-based)
+  for (const r of ranges) {
+    const start = r.start + shift;
+    shift += r.repl.length - (r.end - r.start);
+    const from = Math.max(shown + 1, lineOf(out, start) - CONTEXT);
+    const to = Math.min(lines.length, lineOf(out, start + r.repl.length) + CONTEXT, from + MAX_SHOWN - 1);
+    if (from > shown + 1 && shown > 0) rows.push("…");
+    for (let n = from; n <= to; n++) rows.push(`${n}: ${lines[n - 1]}`);
+    shown = Math.max(shown, to);
+  }
+  return rows.join("\n");
 }
 
 export const editTool: Tool = {

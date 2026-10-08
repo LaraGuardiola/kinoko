@@ -101,6 +101,8 @@ describe("kinoko core tools", () => {
     const ok = await e.run({ path: "a.txt", edits: [{ old: "ef", new: "F" }, { old: "ab", new: "A" }] }, ctx(dir));
     expect(ok).toContain("2 edit(s) applied");
     expect(readFileSync(`${dir}/a.txt`, "utf8")).toBe("AcdF\n");
+    // The result shows the edited lines as they are on disk now.
+    expect(ok).toEndWith("The file now reads:\n1: AcdF\n2: ");
   });
 
   test("read: a long file is cut at a line boundary with the offset to continue from", async () => {

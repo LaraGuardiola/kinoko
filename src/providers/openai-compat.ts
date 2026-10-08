@@ -209,9 +209,11 @@ function merge(pending: Map<number, Pending>, tc: NonNullable<Delta["tool_calls"
 }
 
 function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
-  const messages = req.system
-    ? [{ role: "system", content: req.system }, ...req.messages.map(wire)]
-    : req.messages.map(wire);
+  // Only the newest assistant turn keeps its thinking: older thinking holds drafts of code that
+  // differ from what was really written, and the model trusts the draft over the tool results.
+  const newest = req.messages.findLastIndex((m) => m.role === "assistant");
+  const wired = req.messages.map((m, i) => wire(m, i === newest));
+  const messages = req.system ? [{ role: "system", content: req.system }, ...wired] : wired;
   return {
     model: req.model,
     stream: true,
@@ -225,11 +227,11 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
   };
 }
 
-function wire(m: Message): object {
+function wire(m: Message, withThinking: boolean): object {
   if (m.role === "tool") return { role: "tool", content: m.content, tool_call_id: m.toolCallId };
-  // Thinking goes back as the engine sent it: templates that preserve thinking (Qwen and others)
-  // render it into the prompt, and without it every earlier turn looks like it never thought.
-  const reasoning = m.role === "assistant" && m.thinking ? { reasoning_content: m.thinking } : {};
+  // Thinking goes back as the engine sent it (`reasoning_content`), so a reply cut mid-thought
+  // can continue from where it stopped instead of re-deriving it.
+  const reasoning = withThinking && m.thinking ? { reasoning_content: m.thinking } : {};
   if (m.toolCalls?.length) {
     return {
       role: m.role,

@@ -42,12 +42,13 @@ export function isSummary(m: Message): boolean {
 }
 
 export function messageTokens(m: Message): number {
-  // Thinking counts: providers send it back (reasoning_content, or Anthropic's replayed blocks).
-  return estimateTokens(`${m.role}\n${m.thinking ?? ""}${m.content}${m.toolCalls ? JSON.stringify(m.toolCalls) : ""}`);
+  return estimateTokens(`${m.role}\n${m.content}${m.toolCalls ? JSON.stringify(m.toolCalls) : ""}`);
 }
 
+/** The history as sent: only the newest assistant turn carries its thinking back. */
 export function historyTokens(messages: Message[]): number {
-  return messages.reduce((sum, m) => sum + messageTokens(m), 0);
+  const thinking = messages.findLast((m) => m.role === "assistant")?.thinking ?? "";
+  return messages.reduce((sum, m) => sum + messageTokens(m), estimateTokens(thinking));
 }
 
 export function shouldCompact(messages: Message[], contextWindow: number): boolean {
