@@ -74,6 +74,27 @@ const num = (n: number): string => n.toLocaleString("en-US");
 /** Cells are plain text: the table's own separator is escaped so a path can never split a row. */
 const cell = (text: string): string => text.replaceAll("|", "\\|");
 
+const KEYS: Array<[string, string]> = [
+  ["Enter", "Send as prompt (idle) / steer (running)"],
+  ["Alt+Enter", "Follow-up (running) / send (idle), kitty-protocol terminals"],
+  ["Shift+Enter", "Newline in the input (also Ctrl-J, Ctrl-O)"],
+  ["Esc", "Abort the run; in the menu, back a page, then close it"],
+  ["Ctrl-C", "Abort / clear the input / quit on a second press"],
+  ["Ctrl-D", "Quit when the input is empty"],
+  ["Ctrl-T", "Expand or collapse tool output"],
+  ["Alt+Up", "Pull the last queued message back into the input"],
+  ["Ctrl-P / Ctrl-N", "Previous / next history entry"],
+  ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],
+];
+
+/** /help: one table for the keys, one for the menu (built from ROOT, so it cannot fall behind). */
+export function helpText(width: number): string {
+  const table = (head: string, rows: Array<[string, string]>): string[] =>
+    renderTable([`| ${head} | |`, "|---|---|", ...rows.map(([k, v]) => `| ${cell(k)} | ${cell(v)} |`)], width, (text) => text);
+  const menu = ROOT.map((item): [string, string] => [`/${item.name}`, item.description]);
+  return [...table("Keys", KEYS), "", ...table("Menu", menu)].join("\n");
+}
+
 /** The session page: one table of what this session is and what it has cost. */
 export function sessionLines(facts: SessionFacts, width: number): string[] {
   const all = facts.messages;

@@ -515,7 +515,7 @@ describe("TUI app with the agent", () => {
     const h = await harness([[{ type: "text", delta: "hi" }, { type: "done", stop: "end" }]]);
     h.press("/help\r"); // through the menu: its "help" item runs the command
     await new Promise((r) => setTimeout(r, 10));
-    expect(h.screen()).toContain("kinoko keys");
+    expect(h.screen()).toContain("Ctrl-T"); // the keys table
     expect(h.agent.messages).toHaveLength(0); // no run was started
     expect(h.app.editorText).toBe("");
 

@@ -12,12 +12,12 @@ import { KeyParser } from "./term.ts";
 import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
-import { ABORTED, HELP, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
+import { ABORTED, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
 import { pulseLevel, toolBlock, toolSummary } from "./tools.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
-import { ROOT, modelsPage, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { ROOT, helpText, modelsPage, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
 import { actionFor } from "./keys.ts";
 import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -504,7 +504,7 @@ export class App {
     const [name = ""] = input.replace(/^\//, "").split(" ");
     switch (name) {
       case "help":
-        this.#print("system", HELP);
+        this.#print("system", helpText(this.#width));
         this.render();
         return true;
       case "model":

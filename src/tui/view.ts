@@ -283,21 +283,3 @@ export function statusLine(parts: {
 export function wrapTo(width: number): (line: string) => string[] {
   return (line: string) => (line.length <= width ? [line] : (line.match(new RegExp(`.{1,${width}}`, "g")) ?? [line]));
 }
-
-
-export const HELP = [
-  "kinoko keys",
-  "",
-  "  Enter          send as prompt (idle) / steer (running)",
-  "  Alt+Enter      follow-up (running) / send as prompt (idle), kitty-protocol terminals",
-  "  Esc            abort the run (nothing when idle)",
-  "  Ctrl-C         abort / clear the editor / quit on a second press",
-  "  Ctrl-D         quit when the editor is empty",
-  "  Ctrl-T         expand or collapse tool output",
-  "  Alt+Up         pull the last queued message back into the editor",
-  "  Ctrl-P / N     previous / next history entry",
-  "  Shift+Enter    newline inside the editor (also Ctrl-J, Ctrl-O)",
-  "",
-  "  /              open the menu: thinking, models, session, and the commands below",
-  "  /help  /model  /compact  /fork  /quit",
-].join("\n");
