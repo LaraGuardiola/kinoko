@@ -209,23 +209,49 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
 
 export interface Served {
   id: string;
-  /** The context window, when the endpoint says (llama.cpp and Strata put it in meta.n_ctx). */
+  /** The context window the server runs it with, when it says. */
   contextWindow?: number;
+}
+
+interface ListedModel {
+  id?: unknown;
+  meta?: { n_ctx?: unknown };
+  status?: { args?: unknown };
+}
+
+const positive = (n: unknown): number | undefined => (typeof n === "number" && n > 0 ? n : undefined);
+
+/**
+ * The window a model runs with, wherever its server puts it: Strata in `meta.n_ctx`; llama.cpp's
+ * router in the launch args (`--ctx-size N` / `-c N`). Never `n_ctx_train`: that is what the model
+ * was trained on, not what the server allocated, and trusting it would let the prompt overflow.
+ */
+function windowOf(m: ListedModel): number | undefined {
+  const args = Array.isArray(m.status?.args) ? (m.status.args as unknown[]) : [];
+  const at = args.findIndex((a) => a === "--ctx-size" || a === "-c");
+  return positive(m.meta?.n_ctx) ?? (at >= 0 ? positive(Number(args[at + 1])) : undefined);
 }
 
 /** What an OpenAI-compatible endpoint serves (`GET /models`); empty when it will not say. */
 export async function listModels(baseUrl: string, apiKey: string, signal: AbortSignal): Promise<Served[]> {
-  const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/models`, {
-    headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
-    signal,
-  });
+  const root = baseUrl.replace(/\/+$/, "");
+  const headers: Record<string, string> = apiKey ? { authorization: `Bearer ${apiKey}` } : {};
+  const res = await fetch(`${root}/models`, { headers, signal });
   if (!res.ok) return [];
-  const list = (await res.json()) as { data?: Array<{ id?: unknown; meta?: { n_ctx?: unknown } }> };
+  const list = (await res.json()) as { data?: ListedModel[] };
   const served: Served[] = [];
   for (const m of list.data ?? []) {
     if (typeof m.id !== "string") continue;
-    const n = m.meta?.n_ctx;
-    served.push(typeof n === "number" && n > 0 ? { id: m.id, contextWindow: n } : { id: m.id });
+    const window = windowOf(m);
+    served.push(window ? { id: m.id, contextWindow: window } : { id: m.id });
+  }
+  // A single-model llama.cpp server says its window only in /props (next to /v1, not under it).
+  const only = served.length === 1 ? served[0] : undefined;
+  if (only && only.contextWindow === undefined) {
+    const props = await fetch(`${root.replace(/\/v1$/, "")}/props`, { headers, signal }).catch(() => undefined);
+    const info = props?.ok ? ((await props.json().catch(() => ({}))) as { default_generation_settings?: { n_ctx?: unknown } }) : {};
+    const window = positive(info.default_generation_settings?.n_ctx);
+    if (window) only.contextWindow = window;
   }
   return served;
 }

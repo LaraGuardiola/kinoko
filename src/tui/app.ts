@@ -730,16 +730,47 @@ export class App {
       .finally(() => this.render());
   }
 
-  /** Switches to a model, and to its endpoint when it is served elsewhere. */
+  /** Switches to a model, and to its endpoint when it is served elsewhere; then its window. */
   #useModel(entry: SavedModel): void {
     if (entry.baseUrl !== this.#endpoint && this.#host) {
-      this.#agent.setProvider(this.#host.connect(entry), entry.contextWindow);
+      this.#agent.setProvider(this.#host.connect(entry));
       this.#endpoint = entry.baseUrl;
-      if (entry.contextWindow) this.#window = entry.contextWindow;
     }
     this.#agent.setModel(entry.model);
     this.#model = entry.model;
     this.#marker = `model: ${entry.model}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`;
+    if (entry.contextWindow) this.#useWindow(entry.contextWindow);
+    else this.#learnWindow(entry);
+  }
+
+  #useWindow(window: number): void {
+    this.#agent.setContextWindow(window);
+    this.#window = window;
+  }
+
+  /**
+   * A model picked without a known window (typed by hand, or served by the engine in use): ask its
+   * endpoint, use what it says, and keep it on a saved entry so the next pick knows it at once.
+   * Until then (or if it never says) the previous window stands, and the marker says so.
+   */
+  #learnWindow(entry: SavedModel): void {
+    const host = this.#host;
+    if (!host || entry.baseUrl === "") return;
+    void host
+      .discover(entry.baseUrl, entry.apiKey, AbortSignal.timeout(10_000))
+      .then(async (served) => {
+        const window = served.find((s) => s.id === entry.model)?.contextWindow;
+        if (this.#model !== entry.model) return; // another pick came first
+        if (!window) {
+          this.#marker = `model: ${entry.model} (its context window is unknown: keeping ${this.#window.toLocaleString("en-US")})`;
+          return;
+        }
+        this.#useWindow(window);
+        const saved = this.#saved.some((m) => m.baseUrl === entry.baseUrl && m.model === entry.model && !host.fixed(m));
+        if (saved) this.#saved = await host.save({ ...entry, contextWindow: window });
+      })
+      .catch(() => undefined)
+      .finally(() => this.render());
   }
 
   #sessionPage(): InfoPage {

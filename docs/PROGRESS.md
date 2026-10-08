@@ -378,3 +378,8 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## feat/tui-slash-menu: say when an endpoint does not answer — DONE
 - Adding a model at an endpoint where nothing was running went straight to "type the model id" (that is how a wrong port and a made-up id ended up saved). The id step now tells the two cases apart: an endpoint that answered with no list ("did not list its models"), and one that did not answer at all ("Nothing answered at host: is its server running? Esc to go back, or type the model id anyway").
 - Tests: both hints (app.test). `bun run check` passes (284 tests).
+
+## feat/tui-slash-menu: each model's own context window — DONE
+- Switching to a model on llama.cpp kept Strata's 122,880 as the window: only `meta.n_ctx` (Strata) was read. A window too large lets the prompt overflow before compaction triggers. `listModels` now reads it wherever the server puts it: Strata's `meta.n_ctx`, llama.cpp router mode's launch args (`--ctx-size N` / `-c N`), a single-model llama.cpp server's `/props` (`default_generation_settings.n_ctx`). Never `n_ctx_train` (the training size, not what the server allocated). Live: the user's router on 8086 reports 65,536 for each of its three models.
+- Picks: a known window is applied on every pick, also within the same endpoint (it was only applied when the endpoint changed). A model picked without one (typed by hand, or served by the engine in use) asks its endpoint, applies the answer, and saves it on the entry; if the endpoint never says, the marker says the window is unknown and which one stands. `Agent.setContextWindow`.
+- Tests: the three server styles and n_ctx_train ignored (openai-compat.test), a saved model learning and keeping its window (app.test). `bun run check` passes (286 tests).

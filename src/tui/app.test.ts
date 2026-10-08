@@ -800,3 +800,26 @@ test("adding a model at an endpoint where nothing answers says so before asking 
   h.app.render();
   expect(frame(h).join("\n")).toContain("Nothing answered at 127.0.0.1:8080: is its server running?");
 });
+
+test("a saved model picked without a known window learns it from its endpoint, and keeps it", async () => {
+  const configured: SavedModel = { model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" };
+  const typed: SavedModel = { model: "small", baseUrl: "http://router:8086/v1", apiKey: "" };
+  const saved: SavedModel[] = [];
+  const models: ModelsHost = {
+    endpoint: configured.baseUrl,
+    saved: [configured, typed],
+    connect: () => scripted([]).provider as never,
+    discover: async () => [{ id: "small", contextWindow: 65_536 }],
+    save: async (entry) => (saved.push(entry), [configured, entry]),
+    remove: async () => [],
+    fixed: (entry) => entry === configured,
+  };
+  const h = await harness([], { models: [], modelsHost: models });
+  expect(h.app.statusLine).toContain("/1,000 tok");
+  h.press("/models\r");
+  await new Promise((r) => setTimeout(r, 10));
+  h.press("\x1b[B\r"); // "small"
+  await new Promise((r) => setTimeout(r, 10));
+  expect(h.app.statusLine).toContain("/65,536 tok");
+  expect(saved).toEqual([{ ...typed, contextWindow: 65_536 }]); // the next pick knows it at once
+});

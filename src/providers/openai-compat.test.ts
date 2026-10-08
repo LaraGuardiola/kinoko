@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { openaiCompat } from "./openai-compat.ts";
+import { listModels, openaiCompat } from "./openai-compat.ts";
 import type { ProviderRequest, StreamEvent } from "../types.ts";
 
 let server: ReturnType<typeof Bun.serve>;
@@ -164,5 +164,31 @@ describe("openai-compat: truncation, thinking and effort", () => {
     expect(messages[0]).toEqual({ role: "user", content: "hi" });
     expect(lastBody.reasoning_effort).toBe("off");
     expect(lastBody.reasoning_budget_tokens).toBe(2048);
+  });
+});
+
+describe("listModels: each model's context window, wherever the server puts it", () => {
+  const lists: Record<string, unknown> = {
+    strata: { data: [{ id: "coder", meta: { n_ctx: 122880 } }] },
+    router: { data: [{ id: "small", status: { args: ["--port", "0", "--ctx-size", "65536"] } }, { id: "c", status: { args: ["-c", "4096"] } }] },
+    single: { data: [{ id: "one", meta: { n_ctx_train: 262144 } }] }, // training size: never the window
+  };
+  const windows = Bun.serve({
+    port: 0,
+    fetch(req) {
+      const path = new URL(req.url).pathname;
+      const [, style, tail] = path.split("/"); // /<style>/v1/models or /<style>/props
+      if (path.endsWith("/v1/models")) return Response.json(lists[style ?? ""] ?? { data: [] });
+      if (tail === "props" && style === "single") return Response.json({ default_generation_settings: { n_ctx: 32768 } });
+      return new Response("no", { status: 404 });
+    },
+  });
+  const at = (style: string): Promise<unknown> => listModels(`http://localhost:${windows.port}/${style}/v1`, "", AbortSignal.timeout(5000));
+
+  test("Strata's meta.n_ctx, llama.cpp router launch args, a single llama.cpp server's /props", async () => {
+    expect(await at("strata")).toEqual([{ id: "coder", contextWindow: 122880 }]);
+    expect(await at("router")).toEqual([{ id: "small", contextWindow: 65536 }, { id: "c", contextWindow: 4096 }]);
+    expect(await at("single")).toEqual([{ id: "one", contextWindow: 32768 }]);
+    windows.stop(true);
   });
 });

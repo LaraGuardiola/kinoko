@@ -100,6 +100,11 @@ export class Agent {
     this.#model = model;
   }
 
+  /** The context window of the model in use (compaction triggers against it). */
+  setContextWindow(contextWindow: number): void {
+    this.#contextWindow = contextWindow;
+  }
+
   /** Another endpoint from the next request on (a model added from the TUI); its window too. */
   setProvider(provider: Provider, contextWindow?: number): void {
     this.#provider = provider;
