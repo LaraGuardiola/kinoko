@@ -1,5 +1,6 @@
 import { expect, test, describe } from "bun:test";
-import { formatBlock, liveRegion, splitStable, STREAM_ROWS, toolBlock, toolFailed, toolSummary, wrapAnsi } from "./view.ts";
+import { formatBlock, liveRegion, splitStable, STREAM_ROWS, wrapAnsi } from "./view.ts";
+import { toolBlock, toolFailed, toolSummary } from "./tools.ts";
 import type { RegionInput } from "./view.ts";
 
 const stripAnsi = (line: string): string => line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
@@ -20,19 +21,37 @@ function input(over: Partial<RegionInput> = {}): RegionInput {
 }
 
 describe("live region", () => {
-  test("idle: just the editor, the hint and the status, no filler", () => {
-    const region = liveRegion(input({ viewportRows: 10 }));
-    expect(region.lines).toHaveLength(3);
-    expect(region.lines[0]).toBe("> ");
-    expect(region.lines[1]).toContain("type a prompt");
-    expect(region.lines[2]).toBe(" IDLE ");
-    expect(region.row).toBe(0);
+  test("idle: a blank row, the editor between two rules with the hint as placeholder, the status", () => {
+    const region = liveRegion(input({ viewportRows: 10, viewportCols: 20 }));
+    const plain = region.lines.map(stripAnsi);
+    expect(plain).toHaveLength(5);
+    expect(plain[0]).toBe("");
+    expect(plain[1]).toBe("─".repeat(18));
+    expect(plain[2]?.startsWith("> type a prompt")).toBe(true);
+    expect(plain[3]).toBe("─".repeat(18));
+    expect(plain[4]).toBe(" IDLE ");
+    // The placeholder's first letter wears the block cursor.
+    expect(region.lines[2]?.startsWith("> \x1b[7mt\x1b[0m")).toBe(true);
+    expect(region.row).toBe(2);
+  });
+
+  test("the block cursor sits on the character under it, or past the end of the line", () => {
+    const mid = liveRegion(input({ editorLines: ["abc"], editorEmpty: false, editorCol: 1 }));
+    expect(mid.lines[2]).toBe("> a\x1b[7mb\x1b[0mc");
+    const end = liveRegion(input({ editorLines: ["abc"], editorEmpty: false, editorCol: 3 }));
+    expect(end.lines[2]).toBe("> abc\x1b[7m \x1b[0m");
+  });
+
+  test("the place line goes under the bottom rule, above the status", () => {
+    const region = liveRegion(input({ place: "~/Projects/kinoko (master)" }));
+    const plain = region.lines.map(stripAnsi);
+    expect(plain.slice(-2)).toEqual(["~/Projects/kinoko (master)", " IDLE "]);
   });
 
   test("finished history is NOT part of the region any more (it lives in the scrollback)", () => {
     const region = liveRegion(input({ viewportRows: 10 }));
     expect(region.lines.join("\n")).not.toContain("answer");
-    expect(Object.keys(region).sort()).toEqual(["col", "lines", "row"]);
+    expect(Object.keys(region).toSorted()).toEqual(["col", "lines", "row"]);
   });
 
   test("the open block renders above the editor, the thinking style is dim italic", () => {
@@ -59,11 +78,17 @@ describe("live region", () => {
         editorLines: ["draft"],
         editorEmpty: false,
         editorCol: 5,
-        viewportRows: 3,
+        viewportRows: 6,
       }),
     );
-    expect(region.lines).toEqual(["four", "> draft", " IDLE "]);
-    expect(region.row).toBe(1);
+    expect(region.lines.map(stripAnsi).filter((line) => !line.startsWith("─"))).toEqual(["four", "", "> draft ", " IDLE "]);
+    expect(region.row).toBe(3);
+  });
+
+  test("a tiny viewport drops the chrome but keeps the editor and the status", () => {
+    const region = liveRegion(input({ editorLines: ["x"], editorEmpty: false, editorCol: 1, viewportRows: 3 }));
+    expect(region.lines.map(stripAnsi)).toEqual(["> x ", " IDLE "]);
+    expect(region.row).toBe(0);
   });
 
   test("the region never exceeds the viewport", () => {
@@ -134,9 +159,9 @@ describe("formatBlock", () => {
   });
 });
 
-describe("splitStable", () => {
-  const para = (n: number): string => `paragraph ${n}`;
+const para = (n: number): string => `paragraph ${n}`;
 
+describe("splitStable", () => {
   test("while everything fits nothing moves", () => {
     expect(splitStable("one\ntwo\nthree", 80)).toBeUndefined();
     expect(splitStable("x", 80)).toBeUndefined();
@@ -202,7 +227,7 @@ describe("tool blocks", () => {
   });
 
   test("name in bold yellow, argument in bold white", () => {
-    const head = toolBlock({ name: "read", args: "/a.ts", output: "ok", aborted: false }, false).split("\n")[0] ?? "";
+    const head = toolBlock({ name: "read", args: "/a.ts", output: "ok", aborted: false }, false).split("\n")[1] ?? "";
     expect(head).toContain("\x1b[1;38;5;221mread");
     expect(head).toContain("\x1b[1;97m/a.ts");
   });
@@ -216,13 +241,15 @@ describe("tool blocks", () => {
 
   test("the whole block sits on a soft green band on success and a red one on failure, padded to the width", () => {
     const ok = toolBlock({ name: "bash", args: "ls", output: "a\nb", aborted: false }, false, 20).split("\n");
-    expect(ok).toHaveLength(3);
+    // A padding row above and below the head and the two output rows.
+    expect(ok).toHaveLength(5);
+    expect(stripAnsi(ok[0] ?? "").trim()).toBe("");
     for (const row of ok) {
       expect(row.startsWith("\x1b[48;2;30;44;38m")).toBe(true);
       expect(stripAnsi(row)).toHaveLength(18);
     }
     // A reset inside the head re-opens the band right away.
-    expect(ok[0]).toContain("\x1b[0m\x1b[48;2;30;44;38m");
+    expect(ok[1]).toContain("\x1b[0m\x1b[48;2;30;44;38m");
     const bad = toolBlock({ name: "bash", args: "x", output: "nope\n[exit code 1]", aborted: false }, false, 20);
     expect(bad.startsWith("\x1b[48;2;50;30;36m")).toBe(true);
   });

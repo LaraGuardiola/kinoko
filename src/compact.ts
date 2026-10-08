@@ -79,7 +79,9 @@ export async function compactHistory(
   const text = await summarize(toSummarize, previous, opts);
   if (text === undefined || opts.signal.aborted) return undefined;
 
-  const tail = messages.slice(split);
+  // Replayed thinking is bound to the history it was produced in: after a summary it would be
+  // rejected, so the kept turns go back as plain text and tool calls.
+  const tail = messages.slice(split).map(({ replay: _replay, ...m }) => m);
   const summary: Message = {
     id: crypto.randomUUID(),
     role: "user",

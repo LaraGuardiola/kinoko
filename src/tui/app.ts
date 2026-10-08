@@ -12,7 +12,8 @@ import { KeyParser } from "./term.ts";
 import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
-import { ABORTED, HELP, formatBlock, liveRegion, splitStable, statusLine, toolBlock, toolSummary, wrapTo } from "./view.ts";
+import { ABORTED, HELP, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
+import { toolBlock, toolSummary } from "./tools.ts";
 import { actionFor } from "./keys.ts";
 import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -30,12 +31,8 @@ export interface AppOptions {
   contextWindow: number;
   viewportRows?: number;
   viewportCols?: number;
-  /** @deprecated No longer used: the region is positioned relative to the cursor. */
-  reservedRows?: number;
-  /** @deprecated No longer used. */
-  viewportHeight?: () => number;
-  /** @deprecated No longer used. */
-  viewportTop?: () => number;
+  /** The line under the editor (cwd and git branch). Re-read after every run: tools can switch branch. */
+  place?: () => Promise<string>;
   session?: Session;
   /** Called by /quit. The demo and the CLI pass the process exit. */
   onQuit?: () => void;
@@ -55,6 +52,8 @@ export class App {
   #session: Session | undefined;
   #rebuild: (() => Agent) | undefined;
   #onQuit: (() => void) | undefined;
+  #placeOf: (() => Promise<string>) | undefined;
+  #place = "";
 
   #running = false;
   // The block being streamed (thinking or answer). Thinking is display-only, never sent back.
@@ -83,7 +82,9 @@ export class App {
     this.#session = opts.session;
     this.#rebuild = opts.rebuild;
     this.#onQuit = opts.onQuit;
+    this.#placeOf = opts.place;
     this.#agent.on((e) => this.#onAgentEvent(e));
+    this.#refreshPlace();
   }
 
   /** Raw stdin bytes: parse then dispatch. */
@@ -315,7 +316,17 @@ export class App {
     this.#print("tool", toolBlock(tool, this.#toolBlocksFull, this.#viewportCols));
   }
 
+  #refreshPlace(): void {
+    void this.#placeOf?.()
+      .then((place) => {
+        this.#place = place;
+        this.render();
+      })
+      .catch(() => undefined);
+  }
+
   #finishRun(reason: RunResult["reason"], dropped: string[] | undefined): void {
+    this.#refreshPlace();
     this.#running = false;
     this.#queued = [];
     this.#closeBlock();
@@ -399,7 +410,8 @@ export class App {
   // ---- the live region ----
 
   #state(): { lines: string[]; row: number; col: number } {
-    const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 4);
+    // "> " in front, the block cursor may sit one column past the text, and the renderer's margin.
+    const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 5);
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
       open: this.#open,
@@ -412,6 +424,7 @@ export class App {
       editorRow: view.row,
       editorCol: view.col,
       status: this.statusLine,
+      place: this.#place,
       viewportRows: this.#viewportRows,
       viewportCols: this.#viewportCols,
     });

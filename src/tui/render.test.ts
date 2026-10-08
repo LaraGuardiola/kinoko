@@ -27,7 +27,7 @@ describe("tui renderer", () => {
     expect(tick(50)).toBe(true);
     // No absolute positioning anywhere: the terminal is free to scroll.
     expect(out[0]).toBe(`${SYNC_ON}\r\x1b[J thinking...\r\n > draft\x1b[8G${SYNC_OFF}`);
-    expect(out[0]).not.toMatch(/\x1b\[\d+;\d+H/);
+    expect(out[0]).not.toMatch(new RegExp(`${String.fromCharCode(27)}\\[\\d+;\\d+H`));
     expect(renderer.drawn).toEqual(["thinking...", "> draft"]);
   });
 

@@ -1,6 +1,12 @@
 import { expect, test, describe } from "bun:test";
 import { App } from "./app.ts";
 
+// The fake streams below pace themselves one frame at a time on purpose: the order is the test.
+/* oxlint-disable no-await-in-loop */
+
+const CSI = new RegExp(`^${String.fromCharCode(27)}\\[([0-9;?]*)([A-Za-z])`);
+const noop = (): void => undefined;
+
 // These tests need no Agent implementation: a fake one emits the same events, so they check the
 // SCREEN a user would get (including the terminal scrollback), in order.
 
@@ -13,7 +19,7 @@ class VT {
     for (let i = 0; i < s.length; i++) {
       const ch = s[i]!;
       if (ch === "\x1b" && s[i + 1] === "[") {
-        const m = /^\x1b\[([0-9;?]*)([A-Za-z])/.exec(s.slice(i))!;
+        const m = CSI.exec(s.slice(i))!;
         const n = parseInt(m[1]!.replace("?", "") || "1", 10) || 1; i += m[0].length - 1;
         switch (m[2]) {
           case "A": this.r = Math.max(0, this.r - n); break;
@@ -128,7 +134,7 @@ describe("blocks come out in the order they happened", () => {
 
   test("a steer typed mid-stream lands between what was already streamed and what comes next", async () => {
     const vt = new VT(14, 60);
-    let release: () => void = () => undefined;
+    let release: () => void = noop;
     const gate = new Promise<void>((r) => { release = r; });
     const agent = new FakeAgent(async (emit) => {
       emit({ type: "message_delta", delta: "BEFORE-STEER" });

@@ -195,3 +195,14 @@ Deferred, for whenever an Anthropic model is actually needed:
 - The tool dot is yellow like the tool name (yellow = tool), also on the running line.
 - Tests: band covers every row and pads to the width, yellow dot. 175 pass, tsc clean, view.ts lints clean.
 - Build: rebuilt and installed `~/.local/bin/kinoko`.
+
+## TUI input restyle + Anthropic provider (phase 6) — DONE
+- Tool blocks: one band row of padding above and below.
+- Input: a blank row separates the transcript from the input; the editor sits between two dim rules with a drawn block cursor (inverse cell; the terminal cursor stays hidden), the hint is a placeholder under the cursor. Under the bottom rule: `~/Projects/kinoko (master)` from `src/tui/place.ts` (reads `.git/HEAD`, worktree-aware, no git process; refreshed after every run), then the status line. Tiny viewports drop the rules first.
+- Split `src/tui/view.ts` (was 402 lines): `style.ts` (ANSI palette, wrap/clip) and `tools.ts` (tool head/summary/band). Startup region now uses the full terminal height (rows - 1) like resize; dropped the deprecated App options.
+- Phase 6: `src/providers/anthropic.ts` (raw fetch + SSE, tool calls only when JSON complete, none on abort/truncation/refusal), cache breakpoints on system + last tool + top-level automatic caching for the conversation, adaptive thinking with summarized display, `reasoningEffort` -> `output_config.effort` (`off` -> `low`), server-side refusal fallback (`fallbacks: "default"`) where the model has one. `src/providers/models.json`: context window, max output, cache, reasoning, fallback, prices. Config `provider: "openai-compat" | "anthropic"` (+ `--provider`); anthropic fills baseUrl/apiKey($ANTHROPIC_API_KEY)/contextWindow/maxOutputTokens(min(model max, 64k)) when left at defaults.
+- Signed thinking must go back unchanged: new `Message.replay` (opaque, set from a `replay` stream event) is sent as-is; compaction and the session view strip it from the kept tail (keep-tail compaction would otherwise be rejected).
+- Fixed: `maxCost` was never enforced (cost was never accumulated); the loop now adds `usage.cost`.
+- Lint: fixed the pre-existing test-file errors/warnings from 43bd5f2. `bun run check` passes (191 tests, zero warnings).
+- Assumptions: a global `~/.kinoko/config.json` written for a local model still applies its `maxOutputTokens`/`contextWindow` to anthropic (override per run with flags). Haiku 5.5 cache-read price is an estimate (0.1x input).
+- Build: rebuilt and installed `~/.local/bin/kinoko`.

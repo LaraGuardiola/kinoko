@@ -1,11 +1,13 @@
-import { loadConfig } from "./config.ts";
+import { DEFAULTS, loadConfig } from "./config.ts";
 import { openaiCompat } from "./providers/openai-compat.ts";
+import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
 import { Session, latestSession } from "./session.ts";
 import { Extensions, loadExtensions } from "./ext.ts";
 import { App } from "./tui/app.ts";
 import { Term } from "./tui/term.ts";
+import { placeLine } from "./tui/place.ts";
 import { ansi } from "./tui/render.ts";
 import { discoverContext, discoverSkills } from "./context.ts";
 import { buildSystemPrompt } from "./prompt.ts";
@@ -14,6 +16,7 @@ import { Rpc, serveStdio } from "./rpc.ts";
 
 // CLI spelling -> Config key. Kebab-case is what a human types.
 const FLAGS: Record<string, string> = {
+  provider: "provider",
   "base-url": "baseUrl",
   baseUrl: "baseUrl",
   "api-key": "apiKey",
@@ -158,6 +161,14 @@ if (prompt !== undefined && prompt.startsWith("/")) {
 }
 
 const config = await loadConfig(flags);
+if (config.provider === "anthropic") {
+  // Values still at the generic defaults take the provider's and the model's own.
+  if (config.baseUrl === DEFAULTS.baseUrl) config.baseUrl = "https://api.anthropic.com";
+  if (!config.apiKey) config.apiKey = process.env.ANTHROPIC_API_KEY ?? "";
+  const info = modelInfo(config.model);
+  if (info && config.contextWindow === DEFAULTS.contextWindow) config.contextWindow = info.contextWindow;
+  if (info && config.maxOutputTokens === DEFAULTS.maxOutputTokens) config.maxOutputTokens = Math.min(info.maxOutput, 64_000);
+}
 if (!config.apiKey) {
   process.stderr.write("no apiKey: set it in ~/.kinoko/config.json, ./.kinoko/config.json, or --api-key\n");
   process.exit(1);
@@ -181,7 +192,7 @@ if (previous) process.stderr.write(`[resumed ${session.meta.id}]\n`);
 ext.emit("session_start", { cwd: cwd, model: config.model });
 
 const agent = new Agent({
-  provider: openaiCompat({
+  provider: (config.provider === "anthropic" ? anthropic : openaiCompat)({
     baseUrl: config.baseUrl,
     apiKey: config.apiKey,
     reasoningEffort: config.reasoningEffort,
@@ -203,17 +214,15 @@ if (tui) {
   // The interactive mode: raw terminal in, live region out. Everything else is the same Agent.
   const term = new Term();
   const startup = startupPanel({ context, skills, extensions: extensionPaths, version: VERSION });
-  const reservedRows = startup.split("\n").length + 2;
   const app = new App({
     agent: agent,
     write: (text) => term.write(text),
     model: config.model,
     contextWindow: config.contextWindow,
-    viewportRows: Math.max(2, term.rows - reservedRows),
+    // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
+    viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
-    reservedRows,
-    viewportHeight: () => term.rows,
-    viewportTop: () => reservedRows + 1,
+    place: () => placeLine(cwd),
     session: session,
     onQuit: () => {
       term.stop();
@@ -266,7 +275,6 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
     `  Extensions: ${names(parts.extensions.map((path) => path.split("/").at(-1) ?? path), "none")}`,
     "",
     "Kinoko can inspect and change this project. Ask it to work on a coding task.",
-    "",
   ].join("\n");
 }
 

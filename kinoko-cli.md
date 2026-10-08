@@ -21,6 +21,7 @@ Kebab-case and camelCase both work. Unknown keys are dropped, not applied.
 
 | flag | what it does |
 | --- | --- |
+| `--provider <name>` | `openai-compat` (default) or `anthropic` (config key `provider`). |
 | `--base-url <url>` | provider endpoint (config key `baseUrl`). |
 | `--api-key <key>` | API key; falls back to `$KINOKO_API_KEY`, then to config files. Missing means exit 1. |
 | `--model <name>` | model id to send to the provider. |

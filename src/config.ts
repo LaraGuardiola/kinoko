@@ -1,6 +1,9 @@
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
 
+export type ProviderName = "openai-compat" | "anthropic";
+
 export interface Config {
+  provider: ProviderName;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -12,6 +15,7 @@ export interface Config {
 }
 
 export const DEFAULTS: Config = {
+  provider: "openai-compat",
   baseUrl: "https://api.openai.com/v1",
   apiKey: process.env.KINOKO_API_KEY ?? "",
   model: "gpt-4o-mini",
@@ -23,6 +27,7 @@ export const DEFAULTS: Config = {
 
 const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens"]);
 const FILE_KEYS: ReadonlySet<string> = new Set([
+  "provider",
   "baseUrl",
   "apiKey",
   "model",
@@ -33,6 +38,7 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "reasoningEffort",
 ]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);
+const PROVIDERS: ReadonlySet<string> = new Set(["openai-compat", "anthropic"]);
 
 type Loose = Record<string, string | number>;
 
@@ -45,6 +51,8 @@ function sanitize(raw: Loose): Partial<Config> {
       if (typeof v === "number" && Number.isFinite(v)) out[k] = v;
     } else if (k === "reasoningEffort") {
       if (typeof v === "string" && EFFORTS.has(v)) out[k] = v;
+    } else if (k === "provider") {
+      if (typeof v === "string" && PROVIDERS.has(v)) out[k] = v;
     } else if (typeof v === "string") {
       out[k] = v;
     }
@@ -73,6 +81,7 @@ function fromFlag(key: string, value: string): Partial<Config> {
   if (key === "reasoningEffort") {
     return EFFORTS.has(value) ? ({ reasoningEffort: value as ReasoningEffort } as Partial<Config>) : {};
   }
+  if (key === "provider") return PROVIDERS.has(value) ? ({ provider: value as ProviderName } as Partial<Config>) : {};
   return { [key]: value } as Partial<Config>;
 }
 

@@ -64,6 +64,21 @@ describe("compaction", () => {
     expect(result!.view.map((m) => m.content)).toContain("the most recent question");
   });
 
+  test("2b. the kept tail loses its replayed thinking: it was bound to the summarized history", async () => {
+    const messages = history();
+    messages[messages.length - 2] = { id: "a2", role: "assistant", content: "kept", replay: [{ type: "thinking", signature: "S" }] };
+    const result = await compactHistory(messages, {
+      provider: summarizer("summary"),
+      model: "m",
+      system: "sys",
+      signal: new AbortController().signal,
+      tailTokens: 5000,
+    });
+    const kept = result!.view.find((m) => m.id === "a2");
+    expect(kept?.content).toBe("kept");
+    expect(kept?.replay).toBeUndefined();
+  });
+
   test("3. a previous summary is passed in to be merged, not dropped", async () => {
     const asked: string[] = [];
     const messages: Message[] = [

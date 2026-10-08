@@ -7,10 +7,13 @@
 // the editor and the status line.
 
 import { renderMarkdown } from "./markdown.ts";
+import { ANSI, clipAnsi, wrapAnsi } from "./style.ts";
+import { toolHead } from "./tools.ts";
+
+export { wrapAnsi } from "./style.ts";
 
 /** Rows of streaming text kept in the live region before the stable part moves to scrollback. */
 export const STREAM_ROWS = 12;
-export const COMPACT_ROWS = 3;
 export const ABORTED = "Aborted by user"; // what the Agent puts back for a cut-short tool
 
 export type BlockKind = "user" | "thinking" | "assistant" | "tool" | "system";
@@ -55,6 +58,8 @@ export interface RegionInput {
   editorRow: number;
   editorCol: number;
   status: string;
+  /** Where we are: "~/Projects/kinoko (master)", shown under the editor. */
+  place?: string;
   viewportRows?: number;
   viewportCols?: number;
 }
@@ -160,38 +165,48 @@ export function liveRegion(input: RegionInput): Region {
     const tag = item.kind === "steer" ? "[steer]" : "[follow-up]";
     tail.push(`${ANSI.dim}${tag}${ANSI.reset} ${item.text}`);
   }
-  const editor = input.editorLines.map((line) => (line === "" ? "> " : `> ${line}`));
-  if (input.editorEmpty) {
-    editor.push(`${ANSI.dim}type a prompt, enter to send, enter while running to steer${ANSI.reset}`);
-  }
+  // The editor sits between two rules, with a block cursor drawn in place (the terminal's own
+  // cursor stays hidden). Empty, it shows the hint as a placeholder under the cursor.
+  const placeholder = input.editorEmpty && input.editorLines.length === 1 && input.editorLines[0] === "";
+  const editor = placeholder
+    ? [`> ${ANSI.inverse}${HINT[0]}${ANSI.reset}${ANSI.dim}${HINT.slice(1)}${ANSI.reset}`]
+    : input.editorLines.map((line, i) => `> ${i === input.editorRow ? withCursor(line, input.editorCol) : line}`);
+  const rule = `${ANSI.dim}${"─".repeat(Math.max(1, (input.viewportCols ?? 80) - 2))}${ANSI.reset}`;
+  // A blank row keeps the transcript off the input.
+  let head = ["", rule];
+  let foot = [rule, ...(input.place ? [`${ANSI.dim}${input.place}${ANSI.reset}`] : []), input.status];
 
   const viewport = input.viewportRows;
   const width = input.viewportCols === undefined ? undefined : Math.max(1, input.viewportCols - 2);
-  if (width !== undefined) {
-    tail = tail.flatMap((line) => wrapAnsi(line, width));
-    // The idle hint never holds the cursor, so it can wrap instead of ending in "…".
-    if (input.editorEmpty && editor.length > 0) {
-      const hint = editor.pop() as string;
-      editor.push(...wrapAnsi(hint, width));
-    }
-  }
+  if (width !== undefined) tail = tail.flatMap((line) => wrapAnsi(line, width));
   if (viewport === undefined || viewport < 2) {
-    const rows = [...tail];
-    const editorStart = rows.length;
-    rows.push(...editor, input.status);
-    return region(rows, editorStart + input.editorRow, input.editorCol + 2, input.viewportCols);
+    const rows = [...tail, ...head, ...editor, ...foot];
+    return region(rows, tail.length + head.length + input.editorRow, input.editorCol + 2, input.viewportCols);
   }
 
   // The region must stay shorter than the terminal, or its top scrolls out of reach and cannot be
   // repainted. When the tail does not fit, only its last rows are shown: the rest of a streamed
-  // block was already moved to the scrollback by splitStable, so this only trims extremes.
-  const editorRoom = Math.max(1, viewport - 1);
+  // block was already moved to the scrollback by splitStable, so this only trims extremes. A tiny
+  // viewport drops the chrome first: the editor row and the status always stay.
+  if (viewport < head.length + foot.length + 1) {
+    head = [];
+    foot = [input.status];
+  }
+  const editorRoom = Math.max(1, viewport - head.length - foot.length);
   const editorStartAt = Math.max(0, Math.min(input.editorRow - editorRoom + 1, editor.length - editorRoom));
   const visibleEditor = editor.length <= editorRoom ? editor : editor.slice(editorStartAt, editorStartAt + editorRoom);
-  const contentRoom = Math.max(0, viewport - visibleEditor.length - 1);
+  const contentRoom = Math.max(0, viewport - visibleEditor.length - head.length - foot.length);
   const visibleTail = contentRoom === 0 ? [] : tail.slice(-contentRoom);
-  const rows = [...visibleTail, ...visibleEditor, input.status];
-  return region(rows, visibleTail.length + input.editorRow - editorStartAt, input.editorCol + 2, input.viewportCols);
+  const rows = [...visibleTail, ...head, ...visibleEditor, ...foot];
+  const row = visibleTail.length + head.length + input.editorRow - editorStartAt;
+  return region(rows, row, input.editorCol + 2, input.viewportCols);
+}
+
+const HINT = "type a prompt, enter to send, enter while running to steer";
+
+/** Draws the block cursor over the character at `col` (a space past the end of the line). */
+function withCursor(line: string, col: number): string {
+  return `${line.slice(0, col)}${ANSI.inverse}${line[col] ?? " "}${ANSI.reset}${line.slice(col + 1)}`;
 }
 
 /** Model reasoning is display-only: muted and distinct from the answer. */
@@ -207,134 +222,6 @@ function region(rows: string[], row: number, col: number, width: number | undefi
   if (width === undefined) return { lines: rows, row, col };
   const max = Math.max(1, width - 2);
   return { lines: rows.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max) };
-}
-
-/** Wraps a styled row to the terminal width, keeping ANSI colors across the split rows. */
-export function wrapAnsi(line: string, max: number): string[] {
-  if (max < 1) return [line];
-  if (visibleLength(line) <= max) return [line];
-  const rows: string[] = [];
-  let cur = "";
-  let visible = 0;
-  let active = "";
-  let index = 0;
-  while (index < line.length) {
-    if (line.startsWith("\x1b[", index)) {
-      const end = line.slice(index + 2).search(/[@-~]/);
-      if (end >= 0) {
-        const sequenceEnd = index + end + 3;
-        const seq = line.slice(index, sequenceEnd);
-        cur += seq;
-        if (seq.endsWith("m")) active = seq === ANSI.reset ? "" : active + seq;
-        index = sequenceEnd;
-        continue;
-      }
-    }
-    if (visible >= max) {
-      rows.push(active === "" ? cur : `${cur}${ANSI.reset}`);
-      cur = active;
-      visible = 0;
-      continue;
-    }
-    cur += line[index] ?? "";
-    visible++;
-    index++;
-  }
-  rows.push(cur);
-  return rows;
-}
-
-function visibleLength(line: string): number {
-  let visible = 0;
-  for (let index = 0; index < line.length;) {
-    if (line.startsWith("\x1b[", index)) {
-      const end = line.slice(index + 2).search(/[@-~]/);
-      if (end >= 0) {
-        index += end + 3;
-        continue;
-      }
-    }
-    visible++;
-    index++;
-  }
-  return visible;
-}
-
-function clipAnsi(line: string, max: number): string {
-  // Rows that already fit (including wrapped transcript rows) pass through untouched:
-  // only truly overlong rows are cut, so a trailing reset can never trigger the ellipsis.
-  if (visibleLength(line) <= max) return line;
-  let out = "";
-  let visible = 0;
-  for (let index = 0; index < line.length;) {
-    if (line.startsWith("\x1b[", index)) {
-      const end = line.slice(index + 2).search(/[@-~]/);
-      if (end >= 0) {
-        const sequenceEnd = index + end + 3;
-        out += line.slice(index, sequenceEnd);
-        index = sequenceEnd;
-        continue;
-      }
-    }
-    if (visible >= max - 1 && index < line.length - 1) return `${out}…${ANSI.reset}`;
-    out += line[index] ?? "";
-    visible++;
-    index++;
-  }
-  return out;
-}
-
-/** The tool line: name in bold yellow, what it acts on in bold white. */
-export function toolHead(tool: Pick<ToolView, "name" | "args">): string {
-  const args = tool.args === "" ? "" : ` ${ANSI.white}${tool.args}`;
-  return `${ANSI.toolDot}●${ANSI.reset} ${ANSI.tool}${tool.name}${ANSI.reset}${args}${ANSI.reset}`;
-}
-
-/** What a call acts on, instead of its JSON: the path, the command, the pattern. */
-export function toolSummary(name: string, args: unknown): string {
-  const a = (args ?? {}) as Record<string, unknown>;
-  const str = (key: string): string => (typeof a[key] === "string" ? (a[key] as string) : "");
-  let main = "";
-  if (name === "read" || name === "write" || name === "edit") main = str("path");
-  else if (name === "bash") main = str("cmd");
-  else if (name === "search") main = [str("pattern"), str("path")].filter((part) => part !== "").join(" in ");
-  return oneLine(main === "" ? JSON.stringify(a) : main, 100);
-}
-
-/** A tool failed when it says so: an ERROR result, a non-zero exit or a timeout (see bash.ts). */
-export function toolFailed(output: string): boolean {
-  return output.startsWith("ERROR:") || /\n\[(exit code \d+|timed out after [^\]]*)\]$/.test(output.trimEnd());
-}
-
-/**
- * A finished tool block: collapsed to COMPACT_ROWS lines unless `full` is set. The whole block,
- * head included, sits on a soft green band when the tool succeeded and a soft red one when it
- * failed, `width` wide.
- */
-export function toolBlock(tool: ToolView, full: boolean, width = 80): string {
-  const head = toolHead(tool);
-  if (tool.aborted) return `${head} ${ANSI.dim}aborted${ANSI.reset}`;
-  const all = tool.output.replace(/\n+$/, "").split("\n");
-  const shown = full ? all : all.slice(0, COMPACT_ROWS);
-  // One column of padding each side, plus the renderer's own margin.
-  const inner = Math.max(3, width - 4);
-  const rows = [
-    ...wrapAnsi(head, inner),
-    ...shown.flatMap((row) => wrapAnsi(row.replace(/\t/g, "  "), inner - 2)).map((row) => `  ${row}`),
-  ];
-  const hidden = all.length - shown.length;
-  if (hidden > 0) rows.push(`  ${ANSI.dim}… ${hidden} more lines (ctrl+t)${ANSI.reset}`);
-  return band(rows, toolFailed(tool.output) ? ANSI.bgErr : ANSI.bgOk, inner);
-}
-
-/** Paints rows on a background `inner` wide; a reset inside a row must not end the band. */
-function band(rows: string[], bg: string, inner: number): string {
-  return rows
-    .map((row) => {
-      const pad = " ".repeat(Math.max(0, inner - visibleLength(row)));
-      return `${bg} ${row.replaceAll(ANSI.reset, `${ANSI.reset}${bg}`)}${pad} ${ANSI.reset}`;
-    })
-    .join("\n");
 }
 
 export function statusLine(parts: {
@@ -357,33 +244,11 @@ export function statusLine(parts: {
     .join(`${ANSI.dim} | ${ANSI.reset}`);
 }
 
-/** Tool arguments on one line, trimmed: the region is narrow. */
-export function oneLine(text: string, max = 60): string {
-  const line = text.replace(/\s+/g, " ").trim();
-  return line.length > max ? `${line.slice(0, max - 3)}...` : line;
-}
-
 /** Hard wraps a logical editor line to the terminal width. */
 export function wrapTo(width: number): (line: string) => string[] {
   return (line: string) => (line.length <= width ? [line] : (line.match(new RegExp(`.{1,${width}}`, "g")) ?? [line]));
 }
 
-const ESC = "\x1b[";
-const ANSI = {
-  bold: `${ESC}1m`,
-  dim: `${ESC}2m`,
-  italic: `${ESC}3m`,
-  reset: `${ESC}0m`,
-  inverse: `${ESC}7m`,
-  user: `${ESC}38;5;159m`,
-  // Yellow means "a tool": the dot and the name share it.
-  tool: `${ESC}1;38;5;221m`,
-  toolDot: `${ESC}38;5;221m`,
-  white: `${ESC}1;97m`,
-  // Tints only a step away from a dark background, so they read as translucent.
-  bgOk: `${ESC}48;2;30;44;38m`,
-  bgErr: `${ESC}48;2;50;30;36m`,
-};
 
 export const HELP = [
   "kinoko keys",

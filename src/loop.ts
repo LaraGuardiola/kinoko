@@ -188,6 +188,7 @@ export class Agent {
         } else if (ev.type === "done") {
           stopReason = ev.stop ?? "end";
           if (ev.usage) usage = ev.usage;
+          this.#cost += ev.usage?.cost ?? 0;
         }
       }
 
@@ -212,6 +213,8 @@ export class Agent {
       const thinking = joinOf(streamEvents, "thinking");
       if (thinking) assistantMsg.thinking = thinking;
       if (toolCalls.length > 0) assistantMsg.toolCalls = toolCalls;
+      const replay = streamEvents.findLast((e) => e.type === "replay");
+      if (replay?.type === "replay") assistantMsg.replay = replay.data;
       await this.#push(assistantMsg);
       this.#ext?.emit("turn_end", assistantMsg);
       this.#emit({ type: "message_end", message: assistantMsg });

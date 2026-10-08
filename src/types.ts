@@ -26,12 +26,16 @@ export interface Message {
   toolCallId?: string; // toolCallId only on role "tool"
   stop?: StopReason;
   usage?: Usage;
+  // Provider-opaque content replayed unchanged to the provider that produced it (Anthropic's signed
+  // thinking blocks). Never shown, never edited; dropped when the history is rewritten.
+  replay?: unknown;
 }
 
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "thinking"; delta: string }
   | { type: "tool_call"; call: ToolCall } // emitted ONLY when its JSON args are complete
+  | { type: "replay"; data: unknown } // the finished message as the provider wants it back
   | { type: "done"; stop: StopReason; usage?: Usage }
   | { type: "error"; message: string };
 

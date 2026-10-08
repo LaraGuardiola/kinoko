@@ -223,4 +223,30 @@ describe("Agent loop with abort, steer and follow-up", () => {
     expect(seen.filter((e) => e.type === "thinking_delta")).toHaveLength(1);
     expect(agent.messages.at(-1)!.thinking).toBe("hmm");
   });
+
+  test("the provider's replay data lands on the assistant message", async () => {
+    const provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        yield { type: "text", delta: "ok" };
+        yield { type: "replay", data: [{ type: "text", text: "ok" }] };
+        yield { type: "done", stop: "end", usage: { input: 1, output: 1, cost: 3 } };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 2 });
+    await agent.prompt("one");
+    expect(agent.messages.at(-1)!.replay).toEqual([{ type: "text", text: "ok" }]);
+  });
+
+  test("reported cost counts against maxCost", async () => {
+    const tool = { name: "t", description: "", schema: {}, run: async () => "done" };
+    const provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        yield { type: "tool_call", call: { id: crypto.randomUUID(), name: "t", args: {} } };
+        yield { type: "done", stop: "tool_use", usage: { input: 1, output: 1, cost: 3 } };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [tool], maxTurns: 10, maxCost: 2 });
+    expect((await agent.prompt("go")).reason).toBe("limit");
+    expect(agent.messages.filter((m) => m.role === "assistant")).toHaveLength(1);
+  });
 });

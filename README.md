@@ -105,6 +105,14 @@ both work (`--max-turns` / `--maxTurns`).
 `examples/config.strata.json` is exactly that, for a local Strata/llama.cpp engine. `apiKey` falls
 back to `$KINOKO_API_KEY`. Unknown keys are dropped rather than silently ignored.
 
+Anthropic: `"provider": "anthropic"` with a Console API key (`apiKey`, or `$ANTHROPIC_API_KEY`).
+`baseUrl`, `contextWindow` and `maxOutputTokens` left at their defaults come from
+`src/providers/models.json`; `reasoningEffort` maps to the model's effort.
+
+```json
+{ "provider": "anthropic", "model": "claude-opus-5-5", "reasoningEffort": "high" }
+```
+
 ## Modes
 
 - **`--tui`** — the interactive one. Raw ANSI, no alternate screen, so your terminal scrollback

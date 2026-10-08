@@ -148,7 +148,8 @@ export class Session {
     const from = this.#log.findIndex((m) => m.id === compaction.keepFrom);
     const to = this.#log.findIndex((m) => m.id === compaction.summary);
     if (!summary || from < 0 || to < from) return head;
-    return [summary, ...this.#log.slice(from, to)];
+    // The tail's replayed thinking was bound to the history before the summary (see compact.ts).
+    return [summary, ...this.#log.slice(from, to).map(({ replay: _replay, ...m }) => m)];
   }
 
   /** One append per record: O_APPEND, so a resumed session can never rewrite earlier lines. */
