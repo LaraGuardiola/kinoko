@@ -155,7 +155,7 @@ if (prompt !== undefined && prompt.startsWith("/")) {
   if (command === undefined) {
     const known = ext.commandNames();
     process.stderr.write(
-      `unknown command /${name ?? ""}${known.length > 0 ? ` (available: ${known.map((c) => `/${c}`).join(", ")})` : " (no extensions loaded)"}\n`,
+      `unknown command /${name ?? ""}${known.length > 0 ? ` (available: ${known.map((c) => `/${c}`).join(", ")})` : " (no extension registers a command)"}\n`,
     );
     process.exit(1);
   }
