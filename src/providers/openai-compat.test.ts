@@ -98,8 +98,12 @@ describe("openai-compat", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({ type: "tool_call", call: { id: "call_1", name: "read", args: { path: "src/main.ts" } } });
     expect(events.at(-1)).toEqual({ type: "done", stop: "tool_use", usage: undefined });
-    // The name is announced once, on the first chunk, long before the args are complete.
-    expect(events.filter((e) => e.type === "tool_pending")).toEqual([{ type: "tool_pending", name: "read" }]);
+    // The name is announced on the first chunk, then the path the moment its closing quote arrives,
+    // both long before the call itself.
+    expect(events.filter((e) => e.type === "tool_pending")).toEqual([
+      { type: "tool_pending", name: "read" },
+      { type: "tool_pending", name: "read", args: { path: "src/main.ts" } },
+    ]);
     expect(events.findIndex((e) => e.type === "tool_pending")).toBe(0);
   });
 

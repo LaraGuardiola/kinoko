@@ -23,7 +23,7 @@ export type AgentEvent =
   | { type: "message_delta"; delta: string }
   | { type: "thinking_delta"; delta: string }
   | { type: "message_end"; message: Message }
-  | { type: "tool_pending"; name: string } // the model began writing a call to this tool
+  | { type: "tool_pending"; name: string; args?: Record<string, string> } // a call being written, args so far
   | { type: "tool_start"; call: ToolCall }
   | { type: "tool_output"; call: ToolCall; output: string }
   | { type: "tool_end"; call: ToolCall }
@@ -198,7 +198,7 @@ export class Agent {
             break;
           }
         } else if (ev.type === "tool_pending") {
-          this.#emit({ type: "tool_pending", name: ev.name });
+          this.#emit({ type: "tool_pending", name: ev.name, args: ev.args });
         } else if (ev.type === "error") {
           if (isContextOverflow(ev.message)) overflow = true;
           else streamEvents.push(ev);

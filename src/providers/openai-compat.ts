@@ -1,5 +1,6 @@
 import type { Message, Provider, ProviderRequest, StreamEvent, Usage } from "../types.ts";
 import { ThinkSplit } from "./think-split.ts";
+import { ArgsWatcher } from "./partial-args.ts";
 
 interface Delta {
   content?: string;
@@ -118,6 +119,7 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
       const decoder = new TextDecoder();
       const parser = new SseParser();
       const pending = new Map<number, Pending>();
+      const watchers = new Map<number, ArgsWatcher>();
       const think = new ThinkSplit();
       let finish: string | null | undefined;
       let usage: Usage | undefined;
@@ -143,11 +145,16 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
               }
             }
             for (const tc of choice.delta?.tool_calls ?? []) {
-              const fresh = !pending.get(tc.index ?? 0)?.name;
+              const index = tc.index ?? 0;
+              const fresh = !pending.get(index)?.name;
               merge(pending, tc);
-              // Say a call is coming as soon as its name is known: its args may take minutes.
-              const name = pending.get(tc.index ?? 0)?.name;
+              // Say a call is coming as soon as its name is known (its args may take minutes), and
+              // again as each string arg completes, so a path shows the moment it is written.
+              const name = pending.get(index)?.name;
               if (fresh && name) yield { type: "tool_pending", name };
+              const args = watchers.get(index) ?? watchers.set(index, new ArgsWatcher()).get(index)!;
+              const done = args.push(tc.function?.arguments ?? "");
+              if (done && name) yield { type: "tool_pending", name, args: done };
             }
             if (choice.finish_reason) finish = choice.finish_reason;
           }

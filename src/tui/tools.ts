@@ -31,14 +31,20 @@ export function pulseDot(level: number): string {
   return `\x1b[38;2;${r};${g};${b}m`;
 }
 
-/** What a call acts on, instead of its JSON: the path, the command, the pattern. */
-export function toolSummary(name: string, args: unknown): string {
+/**
+ * What a call acts on, instead of its JSON: the path, the command, the pattern. `fallback` shows
+ * the JSON when there is no such field; a call still being written shows nothing instead.
+ */
+export function toolSummary(name: string, args: unknown, fallback = true): string {
   const a = (args ?? {}) as Record<string, unknown>;
   const str = (key: string): string => (typeof a[key] === "string" ? (a[key] as string) : "");
   let main = "";
   if (name === "read" || name === "write" || name === "edit") main = str("path");
   else if (name === "bash") main = str("command") || str("cmd");
   else if (name === "search") main = [str("pattern"), str("path")].filter((part) => part !== "").join(" in ");
+  else if (name === "web_search") main = str("query");
+  else if (name === "web_fetch") main = str("url");
+  if (main === "" && !fallback) return "";
   return oneLine(main === "" ? JSON.stringify(a) : main, 100);
 }
 

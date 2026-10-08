@@ -66,7 +66,7 @@ export class App {
   #thinkingSeen = false; // this message already streamed its thinking
   #printedAny = false; // something is already in the scrollback: every later block gets a blank row above
   #tool: ToolView | undefined;
-  #pending: string | undefined; // a tool call the model is still writing: only its name is known
+  #pending: { name: string; args: string } | undefined; // a call the model is still writing
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
@@ -277,7 +277,8 @@ export class App {
       case "tool_pending":
         // The text before the call is final; the call itself shows at once, its bullet pulsing.
         this.#closeBlock();
-        this.#pending = e.name;
+        // Its name first, then what it acts on as soon as that arg is complete (a write's path).
+        this.#pending = { name: e.name, args: e.args ? toolSummary(e.name, e.args, false) : "" };
         this.render();
         return;
       case "tool_start":
@@ -453,7 +454,7 @@ export class App {
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
       open: this.#open,
-      tool: this.#tool ?? (this.#pending === undefined ? undefined : { name: this.#pending, args: "", output: "", aborted: false }),
+      tool: this.#tool ?? (this.#pending === undefined ? undefined : { ...this.#pending, output: "", aborted: false }),
       // Until the result is in, the bullet fades in and out (the render timer repaints each step).
       pulse: this.#tool || this.#pending !== undefined ? pulseLevel(Date.now()) : undefined,
       toolGap: this.#printedAny,

@@ -345,21 +345,21 @@ describe("TUI app with the agent", () => {
     const h = await harness(
       [
         [
-          { type: "tool_pending", name: "slow" },
+          { type: "tool_pending", name: "bash" },
+          { type: "tool_pending", name: "bash", args: { command: "make all" } }, // its first arg is written
           { type: "text", delta: "" }, // the long args: nothing to show but time
-          { type: "text", delta: "" },
-          { type: "tool_call", call: { id: "s", name: "slow", args: {} } },
+          { type: "tool_call", call: { id: "s", name: "bash", args: { command: "make all" } } },
           { type: "done", stop: "tool_use" },
         ],
         [{ type: "text", delta: "done" }, { type: "done", stop: "end" }],
       ],
-      { tools: [slow], pace: 40 },
+      { tools: [{ ...slow, name: "bash" }], pace: 40 },
     );
     h.press("go\r");
-    await new Promise((r) => setTimeout(r, 60)); // the name is out, the call is not
+    await new Promise((r) => setTimeout(r, 60)); // the name and command are out, the call is not
     expect(h.agent.messages.some((m) => m.role === "tool")).toBe(false);
     h.app.render();
-    expect(h.screen()).toContain("● slow …");
+    expect(h.screen()).toContain("● bash make all …"); // the command, before the call exists
     await settle(h.agent);
   });
 
