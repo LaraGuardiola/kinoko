@@ -60,7 +60,8 @@ async function harness(
 ): Promise<Harness> {
   const out: string[] = [];
   const { provider, calls } = scripted(turns, opts.pace ?? 1);
-  const session = await Session.create({ cwd: ROOT, model: opts.model ?? "test-model" });
+  // home: ROOT keeps test sessions out of the real ~/.kinoko/sessions.
+  const session = await Session.create({ cwd: ROOT, model: opts.model ?? "test-model", home: ROOT });
   const agent = new Agent({
     provider: provider as never,
     model: opts.model ?? "test-model",

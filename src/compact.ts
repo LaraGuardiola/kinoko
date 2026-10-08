@@ -52,8 +52,20 @@ export function historyTokens(messages: Message[]): number {
   return messages.reduce((sum, m) => sum + messageTokens(m), estimateTokens(thinking));
 }
 
+/**
+ * What the next request will carry. chars/4 runs 15-25% short of a real tokenizer and leaves out the
+ * system prompt and tool schemas, so the server's own count for the newest reply (its prompt plus
+ * the reply) is the base, and only what was appended since is estimated.
+ */
+export function contextTokens(messages: Message[]): number {
+  const i = messages.findLastIndex((m) => m.usage !== undefined);
+  const usage = messages[i]?.usage;
+  if (!usage) return historyTokens(messages);
+  return usage.input + usage.output + historyTokens(messages.slice(i + 1));
+}
+
 export function shouldCompact(messages: Message[], contextWindow: number): boolean {
-  return messages.length > 0 && historyTokens(messages) > contextWindow - RESERVE;
+  return messages.length > 0 && contextTokens(messages) > contextWindow - RESERVE;
 }
 
 /** True for the provider errors that mean "your prompt did not fit". */
@@ -84,7 +96,8 @@ export async function compactHistory(
 
   // Replayed thinking is bound to the history it was produced in: after a summary it would be
   // rejected, so the kept turns go back as plain text and tool calls.
-  const tail = messages.slice(split).map(({ replay: _replay, ...m }) => m);
+  // Its usage counted a prompt that no longer exists, and would trigger compaction again at once.
+  const tail = messages.slice(split).map(({ replay: _replay, usage: _usage, ...m }) => m);
   const summary: Message = {
     id: crypto.randomUUID(),
     role: "user",

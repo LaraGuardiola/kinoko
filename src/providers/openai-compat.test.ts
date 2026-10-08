@@ -134,7 +134,7 @@ describe("openai-compat: truncation, thinking and effort", () => {
 
   test("thinking goes back only for a newest reply cut by the output limit; the request effort overrides the config", async () => {
     setMode("text");
-    const provider = openaiCompat({ baseUrl, apiKey: "k", reasoningEffort: "low" });
+    const provider = openaiCompat({ baseUrl, apiKey: "k", reasoningEffort: "low", thinkingBudget: 2048 });
     const req: ProviderRequest = {
       ...mkReq(new AbortController().signal),
       messages: [
@@ -156,5 +156,6 @@ describe("openai-compat: truncation, thinking and effort", () => {
     expect((lastBody.messages as Array<Record<string, unknown>>)[3]).toEqual({ role: "assistant", content: "ok" });
     expect(messages[0]).toEqual({ role: "user", content: "hi" });
     expect(lastBody.reasoning_effort).toBe("off");
+    expect(lastBody.reasoning_budget_tokens).toBe(2048);
   });
 });

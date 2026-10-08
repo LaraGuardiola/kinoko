@@ -31,6 +31,7 @@ export interface OpenAiCompatOptions {
   apiKey: string;
   reasoningEffort?: "off" | "low" | "medium" | "high";
   maxOutputTokens?: number;
+  thinkingBudget?: number; // sent only when set: OpenAI itself rejects unknown fields
 }
 
 /** Splits an SSE byte stream into complete `data:` payloads. */
@@ -222,6 +223,7 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
     messages,
     ...((req.effort ?? opts.reasoningEffort) ? { reasoning_effort: req.effort ?? opts.reasoningEffort } : {}),
     ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
+    ...(opts.thinkingBudget ? { reasoning_budget_tokens: opts.thinkingBudget } : {}),
     tools: req.tools.length
       ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }))
       : undefined,

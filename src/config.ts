@@ -12,6 +12,9 @@ export interface Config {
   contextWindow: number;
   maxOutputTokens: number;
   reasoningEffort?: ReasoningEffort;
+  // Hard cap on thinking tokens per reply (openai-compat `reasoning_budget_tokens`, as Strata and
+  // llama.cpp-style engines read it). Unset: the engine's own default. Effort alone is only a hint.
+  thinkingBudget?: number;
 }
 
 export const DEFAULTS: Config = {
@@ -25,7 +28,7 @@ export const DEFAULTS: Config = {
   maxOutputTokens: 8192,
 }
 
-const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens"]);
+const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens", "thinkingBudget"]);
 const FILE_KEYS: ReadonlySet<string> = new Set([
   "provider",
   "baseUrl",
@@ -36,6 +39,7 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "contextWindow",
   "maxOutputTokens",
   "reasoningEffort",
+  "thinkingBudget",
 ]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);
 const PROVIDERS: ReadonlySet<string> = new Set(["openai-compat", "anthropic"]);

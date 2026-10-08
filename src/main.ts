@@ -32,6 +32,8 @@ const FLAGS: Record<string, string> = {
   maxOutputTokens: "maxOutputTokens",
   "reasoning-effort": "reasoningEffort",
   reasoningEffort: "reasoningEffort",
+  "thinking-budget": "thinkingBudget",
+  thinkingBudget: "thinkingBudget",
 };
 
 const RESUME_FLAGS = new Set(["continue", "c"]);
@@ -197,6 +199,7 @@ const agent = new Agent({
     apiKey: config.apiKey,
     reasoningEffort: config.reasoningEffort,
     maxOutputTokens: config.maxOutputTokens,
+    thinkingBudget: config.thinkingBudget,
   }),
   model: config.model,
   system,
