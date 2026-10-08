@@ -102,6 +102,9 @@ describe("anthropic provider", () => {
     const calls = events.filter((e) => e.type === "tool_call");
     expect(calls).toEqual([{ type: "tool_call", call: { id: "tu_1", name: "read", args: { path: "src/main.ts" } } }]);
     expect(events.at(-1)).toMatchObject({ type: "done", stop: "tool_use" });
+    // The name is announced at the block start, then the path as soon as it is complete.
+    expect(events[0]).toEqual({ type: "tool_pending", name: "read" });
+    expect(events[1]).toEqual({ type: "tool_pending", name: "read", args: { path: "src/main.ts" } });
   });
 
   test("usage counts the whole prompt and prices it from models.json", async () => {

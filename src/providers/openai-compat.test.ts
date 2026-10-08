@@ -3,14 +3,15 @@ import { openaiCompat } from "./openai-compat.ts";
 import type { ProviderRequest, StreamEvent } from "../types.ts";
 
 let server: ReturnType<typeof Bun.serve>;
-let mode: "text" | "split-tool" | "hang" = "text";
+let mode: "text" | "split-tool" | "length-tool" | "hang" = "text";
+let lastBody: Record<string, unknown> = {};
 let baseUrl: string;
 
 beforeAll(() => {
   server = Bun.serve({
     port: 0,
     async fetch(request) {
-      await request.text();
+      lastBody = JSON.parse(await request.text()) as Record<string, unknown>;
       const stream = new ReadableStream<Uint8Array>({
         async start(ctl) {
           const enc = (s: string): void => ctl.enqueue(new TextEncoder().encode(s));
@@ -26,6 +27,12 @@ beforeAll(() => {
             enc(chunk({ tool_calls: [{ index: 0, function: { arguments: 'th":"src/mai' } }] }));
             enc(chunk({ tool_calls: [{ index: 0, function: { arguments: 'n.ts"}' } }] }));
             enc(finishChunk());
+            enc("data: [DONE]\n\n");
+            ctl.close();
+          } else if (mode === "length-tool") {
+            // A server that heals partial JSON: the args parse, but the reply was cut by max_tokens.
+            enc(chunk({ tool_calls: [{ index: 0, id: "call_2", function: { name: "write", arguments: '{"path":"a.ts","content":"half"}' } }] }));
+            enc(`data: ${JSON.stringify({ choices: [{ delta: {}, index: 0, finish_reason: "length" }] })}\n\n`);
             enc("data: [DONE]\n\n");
             ctl.close();
           } else {
@@ -45,7 +52,7 @@ afterAll(() => {
   server?.stop(true);
 });
 
-function setMode(m: "text" | "split-tool" | "hang"): void {
+function setMode(m: "text" | "split-tool" | "length-tool" | "hang"): void {
   mode = m;
 }
 
@@ -91,6 +98,13 @@ describe("openai-compat", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({ type: "tool_call", call: { id: "call_1", name: "read", args: { path: "src/main.ts" } } });
     expect(events.at(-1)).toEqual({ type: "done", stop: "tool_use", usage: undefined });
+    // The name is announced on the first chunk, then the path the moment its closing quote arrives,
+    // both long before the call itself.
+    expect(events.filter((e) => e.type === "tool_pending")).toEqual([
+      { type: "tool_pending", name: "read" },
+      { type: "tool_pending", name: "read", args: { path: "src/main.ts" } },
+    ]);
+    expect(events.findIndex((e) => e.type === "tool_pending")).toBe(0);
   });
 
   test("3. abort mid-stream stops within 100ms with no partial tool_call", async () => {
@@ -115,5 +129,40 @@ describe("openai-compat", () => {
     ac.abort();
     const events = await collect(ac.signal);
     expect(events).toEqual([{ type: "done", stop: "aborted" }]);
+  });
+});
+describe("openai-compat: truncation, thinking and effort", () => {
+  test("a tool call cut by the output limit never runs, even when its JSON parses", async () => {
+    setMode("length-tool");
+    const events = await collect(new AbortController().signal);
+    expect(events.some((e) => e.type === "tool_call")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "done", stop: "length" });
+  });
+
+  test("thinking goes back only for a newest reply cut by the output limit; the request effort overrides the config", async () => {
+    setMode("text");
+    const provider = openaiCompat({ baseUrl, apiKey: "k", reasoningEffort: "low", thinkingBudget: 2048 });
+    const req: ProviderRequest = {
+      ...mkReq(new AbortController().signal),
+      messages: [
+        { id: "1", role: "user", content: "hi" },
+        { id: "2", role: "assistant", content: "draft", thinking: "an old draft of the file" },
+        { id: "3", role: "user", content: "next" },
+        { id: "4", role: "assistant", content: "", thinking: "let me see", stop: "length" },
+        { id: "5", role: "user", content: "go" },
+      ],
+      effort: "off",
+    };
+    for await (const _ of provider.stream(req)) void _;
+    const messages = lastBody.messages as Array<Record<string, unknown>>;
+    expect(messages[1]).toEqual({ role: "assistant", content: "draft" });
+    expect(messages[3]).toEqual({ role: "assistant", content: "", reasoning_content: "let me see" });
+    // A finished newest reply keeps its thinking to itself: a small model copies it verbatim.
+    const done = { ...req, messages: [...req.messages.slice(0, 3), { id: "4", role: "assistant" as const, content: "ok", thinking: "x" }] };
+    for await (const _ of provider.stream(done)) void _;
+    expect((lastBody.messages as Array<Record<string, unknown>>)[3]).toEqual({ role: "assistant", content: "ok" });
+    expect(messages[0]).toEqual({ role: "user", content: "hi" });
+    expect(lastBody.reasoning_effort).toBe("off");
+    expect(lastBody.reasoning_budget_tokens).toBe(2048);
   });
 });

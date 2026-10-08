@@ -3,9 +3,12 @@ import { budget } from "./budget";
 import type { Tool, ToolContext } from "../types";
 
 const DEFAULT_MAX_TOKENS = 4000;
+/** A command that never ends (a dev server, a prompt for input) must not hang the run forever. */
+const DEFAULT_TIMEOUT_MS = 300_000;
 
 interface BashArgs {
-  cmd?: unknown;
+  command?: unknown;
+  cmd?: unknown; // accepted too: the name used before
   timeout?: unknown;
 }
 
@@ -14,23 +17,23 @@ interface BashArgs {
  * through ctx.onOutput, and kills the WHOLE group on abort or timeout.
  */
 async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
-  const cmd = args.cmd;
-  if (typeof cmd !== "string") return "ERROR: bash: cmd must be a string";
-  const timeoutMs = typeof args.timeout === "number" && args.timeout > 0 ? Math.trunc(args.timeout) : 0;
+  // `command` is what models expect (most harnesses use it).
+  const cmd = args.command ?? args.cmd;
+  if (typeof cmd !== "string") return "ERROR: bash: missing command (string)";
+  const timeoutMs = typeof args.timeout === "number" && args.timeout > 0 ? Math.trunc(args.timeout) : DEFAULT_TIMEOUT_MS;
 
-  const child = spawn("sh", ["-c", cmd], { detached: true, cwd: ctx.cwd, stdio: ["pipe", "pipe", "pipe"] });
+  // No stdin: a command waiting for input would otherwise wait forever.
+  const child = spawn("sh", ["-c", cmd], { detached: true, cwd: ctx.cwd, stdio: ["ignore", "pipe", "pipe"] });
   const pid = child.pid ?? -1;
 
   const chunks: string[] = [];
-  const collect = (b: Buffer): void => {
-    const s = b.toString();
+  const collect = (s: string): void => {
     chunks.push(s);
     ctx.onOutput?.(s);
   };
-  child.stdout.on("data", (b: Buffer) => collect(b));
-  child.stderr.on("data", (b: Buffer) => {
-    collect(b);
-  });
+  // utf8 decoding per stream: a multi-byte character split across two chunks stays whole.
+  child.stdout.setEncoding("utf8").on("data", collect);
+  child.stderr.setEncoding("utf8").on("data", collect);
 
   const killGroup = (): void => {
     try {
@@ -49,16 +52,10 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
     const finish = (value: string): void => resolve(value);
 
     let timedOut = false;
-    let timer: null | ReturnType<typeof setTimeout> = null;
-    if (timeoutMs > 0) {
-      timer = setTimeout(
-        () => {
-          timedOut = true;
-          killGroup();
-        },
-        timeoutMs,
-      );
-    }
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killGroup();
+    }, timeoutMs);
 
     const onAbort = (): void => {
       killGroup();
@@ -67,7 +64,7 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
     ctx.signal.addEventListener("abort", onAbort);
 
     child.on("close", async (code: number | null) => {
-      if (timer) clearTimeout(timer);
+      clearTimeout(timer);
       ctx.signal.removeEventListener("abort", onAbort);
       const raw = chunks.join("");
       // A failed command says so at the end, where the budget's head+tail always keeps it.
@@ -84,10 +81,10 @@ export const bashTool: Tool = {
   schema: {
     type: "object",
     properties: {
-      cmd: { type: "string", description: "shell command" },
-      timeout: { type: "number", description: "kill after N ms" },
+      command: { type: "string", description: "shell command" },
+      timeout: { type: "number", description: `kill after N ms (default ${DEFAULT_TIMEOUT_MS})` },
     },
-    required: ["cmd"],
+    required: ["command"],
   },
   run: bashRun,
 };

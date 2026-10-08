@@ -56,11 +56,19 @@ interface Harness {
 
 async function harness(
   turns: StreamEvent[][],
-  opts: { tools?: Tool[]; model?: string; pace?: number; viewportRows?: number; viewportCols?: number } = {},
+  opts: {
+    tools?: Tool[];
+    model?: string;
+    pace?: number;
+    viewportRows?: number;
+    viewportCols?: number;
+    place?: () => Promise<string>;
+  } = {},
 ): Promise<Harness> {
   const out: string[] = [];
   const { provider, calls } = scripted(turns, opts.pace ?? 1);
-  const session = await Session.create({ cwd: ROOT, model: opts.model ?? "test-model" });
+  // home: ROOT keeps test sessions out of the real ~/.kinoko/sessions.
+  const session = await Session.create({ cwd: ROOT, model: opts.model ?? "test-model", home: ROOT });
   const agent = new Agent({
     provider: provider as never,
     model: opts.model ?? "test-model",
@@ -77,6 +85,7 @@ async function harness(
     contextWindow: 1000,
     viewportRows: opts.viewportRows,
     viewportCols: opts.viewportCols,
+    place: opts.place,
     session: session,
     rebuild: () => agent,
   });
@@ -190,8 +199,12 @@ describe("TUI app with the agent", () => {
     h.press("actually use rg\r"); // steer while the tool runs
     expect(h.app.queued.map((q) => q.kind)).toEqual(["steer"]);
     expect(h.app.queued[0]?.text).toBe("actually use rg");
+    // Only the [steer] line shows it for now: the blue user echo waits until it reaches the model.
+    const echo = "\x1b[38;5;159mactually use rg";
+    expect(h.out.join("")).not.toContain(echo);
 
     await settle(h.agent);
+    expect(h.out.join("").split(echo)).toHaveLength(2); // echoed exactly once, on delivery
     const users = h.agent.messages.filter((m) => m.role === "user").map((m) => m.content);
     expect(users).toEqual(["do the thing", "actually use rg"]);
     // The steer landed after the tool result, not before it.
@@ -292,9 +305,11 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
     const line = h.app.statusLine;
     expect(line).toContain("qwen-local");
-    expect(line).toContain("1,240/1,000 tok"); // input + output
+    expect(line).toContain("1,240/1,000 tok 124%"); // input + output, and how full the window is
+    expect(line).toContain("40 generated");
     expect(line).toContain("cache 25%");
     expect(line.startsWith("IDLE")).toBe(true); // level with the rows above, no extra margin
+    expect(line).not.toContain("\x1b[7m"); // no inverse background on the state
     expect(h.screen()).toContain("IDLE");
   });
 
@@ -320,8 +335,61 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
     // Before the fix this read 3,450 (1,050 + 1,150 + 1,300) for a 1,300-token conversation.
     expect(h.app.statusLine).toContain("1,300/1,000 tok");
+    // Generated is a session total: every round's output, thinking included.
+    expect(h.app.statusLine).toContain("200 generated");
     // The hit rate stays a session total: 2,100 cached of 3,300 sent.
     expect(h.app.statusLine).toContain("cache 64%");
+  });
+
+  test("8f. a tool call shows (pulsing) as soon as its name streams, before its args are done", async () => {
+    const h = await harness(
+      [
+        [
+          { type: "tool_pending", name: "bash" },
+          { type: "tool_pending", name: "bash", args: { command: "make all" } }, // its first arg is written
+          { type: "text", delta: "" }, // the long args: nothing to show but time
+          { type: "tool_call", call: { id: "s", name: "bash", args: { command: "make all" } } },
+          { type: "done", stop: "tool_use" },
+        ],
+        [{ type: "text", delta: "done" }, { type: "done", stop: "end" }],
+      ],
+      { tools: [{ ...slow, name: "bash" }], pace: 40 },
+    );
+    h.press("go\r");
+    await new Promise((r) => setTimeout(r, 60)); // the name and command are out, the call is not
+    expect(h.agent.messages.some((m) => m.role === "tool")).toBe(false);
+    h.app.render();
+    expect(h.screen()).toContain("● bash make all …"); // the command, before the call exists
+    await settle(h.agent);
+  });
+
+  test("8e. the place line picks up a new repository after the tool call, while the run goes on", async () => {
+    let branch = "";
+    const { promise: initDone, resolve: ran } = Promise.withResolvers<void>();
+    const gitInit: Tool = {
+      name: "git_init",
+      description: "",
+      schema: {},
+      run: async () => {
+        branch = " (master)";
+        ran();
+        return "done";
+      },
+    };
+    const h = await harness(
+      [
+        [{ type: "tool_call", call: { id: "g", name: "git_init", args: {} } }, { type: "done", stop: "tool_use" }],
+        [{ type: "text", delta: "still " }, { type: "text", delta: "working " }, { type: "text", delta: "on it" }, { type: "done", stop: "end" }],
+      ],
+      { tools: [gitInit], pace: 40, place: async () => `~/p${branch}` },
+    );
+    h.press("init a repo\r");
+    await initDone;
+    await new Promise((r) => setTimeout(r, 40)); // past the renderer's 33 ms throttle
+    h.app.render(); // the frame the real render timer would paint
+    expect(h.agent.state).toBe("running"); // the run has not ended yet...
+    expect(h.screen()).toContain("~/p (master)"); // ...and the branch already shows
+    await settle(h.agent);
   });
 
   test("8d. the startup panel is followed by a blank row before the first prompt", async () => {

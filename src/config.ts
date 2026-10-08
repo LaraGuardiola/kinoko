@@ -12,6 +12,9 @@ export interface Config {
   contextWindow: number;
   maxOutputTokens: number;
   reasoningEffort?: ReasoningEffort;
+  // Hard cap on thinking tokens per reply (openai-compat `reasoning_budget_tokens`, as Strata and
+  // llama.cpp-style engines read it). Unset: the engine's own default. Effort alone is only a hint.
+  thinkingBudget?: number;
 }
 
 export const DEFAULTS: Config = {
@@ -19,13 +22,13 @@ export const DEFAULTS: Config = {
   baseUrl: "https://api.openai.com/v1",
   apiKey: process.env.KINOKO_API_KEY ?? "",
   model: "gpt-4o-mini",
-  maxTurns: 50,
+  maxTurns: 500, // a long coding task easily needs 100+ tool rounds; Esc is the real brake
   maxCost: 5,
   contextWindow: 128_000,
   maxOutputTokens: 8192,
 }
 
-const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens"]);
+const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens", "thinkingBudget"]);
 const FILE_KEYS: ReadonlySet<string> = new Set([
   "provider",
   "baseUrl",
@@ -36,6 +39,7 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "contextWindow",
   "maxOutputTokens",
   "reasoningEffort",
+  "thinkingBudget",
 ]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);
 const PROVIDERS: ReadonlySet<string> = new Set(["openai-compat", "anthropic"]);
@@ -95,4 +99,9 @@ export async function loadConfig(flags: Record<string, string | undefined> = {})
     if (v !== undefined) layers.push(fromFlag(k, v));
   }
   return Object.assign({}, ...layers) as Config;
+}
+/** The thinking level as the TUI shows it: "LOW · 2048", "OFF", or "DEFAULT" (the model's own). */
+export function thinkingLabel(effort: ReasoningEffort | undefined, budget: number | undefined): string {
+  const level = (effort ?? "default").toUpperCase();
+  return budget && effort !== "off" ? `${level} · ${budget}` : level;
 }

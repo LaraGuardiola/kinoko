@@ -8,7 +8,7 @@
 
 import { fenceOpener, isClosing, renderMarkdown } from "./markdown.ts";
 import { ANSI, clipAnsi, wrapAnsi } from "./style.ts";
-import { toolHead } from "./tools.ts";
+import { pulseDot, toolHead } from "./tools.ts";
 
 export { wrapAnsi } from "./style.ts";
 
@@ -36,6 +36,9 @@ export interface Tokens {
   /** Totals over the session, for the cache hit rate. */
   input: number;
   cacheRead: number;
+  /** Everything the model generated this session, thinking included (it is not resent, so it
+   *  costs time, not context). */
+  output: number;
 }
 
 /** The block that is being streamed right now. At most one exists at any time. */
@@ -51,6 +54,8 @@ export interface RegionInput {
   tool: ToolView | undefined;
   /** A blank row goes before the running tool line. */
   toolGap?: boolean;
+  /** How lit the bullet of the tool in progress is (0..1): it fades in and out until the result. */
+  pulse?: number;
   marker: string;
   /** The marker reports an interruption: red, like the input rules. */
   markerAlert?: boolean;
@@ -61,6 +66,8 @@ export interface RegionInput {
   status: string;
   /** Where we are: "~/Projects/kinoko (master)", shown under the editor. */
   place?: string;
+  /** The thinking level ("LOW · 2048"), set into the right end of the rule above the editor. */
+  thinking?: string;
   viewportRows?: number;
   viewportCols?: number;
 }
@@ -167,7 +174,7 @@ export function liveRegion(input: RegionInput): Region {
   }
   if (input.tool !== undefined) {
     if (input.toolGap) tail.push("");
-    tail.push(`${toolHead(input.tool)} ${ANSI.dim}…${ANSI.reset}`);
+    tail.push(`${toolHead(input.tool, input.pulse === undefined ? undefined : pulseDot(input.pulse))} ${ANSI.dim}…${ANSI.reset}`);
   }
   if (input.marker !== "") {
     // A blank row keeps the note off whatever was streamed before it.
@@ -180,9 +187,10 @@ export function liveRegion(input: RegionInput): Region {
   // The editor sits between two rules, with a block cursor drawn in place (the terminal's own
   // cursor stays hidden).
   const editor = input.editorLines.map((line, i) => (i === input.editorRow ? withCursor(line, input.editorCol) : line));
-  const rule = `${ANSI.amanita}${"─".repeat(Math.max(1, (input.viewportCols ?? 80) - 2))}${ANSI.reset}`;
+  const ruleWidth = Math.max(1, (input.viewportCols ?? 80) - 2);
+  const rule = `${ANSI.amanita}${"─".repeat(ruleWidth)}${ANSI.reset}`;
   // A blank row keeps the transcript off the input.
-  let head = ["", rule];
+  let head = ["", labelledRule(ruleWidth, input.thinking)];
   let foot = [rule, ...(input.place ? [placeRow(input.place)] : []), input.status];
 
   const viewport = input.viewportRows;
@@ -212,6 +220,13 @@ export function liveRegion(input: RegionInput): Region {
 }
 
 /** The path in amanita's cream stem, the branch in its red cap. */
+/** The rule above the editor, with `label` near its right end: "──────── LOW · 2048 ──". */
+function labelledRule(width: number, label: string | undefined): string {
+  const left = width - (label ?? "").length - 4;
+  if (!label || left < 4) return `${ANSI.amanita}${"─".repeat(width)}${ANSI.reset}`;
+  return `${ANSI.amanita}${"─".repeat(left)}${ANSI.reset} ${ANSI.bold}${ANSI.cream}${label}${ANSI.reset} ${ANSI.amanita}──${ANSI.reset}`;
+}
+
 function placeRow(place: string): string {
   const branch = /^(.*) \(([^)]*)\)$/.exec(place);
   if (branch === null) return `${ANSI.cream}${place}${ANSI.reset}`;
@@ -249,10 +264,12 @@ export function statusLine(parts: {
 }): string {
   const used = parts.tokens.context;
   const cache = parts.tokens.input > 0 ? Math.round((parts.tokens.cacheRead / parts.tokens.input) * 100) : 0;
+  const full = parts.contextWindow > 0 ? ` ${Math.round((used / parts.contextWindow) * 100)}%` : "";
   return [
-    parts.running ? `${ANSI.inverse}RUNNING${ANSI.reset}` : "IDLE",
+    parts.running ? "RUNNING" : "IDLE",
     parts.model,
-    `${used.toLocaleString("en-US")}/${parts.contextWindow.toLocaleString("en-US")} tok`,
+    `${used.toLocaleString("en-US")}/${parts.contextWindow.toLocaleString("en-US")} tok${full}`,
+    `${parts.tokens.output.toLocaleString("en-US")} generated`,
     `cache ${cache}%`,
     parts.cost > 0 ? `$${parts.cost.toFixed(4)}` : "",
   ]

@@ -1,5 +1,6 @@
 import type { Message, Provider, ProviderRequest, StreamEvent, Usage } from "../types.ts";
 import { ThinkSplit } from "./think-split.ts";
+import { ArgsWatcher } from "./partial-args.ts";
 
 interface Delta {
   content?: string;
@@ -31,6 +32,7 @@ export interface OpenAiCompatOptions {
   apiKey: string;
   reasoningEffort?: "off" | "low" | "medium" | "high";
   maxOutputTokens?: number;
+  thinkingBudget?: number; // sent only when set: OpenAI itself rejects unknown fields
 }
 
 /** Splits an SSE byte stream into complete `data:` payloads. */
@@ -117,6 +119,7 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
       const decoder = new TextDecoder();
       const parser = new SseParser();
       const pending = new Map<number, Pending>();
+      const watchers = new Map<number, ArgsWatcher>();
       const think = new ThinkSplit();
       let finish: string | null | undefined;
       let usage: Usage | undefined;
@@ -141,7 +144,18 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
                 else yield { type: "text", delta: part.delta };
               }
             }
-            for (const tc of choice.delta?.tool_calls ?? []) merge(pending, tc);
+            for (const tc of choice.delta?.tool_calls ?? []) {
+              const index = tc.index ?? 0;
+              const fresh = !pending.get(index)?.name;
+              merge(pending, tc);
+              // Say a call is coming as soon as its name is known (its args may take minutes), and
+              // again as each string arg completes, so a path shows the moment it is written.
+              const name = pending.get(index)?.name;
+              if (fresh && name) yield { type: "tool_pending", name };
+              const args = watchers.get(index) ?? watchers.set(index, new ArgsWatcher()).get(index)!;
+              const done = args.push(tc.function?.arguments ?? "");
+              if (done && name) yield { type: "tool_pending", name, args: done };
+            }
             if (choice.finish_reason) finish = choice.finish_reason;
           }
           if (parser.done) break;
@@ -158,6 +172,12 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
         await reader.cancel().catch(() => {});
       }
 
+      // Cut by the output limit: a call may still parse (some servers heal partial JSON) yet be
+      // truncated, and a truncated write must never run. The loop asks the model to continue.
+      if (finish === "length") {
+        yield { type: "done", stop: "length", usage };
+        return;
+      }
       // Only now, with the stream fully consumed, are the tool-call args complete.
       let broken = false;
       for (const key of [...pending.keys()].toSorted((a, b) => a - b)) {
@@ -203,28 +223,34 @@ function merge(pending: Map<number, Pending>, tc: NonNullable<Delta["tool_calls"
 }
 
 function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
-  const messages = req.system
-    ? [{ role: "system", content: req.system }, ...req.messages.map(wire)]
-    : req.messages.map(wire);
+  // Thinking goes back only for a reply cut by the output limit, so it can continue where it
+  // stopped. Any other old thinking does harm: it holds drafts that differ from what was really
+  // written, and a small model copies its last reasoning verbatim (a loop).
+  const newest = req.messages.findLastIndex((m) => m.role === "assistant");
+  const wired = req.messages.map((m, i) => wire(m, i === newest && m.stop === "length"));
+  const messages = req.system ? [{ role: "system", content: req.system }, ...wired] : wired;
   return {
     model: req.model,
     stream: true,
     stream_options: { include_usage: true },
     messages,
-    ...(opts.reasoningEffort ? { reasoning_effort: opts.reasoningEffort } : {}),
+    ...((req.effort ?? opts.reasoningEffort) ? { reasoning_effort: req.effort ?? opts.reasoningEffort } : {}),
     ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
+    ...(opts.thinkingBudget ? { reasoning_budget_tokens: opts.thinkingBudget } : {}),
     tools: req.tools.length
       ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }))
       : undefined,
   };
 }
 
-function wire(m: Message): object {
+function wire(m: Message, withThinking: boolean): object {
   if (m.role === "tool") return { role: "tool", content: m.content, tool_call_id: m.toolCallId };
+  const reasoning = withThinking && m.thinking ? { reasoning_content: m.thinking } : {};
   if (m.toolCalls?.length) {
     return {
       role: m.role,
       content: m.content,
+      ...reasoning,
       tool_calls: m.toolCalls.map((c) => ({
         id: c.id,
         type: "function",
@@ -232,5 +258,5 @@ function wire(m: Message): object {
       })),
     };
   }
-  return { role: m.role, content: m.content };
+  return { role: m.role, content: m.content, ...reasoning };
 }

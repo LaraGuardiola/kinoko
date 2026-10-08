@@ -21,7 +21,9 @@ export interface Message {
   parentId?: string;
   role: Role;
   content: string;
-  thinking?: string; // display + session logs ONLY: never sent back to a provider
+  // Shown, logged, and sent back where the wire has a field for it (openai-compat `reasoning_content`:
+  // chat templates that preserve thinking render it into the prompt). Anthropic uses `replay` instead.
+  thinking?: string;
   toolCalls?: ToolCall[];
   toolCallId?: string; // toolCallId only on role "tool"
   stop?: StopReason;
@@ -34,6 +36,9 @@ export interface Message {
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "thinking"; delta: string }
+  // A tool call is streaming: its name, then again each time one of its string args completes
+  // (for display only: the call itself is the later tool_call).
+  | { type: "tool_pending"; name: string; args?: Record<string, string> }
   | { type: "tool_call"; call: ToolCall } // emitted ONLY when its JSON args are complete
   | { type: "replay"; data: unknown } // the finished message as the provider wants it back
   | { type: "done"; stop: StopReason; usage?: Usage }
@@ -51,6 +56,7 @@ export interface ProviderRequest {
   messages: Message[];
   tools: ToolSpec[];
   signal: AbortSignal;
+  effort?: "off" | "low" | "medium" | "high"; // overrides the provider's configured reasoning effort
 }
 
 export interface Provider {

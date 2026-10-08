@@ -5,6 +5,7 @@
 
 import type { Message, Provider, ProviderRequest, StreamEvent, Usage } from "../types.ts";
 import { SseParser } from "./openai-compat.ts";
+import { ArgsWatcher } from "./partial-args.ts";
 import models from "./models.json";
 
 const VERSION = "2023-06-01";
@@ -92,6 +93,7 @@ export function anthropic(opts: AnthropicOptions): Provider {
       const parser = new SseParser();
       const blocks: Block[] = [];
       const json = new Map<number, string>(); // tool_use index -> partial JSON
+      const watchers = new Map<number, ArgsWatcher>(); // tool_use index -> its completed string args
       const raw: RawUsage = {};
       let stop: string | undefined;
       let refusal: string | null | undefined;
@@ -115,7 +117,12 @@ export function anthropic(opts: AnthropicOptions): Provider {
               if (ev.delta?.stop_details) refusal = ev.delta.stop_details.category;
             }
             const i = ev.index ?? 0;
-            if (ev.type === "content_block_start" && ev.content_block) blocks[i] = { ...ev.content_block };
+            if (ev.type === "content_block_start" && ev.content_block) {
+              blocks[i] = { ...ev.content_block };
+              // Say a call is coming as soon as its name is known: its input may take minutes.
+              const block = ev.content_block as { type?: string; name?: string };
+              if (block.type === "tool_use" && block.name) yield { type: "tool_pending", name: block.name };
+            }
             if (ev.type === "content_block_delta") {
               const block = blocks[i];
               const d = ev.delta;
@@ -130,6 +137,11 @@ export function anthropic(opts: AnthropicOptions): Provider {
                 block.signature = d.signature;
               } else if (d.type === "input_json_delta") {
                 json.set(i, (json.get(i) ?? "") + (d.partial_json ?? ""));
+                // As each string arg completes, say so: a path shows the moment it is written.
+                const args = watchers.get(i) ?? watchers.set(i, new ArgsWatcher()).get(i)!;
+                const done = args.push(d.partial_json ?? "");
+                const name = (block as { name?: string }).name;
+                if (done && name) yield { type: "tool_pending", name, args: done };
               }
             }
           }
@@ -211,7 +223,8 @@ function body(req: ProviderRequest, opts: AnthropicOptions): object {
   const info = modelInfo(req.model);
   const cache = info?.supportsCache !== false;
   const ephemeral = { type: "ephemeral" };
-  const effort = opts.reasoningEffort === "off" ? "low" : opts.reasoningEffort;
+  const wanted = req.effort ?? opts.reasoningEffort;
+  const effort = wanted === "off" ? "low" : wanted;
   const tools = req.tools.map((t, i) => ({
     name: t.name,
     description: t.description,

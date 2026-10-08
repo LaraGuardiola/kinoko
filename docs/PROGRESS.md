@@ -237,3 +237,120 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Note: `app.ts` (484) and `term.ts` (326) were already over the ~300-line guideline before this branch.
 - Round 2: a padding row above the language label; long code lines soft-wrap at token boundaries (after space , ; ( [ {, before a dot) with a hanging indent two columns past the line's own indentation, instead of cutting mid-identifier; only an unbreakable run is cut by column. The language label is the full name ("TypeScript", not "ts") in the top-right corner with a two-column margin. Template literals colour `${expr}` as code (red `${ }`), and shell double-quoted strings colour `$VAR`. 219 tests pass; rebuilt and installed.
 - Lowercase built-in types (string, number, boolean, i32, str…) are coloured as types.
+
+## fix/llm-behaviour: overthinking, loops, runs that stop on their own — DONE (branch fix/llm-behaviour)
+- Diagnosis (flappy-bird/voxel session `nu1cktkorwfi`, 440 entries): 16 replies ended `stop=length` at exactly 4096 output tokens with no text and no tool call (the model drafts whole files inside its thinking; `~/.kinoko/config.json` has `maxOutputTokens: 4096`). The loop treated `length` as the end of the run, so the user had to type "continue"; the next request had the same context minus the thinking, so the model re-derived the same plan and was cut again (10 times in a row at entries 372–391). Two more runs ended at exactly 50 turns (default `maxTurns`), silently. One reply repeated a line 36 times. Compaction never ran because the run peaked at ~86k tokens, under the 106k trigger (122880 − 16384).
+- Effort: probed Strata directly. `reasoning_effort` does reach the template; unset means xhigh, `low` is only a soft hint, `off` disables thinking. So the setting works but only `off` is a hard limit.
+- Loop: a reply cut by the output limit (or by the repeat guard) with no tool call gets a nudge user message and the run continues, up to 3 in a row (`MAX_NUDGES`), then stops with a reason. New `src/guard.ts`: `RepeatGuard` cuts a reply mid-stream when one line (≥24 chars) repeats 8 times (its looping thinking is not kept); `CallGuard` notes on the tool result when the same call returns the same output 3 times, and stops the run at 10. Each request gets its own AbortController (`AbortSignal.any` with the run's), so a guard cuts one reply without aborting the run.
+- `RunResult.detail` / `run_end.detail`: the TUI shows "Stopped — turn limit (500)" etc. for `limit`/`error`; print mode prints it. Default `maxTurns` 50 → 500.
+- openai-compat: assistant thinking is sent back as `reasoning_content` (templates that preserve thinking rendered an empty `<think>` for every past turn); a reply with `finish_reason: "length"` never yields tool calls, even if their JSON parses (a truncated `write` must not run). `ProviderRequest.effort` overrides the configured effort; compaction asks for `off` so a reasoning model cannot spend the whole output limit thinking and return no summary. `messageTokens` now counts thinking, since it is sent.
+- Docs: `docs/engines/strata.md` and `examples/config.strata.json` recommend `maxOutputTokens: 32768`.
+- Tests: `guard.test.ts`, `loop-guards.test.ts` (nudge, nudge cap, cut looping thinking, repeated call), two openai-compat cases. `bun run check` passes (229 tests). `session.test.ts` #5 flaked once more (known mtime flake), passed on rerun.
+- NOT done: the user's `~/.kinoko/config.json` still says `maxOutputTokens: 4096` (user file, not touched). `loop.ts` is now 422 lines (was 393, already over the guideline).
+
+## fix/llm-behaviour, round 2: tool review — DONE
+- Session check: the model's "the environment rewrites my files" was a hallucination; every write landed byte for byte and the edit error showed the real text. But the tools had real bugs feeding that distrust:
+- `edit`: the overlap check compared each range with itself, so EVERY call with 2+ edits failed with "edits overlap" (9 times in the voxel session; the model fell back to heredocs/base64 and blamed the write tool). Fixed; the test only covered a real overlap, now also two separate edits.
+- `edit`: exact `indexOf` first; the per-char NFKC normalization runs only when an old string does not match byte for byte. "not found" no longer echoes the whole `old`; it shows the file window most like it (each line of `old` votes for the start), ready to copy. "ambiguous" gives the line numbers.
+- Loop: tools ran read-only first, so `[write a, read a]` read the old `a`. They now run in the order called (they never ran in parallel anyway). `docs/interruption.md` item 7 updated.
+- `tracker`: no more synchronous whole-file reads (`readFileSync` blocked the event loop on every write/edit). Same mtime = unchanged; the hash is only checked when the mtime moved, using the text the caller already read.
+- `read`: output capped at ~40k chars (~10k tokens) at a line boundary, with `[lines a-b of N; continue with offset=…]` whenever the file goes on.
+- `bash`: stdin is closed (a command waiting for input used to hang forever), utf8 decoding per stream (multi-byte chars split across chunks were mangled), default timeout 300 s.
+- `write`: says which argument is missing; reports lines and chars.
+- `bun run check` passes (231 tests). src net −12 lines.
+
+## fix/llm-behaviour, round 3: "the harness rewrites my files" — DONE
+- Traced session `e58094f8` (66 turns, 9 of them suspecting the environment): every write landed exactly as sent and every read matched; Strata does render past tool-call arguments into the prompt (measured: longer args → more prompt tokens). The model sees its own calls and even spots its own typos in them (`color: 'POWERUPS.magnet'`). The cause is the model: what it emits differs from what it meant (1.75-bit quant), and when it reads the file back it does not recognise its own output. Its `_probe.ts` "test" wrote `MARKER = 42`, read `MARKER = 42`, and concluded the harness rewrites files. One trigger came from the harness: a read with `offset: 30` showed only a slice of a file, which the model took for the whole file.
+- `read`: every partial view is labelled (`[lines a-b of N]`, plus `continue with offset=` when more follows).
+- System prompt: one line, files change only through the tools or the user, so when a file differs from memory, trust the tool result.
+- `edit`: "missing path (string)", like write.
+- Tool errors fell from 13 (voxel session, 214 turns) to 2 in this one (66 turns).
+- `bun run check` passes (231 tests; the session #5 mtime flake fired once).
+
+## fix/llm-behaviour, round 4: a run that ended "done" mid-task — DONE
+- Session `a01968e1`: the last reply (#65) never closed its thinking. It looped `"strict": true,` 129 times, then wrote its tool call (`</parameter></function></tool_call>`) inside the thinking. Strata returned it all as reasoning: no text, no call, `stop=end`, so the loop took it as "done". The repeat guard missed it: the line is 15 chars and only lines ≥ 24 chars were counted.
+- `RepeatGuard`: also trips on 12 identical non-empty lines in a row, whatever their length.
+- Loop: a reply with no text and no tool call is nudged (`NUDGE_EMPTY`: a call inside the thinking does not run; close it, then call or say you are done), under the same `MAX_NUDGES` cap.
+- `bash`: the parameter is `command`, the name models expect (the model sent `command` and got "cmd must be a string"); `cmd` is still accepted. `examples/ext/permission-gate.ts` and `plan-mode.ts` read both names. Reading only `cmd` would have let a `command` through the gate unchecked. Tested.
+- Still open: `~/.kinoko/config.json` has `maxOutputTokens: 4096` (reply #10 cut at exactly 4096).
+- `bun run check` passes (233 tests).
+
+## fix/llm-behaviour, round 5: tool results as the only version of a file — DONE
+- Audit of session `2fdb6bee`: replaying every write/edit in memory gives exactly the files on disk (13/13 identical; 11 skipped because bash touched them); every comparable read matched its write. The tools are right. The model said it itself: "the files on disk are different from what I drafted in my thinking". It holds two versions of each file in context (the draft in its thinking, the real call) and trusts the draft.
+- openai-compat: only the newest assistant turn sends its thinking back (`reasoning_content`), so a cut reply can still continue; older thinking (old drafts) is no longer sent. It also costs far less context. `historyTokens` counts only that one thinking.
+- `edit`: the result shows the edited lines as they are now on disk (2 lines of context, at most 30 per edit, `…` between distant edits), so the real text sits right after the action.
+- `bun run check` passes (233 tests).
+
+## fix/llm-behaviour, round 6: thinking copied verbatim; same error under different flags — DONE
+- Session `58ae57a5`: the thinking of #29 is a byte-for-byte copy of #27's, which was the newest thinking and so the one round 5 sent back. A small model copies its last reasoning, and that makes the loop. Thinking now goes back only when the newest reply was cut by the output limit (`stop: "length"`), the one case where continuing from it helps.
+- The same session ran 7 different `bun build` commands (only the flags changed) that all returned the identical "Could not resolve" error. `CallGuard.failures` counts consecutive identical failures (`ERROR:`, `[exit code N]`, or an `error` word) of one tool whatever its args; from the 3rd it appends a note: the arguments being changed are not the cause, re-read the error itself.
+- Seen, not changed: after the user's steer, the model sometimes reads tool results as the user speaking ("The user is asking about the --config flag"). Strata's chat template renders tool results inside user turns, so pi gets the same rendering.
+- `~/.kinoko/config.json`: `maxOutputTokens` 4096 → 32768 (with the user's permission).
+- `bun run check` passes (234 tests).
+
+## fix/llm-behaviour, round 7: a hard thinking budget, real token counts for compaction — DONE
+- Thinking: `reasoningEffort` already reaches the template (the "keep your thinking brief" sentence), but per Strata's own docs it is "an instruction, not a hard token limit", and this model ignores it. Strata caps thinking with `reasoning_budget_tokens` (its config defaults to 4096, the cut the user saw every turn; a request's value wins). Measured on the live engine with effort high: no budget gave 21,966 chars of thinking that degenerated into a loop and used all 6,000 tokens with no answer; a budget of 400 ended the thinking with "I have thought about this long enough" and the model answered. New config `thinkingBudget` (`--thinking-budget`) → openai-compat `reasoning_budget_tokens`, sent only when set (OpenAI rejects unknown fields). User config: 2048.
+- Compaction: chars/4 ran 16-26% short of Strata's real prompt counts (no system prompt or tool schemas, and the tokenizer's ratio), and the gap grew. With the 122,880 window it would trigger at ~130k real tokens, after the server had already overflowed. `contextTokens` takes the server's usage (prompt + reply) of the newest reply and estimates only what came after. A compacted tail drops its `usage` (compact.ts and session.ts view) so it cannot re-trigger compaction at once.
+- The context counter was right: the session peaked at 19,764 tokens (16% of the window), so compaction correctly never ran. Thinking from earlier turns is not resent, so it is not in the prompt.
+- Tests polluted the real `~/.kinoko/sessions`: `app.test.ts` created sessions without `home`, one new directory per run. Fixed (`home: ROOT`); removed 152 test-only session directories, kept the 11 real ones.
+- `bun run check` passes (236 tests).
+
+## TUI: context %, generated tokens, thinking level on the input rule — DONE
+- Status line: `19,764/122,880 tok 16%` (how full the window is) and `61,873 generated`, a session total of every reply's output, thinking included. Thinking is not resent, so it costs time, not context; the two numbers together show both.
+- The rule above the editor carries the thinking level near its right end, bold cream: `──────── LOW · 2048 ──` (`thinkingLabel` in config.ts: effort uppercased, `DEFAULT` when unset, `OFF`, plus the budget when one is set). A plain rule when the terminal is too narrow for it.
+- Tests: status percent and generated total (app.test), labelled rule (view.test), `thinkingLabel` (new config.test). `bun run check` passes (238 tests).
+- Next (asked for later): changing the level from the TUI.
+
+## Repeat note for writes — DONE
+- Live session `33effaae`: the model wrote byte-identical content to `spawning.ts` four times (#122-#128) while its plan said "fix the bugs". The call guard fired at the third, but its note ("got this exact result every time") read to the model as "the write tool keeps returning the same content". For a tool that changes files (not `readOnly`) the note now says the arguments were byte-identical, the file already holds exactly that content, and fixing it needs different arguments. Read-only tools keep the old note.
+- `bun run check` passes (239 tests).
+
+## TUI: steer echo on delivery, plain run state, two-tone name — DONE
+- A steer (Enter while running) or follow-up (Alt+Enter) no longer prints its blue user line when typed: it shows only in the queued area (`[steer]` / `[follow-up]`) until the loop hands it to the model. New AgentEvent `delivered` (loop `#deliver`: leave the queue, append the user message, emit), and the App echoes it then, so it lands where the model actually read it.
+- Status line: `RUNNING` without the inverse background.
+- Startup panel: `kinoko` in amanita red, the version in cream.
+- Tests: app.test (no echo before delivery, exactly one after; no inverse in the status), order.test updated to the new order. `bun run check` passes (239 tests).
+
+## examples/ext/web.ts: web search and fetch, no API key — DONE
+- Two read-only tools. `web_search(query, max?)` scrapes the HTML result pages of Brave Search, then DuckDuckGo, then Bing, and returns the first that answers with results: numbered title, real URL (DuckDuckGo's `uddg=` and Bing's `u=a1<base64url>` redirects decoded), snippet clipped to 300 chars. `web_fetch(url, offset?)` turns a page into readable text (`<main>`/`<article>` when present; scripts, styles, nav, header, footer dropped; headings `#`, list items `-`, entities decoded), JSON and text as-is, binaries refused, 12,000 chars per page with `continue with offset=`.
+- Probed live: DuckDuckGo's HTML page answers 202 (its bot check) after a few queries, and the lite page at once; Bing without cookies matches only the first word of the query (and localizes "bun" to blood urea nitrogen); Mojeek and Startpage refuse; Brave gave the most relevant results, so it goes first.
+- Every request honors the run's AbortSignal, plus a 20 s cap so a silent server cannot hold a run.
+- Tests (`examples/ext/web.test.ts`, no network): the three parsers on fixtures, entity decoding, HTML to text, `web_fetch` against a local `Bun.serve` (page, paging, JSON, binary, 404, non-http, abort), the engine fallback past a 202, and the tool registration. `bun run check` passes (250 tests).
+- Not installed for the user yet (it would change the kinoko vs pi comparison); `cp examples/ext/web.ts ~/.kinoko/ext/` switches it on.
+
+## TUI: the place line follows git during a run — DONE
+- The cwd/branch line was re-read only when a run ended, so a `git init` (or a checkout) made early in a long run did not show until the end, which looked like it needed a restart. It is now re-read after every tool call too: two small file reads, no git process.
+- Test (app.test 8e): a tool "inits a repo" mid-run; the branch shows while the run is still going. Verified the test fails without the fix. The harness gained a `place` option. `bun run check` passes (251 tests).
+
+## TUI: a tool call shows at once, its bullet pulsing until the result — DONE
+- Before, nothing showed while the model wrote a tool call (a `write` with a whole file can take minutes): the call only appeared once its args were complete and the tool was running, as a static line.
+- New StreamEvent / AgentEvent `tool_pending { name }`: openai-compat emits it on the first `tool_calls` chunk that carries the name, anthropic on `content_block_start` of a `tool_use`. The App shows `● name …` at once and keeps it until `tool_start` (then the running line, args known) and `tool_end` (the static result block, as before). A call cut off before it completes (no tool calls on the message) drops the line.
+- While a call is pending or running the bullet fades between dim amber rgb(70,58,22) and its resting yellow rgb(255,215,95) on a cosine, 1.2 s per cycle in 12 steps (`pulseLevel` / `pulseDot` in tools.ts), so the 33 ms render timer repaints about 10 times a second and only while a tool is in progress.
+- Tests: both providers announce the name first; pulse steps and colours; running line colour with and without a pulse; app.test 8f shows the line before the call exists (fails without the feature). `bun run check` passes (254 tests).
+
+## Sessions: resume by id, per directory — DONE
+- On exit (Ctrl+C on an empty editor, Ctrl+D, /quit) the TUI prints `resume this session with  kinoko --session <id>`. A session nothing was said in is deleted instead (no file, no hint), so the per-directory session list holds only real conversations.
+- `--session <id>` (exact id, a unique prefix, or the pasted `<id>.jsonl`) is looked up in this directory's sessions only (`findSession` in session.ts); an unknown id, or one from another directory, exits with "no session … sessions are kept per directory". `--continue` now works in the TUI too (it was print mode only) and takes the newest one.
+- Resuming in the TUI prints the conversation again (`src/tui/replay.ts`, `App.replay`): your messages, the answers and each tool call with its result, as the live view shows them; thinking and the loop's own `[kinoko]` nudges are left out, a compaction shows as a one-line note. The context counter comes back from the last reply's usage.
+- Tests: session.test 7-8 (find by id/prefix/pasted name, not across directories; `empty`), replay.test. End to end with the built binary in a pseudo-terminal: resume by 8-char prefix shows the conversation and 920 tok, quitting prints the command; an empty session leaves no file; wrong or foreign ids exit 1 with the message. `bun run check` passes (257 tests).
+- Next (asked for later): a small session picker menu.
+
+## Flaky session.test #5 — FIXED
+- "--continue picks the newest session" failed now and then under the full suite. Cause: Linux stamps mtimes from a coarse clock (a few ms per tick), so the two sessions' writes, microseconds apart, could share one mtime and "newest" became a tie decided by readdir order. The test's 10 ms pause sat after both writes, where it does nothing; a 25 ms pause now sits between them. 15/15 isolated runs and 5/5 full `bun run check` runs pass. (It also slipped through the previous commit: that check's exit code was hidden by a pipe.)
+
+## Resume keeps the prompt's date — DONE
+- A resumed ~53k-token session read its whole prompt once (first request: 53,315 in, 0 cached), then went back to the cache (next: 53,310 of 54,111 cached). Expected: the engine reuses only a byte-identical prefix, and here the prefix had changed (the `web.ts` extension was installed after the session started, and tool schemas render first) or the engine no longer held it.
+- One avoidable cause fixed: the system prompt's date was today's at every start, so a session resumed on a later day changed its very first line and always re-read everything. The date now comes from the session's creation (`meta.created`), resolved before the prompt is built: a new session gets today, a resumed one keeps its own.
+- `bun run check` passes (257 tests).
+
+## Resume keeps read-before-change — DONE
+- After resuming, the model got "you must read this file before changing it" for `hud.ts`, a file it had just written: the read-before-change tracker lives in memory, so a restarted kinoko forgot every file the session had read or written.
+- `src/tools/restore.ts` (`restoreTracker`, called in main.ts on resume): from the session's messages, the last content the model saw of each file (a write's content, each later edit replayed byte for byte, a whole read with its line numbers stripped; partial reads, failed calls and unknown bases teach nothing). A file is marked read only if the disk still holds exactly that (the trailing newline aside, since a read cannot show it); anything changed since still needs a read.
+- On the real resumed session: 44 files touched, 38 trusted again, `hud.ts` among them.
+- Tests: restore.test (write, write then edit, read with blank lines, changed on disk, partial read, missing file, failed calls, edit on an unknown base). `bun run check` passes (259 tests).
+
+## TUI: the pending tool line shows its path as soon as it is written — DONE
+- The pulsing line only had the tool's name while the model wrote the call. Strata streams a call's JSON args piece by piece (string params character by character), so the path or command can show long before the call completes.
+- `src/providers/partial-args.ts` (`ArgsWatcher`): fed the arg pieces, reports every complete `"key": "string"` field when a piece completes a new one (escapes undone, numbers ignored). It only rescans on a piece containing a quote, from where the last complete field ended. Both providers emit `tool_pending { name, args }` again on each new complete field; the loop forwards `args`; the App shows `toolSummary(name, args)` without its JSON fallback, so a call with nothing useful yet shows just its name. `toolSummary` also names `web_search`'s query and `web_fetch`'s url.
+- A model that writes `content` before `path` gets its path shown only at the end: what is shown is what the model has written so far.
+- Tests: partial-args.test (char by char, escaped quotes), both providers announce the path after the name, app.test 8f shows `● bash make all …` before the call exists (10/10 runs). `bun run check` passes (261 tests).

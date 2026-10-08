@@ -3,6 +3,7 @@ import {
   RESERVE,
   SUMMARY_HEADING,
   compactHistory,
+  contextTokens,
   historyTokens,
   isContextOverflow,
   shouldCompact,
@@ -44,6 +45,27 @@ describe("compaction", () => {
     expect(shouldCompact(history(), window)).toBe(false);
     expect(shouldCompact(history(), window - 1)).toBe(true);
     expect(shouldCompact([], 0)).toBe(false);
+  });
+
+  test("1b. the server's count for the newest reply is the base; only what came after is estimated", () => {
+    const answered: Message = { id: "a", role: "assistant", content: "ok", usage: { input: 90_000, output: 500 } };
+    const after = user("t", 4000);
+    expect(contextTokens([user("u", 40), answered, after])).toBe(90_500 + historyTokens([after]));
+    // chars/4 alone would say ~1k tokens here and never compact a 100k-token prompt.
+    expect(shouldCompact([user("u", 40), answered, after], 100_000)).toBe(true);
+  });
+
+  test("1c. a compacted tail drops its usage: it counted a prompt that no longer exists", async () => {
+    const messages = history();
+    messages[1]!.usage = { input: 200_000, output: 10 };
+    const result = await compactHistory([...messages, { ...messages[1]!, id: "a2" }, user("u5", 10)], {
+      provider: summarizer("Objective: x"),
+      model: "m",
+      system: "",
+      signal: new AbortController().signal,
+      tailTokens: 100,
+    });
+    expect(result!.view.some((m) => m.usage !== undefined)).toBe(false);
   });
 
   test("2. keeps the tail verbatim and replaces the head with one summary", async () => {

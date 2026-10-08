@@ -1,4 +1,4 @@
-import { statSync, readFileSync } from "node:fs";
+import { stat } from "node:fs/promises";
 
 export interface FileRecord {
   mtimeMs: number;
@@ -29,35 +29,26 @@ export function hashOf(content: string): string {
   return Bun.hash(content).toString(36);
 }
 
-/** Current on-disk state of a file (null if missing). */
-export function readState(path: string): FileRecord | null {
-  try {
-    const st = statSync(path);
-    const text = readFileSync(path, "utf8");
-    return { mtimeMs: st.mtimeMs, hash: hashOf(text) };
-  } catch {
-    return null;
-  }
+/** Records what the model has now seen (or written) of a file. */
+export async function remember(path: string, text: string): Promise<void> {
+  const st = await stat(path).catch(() => null);
+  if (st) tracker.record(path, { mtimeMs: st.mtimeMs, hash: hashOf(text) });
 }
 
-/** Snapshot from content already in memory (avoids re-reading). */
-export function stateOf(path: string, text: string): FileRecord | null {
-  try {
-    const st = statSync(path);
-    return { mtimeMs: st.mtimeMs, hash: hashOf(text) };
-  } catch {
-    return null;
-  }
-}
-
-/** Read-before-change check: null = OK, string = ERROR message for the model. */
-export function checkRead(path: string): string | null {
+/**
+ * Read-before-change check: null = OK, string = ERROR message for the model. Same mtime means
+ * unchanged, so the file is only read (or `text`, already read by the caller, hashed) when the
+ * mtime moved: a touch or a no-op rewrite with identical content still passes.
+ */
+export async function checkRead(path: string, text?: string): Promise<string | null> {
   const seen = tracker.get(path);
   if (!seen) return "ERROR: you must read this file before changing it — call read first";
-  const cur = readState(path);
-  if (!cur) return "ERROR: file disappeared since you read it — read it again";
-  if (cur.mtimeMs !== seen.mtimeMs || cur.hash !== seen.hash) {
+  const st = await stat(path).catch(() => null);
+  if (!st) return "ERROR: file disappeared since you read it — read it again";
+  if (st.mtimeMs === seen.mtimeMs) return null;
+  if (hashOf(text ?? (await Bun.file(path).text())) !== seen.hash) {
     return "ERROR: file changed on disk since you read it — read it again before changing it";
   }
+  tracker.record(path, { mtimeMs: st.mtimeMs, hash: seen.hash });
   return null;
 }

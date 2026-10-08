@@ -13,7 +13,8 @@ import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
 import { ABORTED, HELP, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
-import { toolBlock, toolSummary } from "./tools.ts";
+import { pulseLevel, toolBlock, toolSummary } from "./tools.ts";
+import { replayBlocks } from "./replay.ts";
 import { actionFor } from "./keys.ts";
 import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -29,9 +30,12 @@ export interface AppOptions {
   /** 0-based model id shown in the status line. */
   model: string;
   contextWindow: number;
+  /** The thinking level shown on the rule above the editor ("LOW · 2048"). */
+  thinking?: string;
   viewportRows?: number;
   viewportCols?: number;
-  /** The line under the editor (cwd and git branch). Re-read after every run: tools can switch branch. */
+  /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
+   *  create a repository or switch branch. */
   place?: () => Promise<string>;
   session?: Session;
   /** Called by /quit. The demo and the CLI pass the process exit. */
@@ -47,6 +51,7 @@ export class App {
   #editor: Editor;
   #model: string;
   #window: number;
+  #thinking: string | undefined;
   #viewportRows: number | undefined;
   #viewportCols: number | undefined;
   #session: Session | undefined;
@@ -56,15 +61,16 @@ export class App {
   #place = "";
 
   #running = false;
-  // The block being streamed (thinking or answer). Thinking is display-only, never sent back.
+  // The block being streamed (thinking or answer).
   #open: OpenBlock | undefined;
   #thinkingSeen = false; // this message already streamed its thinking
   #printedAny = false; // something is already in the scrollback: every later block gets a blank row above
   #tool: ToolView | undefined;
+  #pending: { name: string; args: string } | undefined; // a call the model is still writing
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
-  #tokens = { context: 0, input: 0, cacheRead: 0 };
+  #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
   constructor(opts: AppOptions) {
@@ -76,6 +82,7 @@ export class App {
     this.#editor = new Editor();
     this.#model = opts.model;
     this.#window = opts.contextWindow;
+    this.#thinking = opts.thinking;
     this.#viewportRows = opts.viewportRows;
     this.#viewportCols = opts.viewportCols;
     this.#session = opts.session;
@@ -100,6 +107,15 @@ export class App {
   render(): void {
     this.#renderer.update(this.#state());
     this.#renderer.frame();
+  }
+
+  /** A resumed session: its conversation goes to the scrollback, and the context counter is back. */
+  replay(messages: Message[], note: string): void {
+    this.#print("system", note);
+    for (const block of replayBlocks(messages, this.#viewportCols)) this.#print(block.kind, block.text);
+    const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
+    if (usage) this.#tokens.context = usage.input + usage.output;
+    this.render();
   }
 
   /** Prints the startup panel above the region; what follows it is spaced like any other block. */
@@ -199,8 +215,8 @@ export class App {
     this.#editor.clear();
     this.#marker = "";
     if (this.#agent.state === "running") {
-      // Already running: this is a steer. queue_change updates the queued area.
-      this.#echoUser(text);
+      // Already running: this is a steer. It shows in the queued area until it reaches the model
+      // ("delivered"), and only then joins the transcript.
       this.#agent.steer(text);
       this.render();
       return;
@@ -219,7 +235,6 @@ export class App {
     this.#running = true;
     this.#marker = "";
     if (this.#agent.state === "running") {
-      this.#echoUser(text);
       this.#agent.followUp(text);
       this.render();
       return;
@@ -259,8 +274,16 @@ export class App {
         this.#thinkingSeen = true;
         this.#append("thinking", e.delta);
         return;
+      case "tool_pending":
+        // The text before the call is final; the call itself shows at once, its bullet pulsing.
+        this.#closeBlock();
+        // Its name first, then what it acts on as soon as that arg is complete (a write's path).
+        this.#pending = { name: e.name, args: e.args ? toolSummary(e.name, e.args, false) : "" };
+        this.render();
+        return;
       case "tool_start":
         this.#closeBlock();
+        this.#pending = undefined;
         this.#tool = {
           name: e.call.name,
           args: toolSummary(e.call.name, e.call.args),
@@ -277,6 +300,8 @@ export class App {
         return;
       case "tool_end":
         this.#printTool();
+        // A tool may have run `git init` or switched branch: show it now, not when the run ends.
+        this.#refreshPlace();
         return;
       case "message_end":
         this.#finishMessage(e.message);
@@ -284,11 +309,14 @@ export class App {
       case "queue_change":
         this.#syncQueued(e.steer, e.followUp);
         return;
+      case "delivered":
+        this.#echoUser(e.text);
+        return;
       case "compacted":
         this.#marker = "compacted: full prompt re-read expected";
         return;
       case "run_end":
-        this.#finishRun(e.reason, e.dropped);
+        this.#finishRun(e.reason, e.dropped, e.detail);
         return;
       default:
         return;
@@ -304,9 +332,12 @@ export class App {
       this.#tokens.context = (usage.input ?? 0) + (usage.output ?? 0);
       this.#tokens.input += usage.input ?? 0;
       this.#tokens.cacheRead += usage.cacheRead ?? 0;
+      this.#tokens.output += usage.output ?? 0;
       this.#cost += usage.cost ?? 0;
     }
     this.#closeBlock();
+    // A call cut off before its args were complete never starts: drop its pulsing line.
+    if (!message.toolCalls?.length) this.#pending = undefined;
     // A provider that only reports the reasoning at the end (no deltas): better late than lost.
     const thinking = message.thinking ?? "";
     if (!this.#thinkingSeen && thinking.trim() !== "") this.#print("thinking", formatBlock("thinking", thinking));
@@ -331,9 +362,10 @@ export class App {
       .catch(() => undefined);
   }
 
-  #finishRun(reason: RunResult["reason"], dropped: string[] | undefined): void {
+  #finishRun(reason: RunResult["reason"], dropped: string[] | undefined, detail?: string): void {
     this.#refreshPlace();
     this.#running = false;
+    this.#pending = undefined;
     this.#queued = [];
     this.#closeBlock();
     this.#thinkingSeen = false;
@@ -345,6 +377,9 @@ export class App {
       this.#marker = "Interrupted — your queued messages are back in the editor";
     } else if (reason === "aborted") {
       this.#marker = "Interrupted";
+    } else if (reason === "limit" || reason === "error") {
+      // A run that stops on its own must say why, or it looks like the model gave up.
+      this.#marker = `Stopped — ${detail ?? reason}`;
     }
     this.render();
   }
@@ -419,7 +454,9 @@ export class App {
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
       open: this.#open,
-      tool: this.#tool,
+      tool: this.#tool ?? (this.#pending === undefined ? undefined : { ...this.#pending, output: "", aborted: false }),
+      // Until the result is in, the bullet fades in and out (the render timer repaints each step).
+      pulse: this.#tool || this.#pending !== undefined ? pulseLevel(Date.now()) : undefined,
       toolGap: this.#printedAny,
       marker: this.#marker,
       markerAlert: this.#marker.startsWith("Interrupted"),
@@ -429,6 +466,7 @@ export class App {
       editorCol: view.col,
       status: this.statusLine,
       place: this.#place,
+      thinking: this.#thinking,
       viewportRows: this.#viewportRows,
       viewportCols: this.#viewportCols,
     });

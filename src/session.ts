@@ -58,6 +58,25 @@ export function latestSession(cwd: string, home?: string): string | undefined {
   return best?.path;
 }
 
+/**
+ * The session file for `id` in this directory's sessions: the exact id, or a prefix only one
+ * session starts with. Sessions are per directory: an id from another project is not found here.
+ */
+export function findSession(cwd: string, id: string, home?: string): string | undefined {
+  const dir = sessionDir(cwd, home);
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((name) => name.endsWith(".jsonl"));
+  } catch {
+    return undefined;
+  }
+  const want = id.trim().replace(/\.jsonl$/, "");
+  if (want === "") return undefined;
+  const exact = names.find((name) => name === `${want}.jsonl`);
+  const matches = exact ? [exact] : names.filter((name) => name.startsWith(want));
+  return matches.length === 1 ? join(dir, matches[0]!) : undefined;
+}
+
 function parseRecords(text: string): Record[] {
   const out: Record[] = [];
   for (const line of text.split("\n")) {
@@ -126,6 +145,11 @@ export class Session {
     await this.#write({ type: "head", id });
   }
 
+  /** Nothing was ever said in it: not worth keeping, nor offering to resume. */
+  get empty(): boolean {
+    return this.#log.length === 0;
+  }
+
   /** Root-first messages from the head back to the first message, following parentId. */
   activeBranch(): Message[] {
     const out: Message[] = [];
@@ -148,8 +172,8 @@ export class Session {
     const from = this.#log.findIndex((m) => m.id === compaction.keepFrom);
     const to = this.#log.findIndex((m) => m.id === compaction.summary);
     if (!summary || from < 0 || to < from) return head;
-    // The tail's replayed thinking was bound to the history before the summary (see compact.ts).
-    return [summary, ...this.#log.slice(from, to).map(({ replay: _replay, ...m }) => m)];
+    // The tail's replayed thinking and usage belong to the history before the summary (compact.ts).
+    return [summary, ...this.#log.slice(from, to).map(({ replay: _replay, usage: _usage, ...m }) => m)];
   }
 
   /** One append per record: O_APPEND, so a resumed session can never rewrite earlier lines. */

@@ -60,7 +60,10 @@ engine can do.
 ## Sessions, context and compaction
 
 Every message is appended to `~/.kinoko/sessions/<project-hash>/<id>.jsonl` as it is finalized,
-including aborted ones, so `--continue` picks up exactly where you left off.
+including aborted ones. Sessions are kept per directory. When the TUI closes it prints
+`kinoko --session <id>`: run that in the same directory to pick up where you left off (a unique
+prefix of the id works too); the conversation is printed again and the model sees all of it.
+`--continue` takes the directory's newest session. A session nothing was said in is not kept.
 
 Local engines reuse the prompt prefix between requests, and a change near the start costs a full
 re-read (about a minute per 30k tokens). So history is append-only and byte-stable: the system
@@ -91,8 +94,9 @@ Events: `session_start`, `context` (rewrite the messages before a request), `bef
 `tool_call` (mutate args, or block), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
 throws is logged and skipped; a blocked call returns its reason to the model instead of running.
 
-`examples/ext/` ships three: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
-`plan-mode.ts` (read-only) and `hello.ts`.
+`examples/ext/` ships four: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
+`plan-mode.ts` (read-only), `web.ts` (`web_search` and `web_fetch`: no API key, Brave, DuckDuckGo
+then Bing, pages turned into readable text) and `hello.ts`.
 
 ## Config layers
 

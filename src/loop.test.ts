@@ -125,7 +125,7 @@ describe("Agent loop with abort, steer and follow-up", () => {
     expect(agent.state).toBe("idle");
   });
 
-  test("7. readOnly tools run in parallel; non-readOnly run sequentially", async () => {
+  test("7. tools run one at a time, in the order the model called them", async () => {
     const t1 = { name: "r1", description: "", schema: {}, readOnly: true, run: async (_a: unknown, _ctx: unknown) => "" };
     const t2 = { name: "r2", description: "", schema: {}, readOnly: true, run: async (_a: unknown, _ctx: unknown) => "" };
     const t3 = { name: "s1", description: "", schema: {}, readOnly: false, run: async (_a: unknown, _ctx: unknown) => "" };
@@ -140,7 +140,7 @@ describe("Agent loop with abort, steer and follow-up", () => {
     const agent = new Agent({ provider, model: "t", system: "", tools: [t1, t2, t3], maxTurns: 10, maxCost: 100 });
     await agent.prompt("test");
     const toolMsgs = agent.messages.filter((m: Message) => m.role === "tool");
-    expect(toolMsgs.length).toBeGreaterThanOrEqual(3);
+    expect(toolMsgs.map((m) => m.toolCallId).slice(0, 3)).toEqual(["c1", "c2", "c3"]);
   });
 
   test("8. thrown tool error becomes tool message \"ERROR: ...\"", async () => {

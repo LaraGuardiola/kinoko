@@ -48,7 +48,8 @@ export default function (k: Kinoko): void {
     const reason = BLOCKED_TOOLS[call.name];
     if (reason !== undefined) return { block: true, reason: reason };
     if (call.name !== "bash") return;
-    const cmd = typeof call.args.cmd === "string" ? call.args.cmd.trim() : "";
+    const raw = call.args.command ?? call.args.cmd; // bash accepts both names
+    const cmd = typeof raw === "string" ? raw.trim() : "";
     if (cmd === "") return;
     if (isReadOnly(cmd)) return;
     return {

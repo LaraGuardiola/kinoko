@@ -30,7 +30,8 @@ describe("kinoko core tools", () => {
     const out = await r.run({ path: "a.txt" }, ctx(dir));
     expect(out).toBe("1: one\n2: two\n3: three");
     const paged = await r.run({ path: "a.txt", offset: 2, limit: 1 }, ctx(dir));
-    expect(paged).toBe("2: two");
+    expect(paged).toBe("2: two\n[lines 2-2 of 3; continue with offset=3]");
+    expect(await r.run({ path: "a.txt", offset: 3 }, ctx(dir))).toBe("3: three\n[lines 3-3 of 3]");
     writeFileSync(`${dir}/b.bin`, "a\u0000b");
     const bin = await r.run({ path: "b.bin" }, ctx(dir));
     expect(bin).toContain("ERROR");
@@ -81,7 +82,9 @@ describe("kinoko core tools", () => {
     expect(amb).toContain("ambiguous");
     const miss = await e.run({ path: "a.txt", edits: [{ old: "zzz", new: "X" }] }, ctx(dir));
     expect(miss).toContain("not found");
-    expect(miss).toContain("Closest lines");
+    expect(miss).toContain("Nothing similar");
+    const near = await e.run({ path: "a.txt", edits: [{ old: "beta  one\ngamma three", new: "X" }] }, ctx(dir));
+    expect(near).toContain("Closest text (lines 2-3):\n2: beta one\n3: gamma two");
   });
 
   test("edit: overlapping edits rejected, all-or-none", async () => {
@@ -94,6 +97,25 @@ describe("kinoko core tools", () => {
     expect(bad).toContain("overlap");
     const text = readFileSync(`${dir}/a.txt`, "utf8");
     expect(text).toBe("abcdef\n");
+    // Separate edits in one call all apply (this used to be rejected as an overlap).
+    const ok = await e.run({ path: "a.txt", edits: [{ old: "ef", new: "F" }, { old: "ab", new: "A" }] }, ctx(dir));
+    expect(ok).toContain("2 edit(s) applied");
+    expect(readFileSync(`${dir}/a.txt`, "utf8")).toBe("AcdF\n");
+    // The result shows the edited lines as they are on disk now.
+    expect(ok).toEndWith("The file now reads:\n1: AcdF\n2: ");
+  });
+
+  test("read: a long file is cut at a line boundary with the offset to continue from", async () => {
+    const dir = fresh("long");
+    writeFileSync(`${dir}/big.txt`, `${"x".repeat(1000)}\n`.repeat(100));
+    const out = await pick("read").run({ path: "big.txt" }, ctx(dir));
+    expect(out.length).toBeLessThan(42_000);
+    expect(out).toMatch(/\[lines 1-\d+ of 100; continue with offset=\d+\]$/);
+  });
+
+  test("bash: no stdin, so a command waiting for input ends instead of hanging", async () => {
+    const out = await pick("bash").run({ command: "cat; echo done" }, ctx(fresh("stdin")));
+    expect(out).toBe("done\n");
   });
 
   test("bash: output budget spills full output, spill readable", async () => {
