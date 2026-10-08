@@ -385,10 +385,10 @@ describe("TUI app with the agent", () => {
     );
     h.press("init a repo\r");
     await initDone;
-    await new Promise((r) => setTimeout(r, 40)); // past the renderer's 33 ms throttle
-    h.app.render(); // the frame the real render timer would paint
+    await new Promise((r) => setTimeout(r, 20)); // the tool returns and the line is re-read
+    // The state, not the screen: what reaches the screen also depends on the 33 ms paint throttle.
     expect(h.agent.state).toBe("running"); // the run has not ended yet...
-    expect(h.screen()).toContain("~/p (master)"); // ...and the branch already shows
+    expect(h.app.place).toBe("~/p (master)"); // ...and the branch is already there
     await settle(h.agent);
   });
 

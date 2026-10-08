@@ -149,6 +149,11 @@ export class App {
     return this.#marker;
   }
 
+  /** The cwd/branch line under the editor, as it stands now (not as last painted). */
+  get place(): string {
+    return this.#place;
+  }
+
   get statusLine(): string {
     return statusLine({
       running: this.#running,
