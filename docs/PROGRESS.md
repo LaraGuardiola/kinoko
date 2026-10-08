@@ -317,3 +317,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Every request honors the run's AbortSignal, plus a 20 s cap so a silent server cannot hold a run.
 - Tests (`examples/ext/web.test.ts`, no network): the three parsers on fixtures, entity decoding, HTML to text, `web_fetch` against a local `Bun.serve` (page, paging, JSON, binary, 404, non-http, abort), the engine fallback past a 202, and the tool registration. `bun run check` passes (250 tests).
 - Not installed for the user yet (it would change the kinoko vs pi comparison); `cp examples/ext/web.ts ~/.kinoko/ext/` switches it on.
+
+## TUI: the place line follows git during a run — DONE
+- The cwd/branch line was re-read only when a run ended, so a `git init` (or a checkout) made early in a long run did not show until the end, which looked like it needed a restart. It is now re-read after every tool call too: two small file reads, no git process.
+- Test (app.test 8e): a tool "inits a repo" mid-run; the branch shows while the run is still going. Verified the test fails without the fix. The harness gained a `place` option. `bun run check` passes (251 tests).

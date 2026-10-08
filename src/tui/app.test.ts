@@ -56,7 +56,14 @@ interface Harness {
 
 async function harness(
   turns: StreamEvent[][],
-  opts: { tools?: Tool[]; model?: string; pace?: number; viewportRows?: number; viewportCols?: number } = {},
+  opts: {
+    tools?: Tool[];
+    model?: string;
+    pace?: number;
+    viewportRows?: number;
+    viewportCols?: number;
+    place?: () => Promise<string>;
+  } = {},
 ): Promise<Harness> {
   const out: string[] = [];
   const { provider, calls } = scripted(turns, opts.pace ?? 1);
@@ -78,6 +85,7 @@ async function harness(
     contextWindow: 1000,
     viewportRows: opts.viewportRows,
     viewportCols: opts.viewportCols,
+    place: opts.place,
     session: session,
     rebuild: () => agent,
   });
@@ -331,6 +339,35 @@ describe("TUI app with the agent", () => {
     expect(h.app.statusLine).toContain("200 generated");
     // The hit rate stays a session total: 2,100 cached of 3,300 sent.
     expect(h.app.statusLine).toContain("cache 64%");
+  });
+
+  test("8e. the place line picks up a new repository after the tool call, while the run goes on", async () => {
+    let branch = "";
+    const { promise: initDone, resolve: ran } = Promise.withResolvers<void>();
+    const gitInit: Tool = {
+      name: "git_init",
+      description: "",
+      schema: {},
+      run: async () => {
+        branch = " (master)";
+        ran();
+        return "done";
+      },
+    };
+    const h = await harness(
+      [
+        [{ type: "tool_call", call: { id: "g", name: "git_init", args: {} } }, { type: "done", stop: "tool_use" }],
+        [{ type: "text", delta: "still " }, { type: "text", delta: "working " }, { type: "text", delta: "on it" }, { type: "done", stop: "end" }],
+      ],
+      { tools: [gitInit], pace: 40, place: async () => `~/p${branch}` },
+    );
+    h.press("init a repo\r");
+    await initDone;
+    await new Promise((r) => setTimeout(r, 40)); // past the renderer's 33 ms throttle
+    h.app.render(); // the frame the real render timer would paint
+    expect(h.agent.state).toBe("running"); // the run has not ended yet...
+    expect(h.screen()).toContain("~/p (master)"); // ...and the branch already shows
+    await settle(h.agent);
   });
 
   test("8d. the startup panel is followed by a blank row before the first prompt", async () => {

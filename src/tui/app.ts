@@ -33,7 +33,8 @@ export interface AppOptions {
   thinking?: string;
   viewportRows?: number;
   viewportCols?: number;
-  /** The line under the editor (cwd and git branch). Re-read after every run: tools can switch branch. */
+  /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
+   *  create a repository or switch branch. */
   place?: () => Promise<string>;
   session?: Session;
   /** Called by /quit. The demo and the CLI pass the process exit. */
@@ -280,6 +281,8 @@ export class App {
         return;
       case "tool_end":
         this.#printTool();
+        // A tool may have run `git init` or switched branch: show it now, not when the run ends.
+        this.#refreshPlace();
         return;
       case "message_end":
         this.#finishMessage(e.message);
