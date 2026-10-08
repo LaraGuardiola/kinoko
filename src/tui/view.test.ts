@@ -29,6 +29,16 @@ describe("live region", () => {
     expect(region.row).toBe(2);
   });
 
+  test("the thinking level sits near the right end of the rule above the editor, same width", () => {
+    const region = liveRegion(input({ viewportRows: 10, viewportCols: 30, thinking: "LOW · 2048" }));
+    const plain = region.lines.map(stripAnsi);
+    expect(plain[1]).toBe(`${"─".repeat(14)} LOW · 2048 ──`);
+    expect(plain[1]!.length).toBe(plain[3]!.length); // the bottom rule stays plain, same width
+    expect(region.lines[1]).toContain("\x1b[1m\x1b[38;2;238;222;186mLOW · 2048"); // bold cream
+    // Too narrow for the label: a plain rule.
+    expect(stripAnsi(liveRegion(input({ viewportCols: 12, thinking: "LOW · 2048" })).lines[1]!)).toBe("─".repeat(10));
+  });
+
   test("the path is cream and the branch amanita red", () => {
     const region = liveRegion(input({ place: "~/p (master)" }));
     expect(region.lines.at(-2)).toBe("\x1b[38;2;238;222;186m~/p\x1b[0m \x1b[38;2;232;36;36m(master)\x1b[0m");

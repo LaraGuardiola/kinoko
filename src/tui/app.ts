@@ -29,6 +29,8 @@ export interface AppOptions {
   /** 0-based model id shown in the status line. */
   model: string;
   contextWindow: number;
+  /** The thinking level shown on the rule above the editor ("LOW · 2048"). */
+  thinking?: string;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every run: tools can switch branch. */
@@ -47,6 +49,7 @@ export class App {
   #editor: Editor;
   #model: string;
   #window: number;
+  #thinking: string | undefined;
   #viewportRows: number | undefined;
   #viewportCols: number | undefined;
   #session: Session | undefined;
@@ -64,7 +67,7 @@ export class App {
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
-  #tokens = { context: 0, input: 0, cacheRead: 0 };
+  #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
   constructor(opts: AppOptions) {
@@ -76,6 +79,7 @@ export class App {
     this.#editor = new Editor();
     this.#model = opts.model;
     this.#window = opts.contextWindow;
+    this.#thinking = opts.thinking;
     this.#viewportRows = opts.viewportRows;
     this.#viewportCols = opts.viewportCols;
     this.#session = opts.session;
@@ -304,6 +308,7 @@ export class App {
       this.#tokens.context = (usage.input ?? 0) + (usage.output ?? 0);
       this.#tokens.input += usage.input ?? 0;
       this.#tokens.cacheRead += usage.cacheRead ?? 0;
+      this.#tokens.output += usage.output ?? 0;
       this.#cost += usage.cost ?? 0;
     }
     this.#closeBlock();
@@ -432,6 +437,7 @@ export class App {
       editorCol: view.col,
       status: this.statusLine,
       place: this.#place,
+      thinking: this.#thinking,
       viewportRows: this.#viewportRows,
       viewportCols: this.#viewportCols,
     });

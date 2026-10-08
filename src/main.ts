@@ -1,4 +1,4 @@
-import { DEFAULTS, loadConfig } from "./config.ts";
+import { DEFAULTS, loadConfig, thinkingLabel } from "./config.ts";
 import { openaiCompat } from "./providers/openai-compat.ts";
 import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
@@ -222,6 +222,7 @@ if (tui) {
     write: (text) => term.write(text),
     model: config.model,
     contextWindow: config.contextWindow,
+    thinking: thinkingLabel(config.reasoningEffort, config.thinkingBudget),
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,

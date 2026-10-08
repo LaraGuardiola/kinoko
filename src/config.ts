@@ -100,3 +100,8 @@ export async function loadConfig(flags: Record<string, string | undefined> = {})
   }
   return Object.assign({}, ...layers) as Config;
 }
+/** The thinking level as the TUI shows it: "LOW · 2048", "OFF", or "DEFAULT" (the model's own). */
+export function thinkingLabel(effort: ReasoningEffort | undefined, budget: number | undefined): string {
+  const level = (effort ?? "default").toUpperCase();
+  return budget && effort !== "off" ? `${level} · ${budget}` : level;
+}

@@ -293,7 +293,8 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
     const line = h.app.statusLine;
     expect(line).toContain("qwen-local");
-    expect(line).toContain("1,240/1,000 tok"); // input + output
+    expect(line).toContain("1,240/1,000 tok 124%"); // input + output, and how full the window is
+    expect(line).toContain("40 generated");
     expect(line).toContain("cache 25%");
     expect(line.startsWith("IDLE")).toBe(true); // level with the rows above, no extra margin
     expect(h.screen()).toContain("IDLE");
@@ -321,6 +322,8 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
     // Before the fix this read 3,450 (1,050 + 1,150 + 1,300) for a 1,300-token conversation.
     expect(h.app.statusLine).toContain("1,300/1,000 tok");
+    // Generated is a session total: every round's output, thinking included.
+    expect(h.app.statusLine).toContain("200 generated");
     // The hit rate stays a session total: 2,100 cached of 3,300 sent.
     expect(h.app.statusLine).toContain("cache 64%");
   });

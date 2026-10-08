@@ -294,3 +294,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - The context counter was right: the session peaked at 19,764 tokens (16% of the window), so compaction correctly never ran. Thinking from earlier turns is not resent, so it is not in the prompt.
 - Tests polluted the real `~/.kinoko/sessions`: `app.test.ts` created sessions without `home`, one new directory per run. Fixed (`home: ROOT`); removed 152 test-only session directories, kept the 11 real ones.
 - `bun run check` passes (236 tests).
+
+## TUI: context %, generated tokens, thinking level on the input rule — DONE
+- Status line: `19,764/122,880 tok 16%` (how full the window is) and `61,873 generated`, a session total of every reply's output, thinking included. Thinking is not resent, so it costs time, not context; the two numbers together show both.
+- The rule above the editor carries the thinking level near its right end, bold cream: `──────── LOW · 2048 ──` (`thinkingLabel` in config.ts: effort uppercased, `DEFAULT` when unset, `OFF`, plus the budget when one is set). A plain rule when the terminal is too narrow for it.
+- Tests: status percent and generated total (app.test), labelled rule (view.test), `thinkingLabel` (new config.test). `bun run check` passes (238 tests).
+- Next (asked for later): changing the level from the TUI.
