@@ -59,8 +59,7 @@ export class App {
   // The block being streamed (thinking or answer). Thinking is display-only, never sent back.
   #open: OpenBlock | undefined;
   #thinkingSeen = false; // this message already streamed its thinking
-  #printedAny = false; // something is already in the scrollback (decides blank rows between blocks)
-  #lastKind: BlockKind | undefined;
+  #printedAny = false; // something is already in the scrollback: every later block gets a blank row above
   #tool: ToolView | undefined;
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
@@ -350,7 +349,7 @@ export class App {
     if (this.#open !== undefined && this.#open.kind !== kind) this.#closeBlock();
     // Whitespace between two blocks must not open a block of its own.
     if (this.#open === undefined && delta.trim() === "") return;
-    const open = (this.#open ??= { kind: kind, text: "", gap: this.#gapFor(kind), inFence: false });
+    const open = (this.#open ??= { kind: kind, text: "", gap: this.#printedAny, inFence: false });
     open.text += delta;
     this.#spill();
   }
@@ -376,20 +375,13 @@ export class App {
     if (text !== "") this.#print(open.kind, text, open.gap);
   }
 
-  /** Does a block of this kind need a blank row above it, given what is already printed? */
-  #gapFor(kind: BlockKind): boolean {
-    if (!this.#printedAny) return false;
-    return !(kind === "tool" && this.#lastKind === "tool");
-  }
-
   /** Sends one finished piece to the scrollback. `gap` defaults to the usual blank row between blocks. */
-  #print(kind: BlockKind, text: string, gap = this.#gapFor(kind)): void {
+  #print(kind: BlockKind, text: string, gap = this.#printedAny): void {
     if (text === "") return;
     // The renderer repaints the region right after the text: it has to know the current state.
     this.#renderer.update(this.#state());
     this.#renderer.printAbove(gap ? `\n${text}` : text);
     this.#printedAny = true;
-    this.#lastKind = kind;
   }
 
   #syncQueued(steer: string[], followUp: string[]): void {
@@ -410,14 +402,15 @@ export class App {
   // ---- the live region ----
 
   #state(): { lines: string[]; row: number; col: number } {
-    // "> " in front, the block cursor may sit one column past the text, and the renderer's margin.
-    const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 5);
+    // The block cursor may sit one column past the text, plus the renderer's margins.
+    const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 3);
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
       open: this.#open,
       tool: this.#tool,
-      toolGap: this.#gapFor("tool"),
+      toolGap: this.#printedAny,
       marker: this.#marker,
+      markerAlert: this.#marker.startsWith("Interrupted"),
       queued: this.#queued,
       editorLines: view.lines,
       editorEmpty: this.#editor.empty,

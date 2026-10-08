@@ -114,7 +114,7 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
     await new Promise((resolve) => setTimeout(resolve, 40));
     h.app.render();
-    expect(h.out.join("")).toContain("\x1b[38;5;159m> show me\x1b[0m");
+    expect(h.out.join("")).toContain("\x1b[38;5;159mshow me\x1b[0m");
     expect(h.out.join("")).not.toContain("\x1b[48;5");
     // Finished text goes to the scrollback (printed above the region), not into the last repaint.
     expect(h.screen()).toContain("here is the answer");
@@ -137,13 +137,13 @@ describe("TUI app with the agent", () => {
     // The first exchange no longer fits the live region, but it is still
     // reachable by scrolling up: it was printed above exactly once.
     const stripped = h.screen();
-    expect(stripped).toContain("> first question");
+    expect(stripped).toContain("first question");
     expect(stripped).toContain("answer one");
-    expect(stripped).toContain("> second question");
+    expect(stripped).toContain("second question");
     expect(stripped).toContain("answer two");
-    expect(stripped.indexOf("> first question")).toBeLessThan(stripped.indexOf("> second question"));
+    expect(stripped.indexOf("first question")).toBeLessThan(stripped.indexOf("second question"));
     // The flushed row left the live region, so it was printed above exactly once.
-    expect(stripped.split("> first question")).toHaveLength(2);
+    expect(stripped.split("first question")).toHaveLength(2);
   });
 
   test("1. Enter sends the prompt, Esc aborts within 100ms", async () => {
@@ -296,6 +296,24 @@ describe("TUI app with the agent", () => {
     expect(line).toContain("cache 25%");
     expect(line).toContain("IDLE");
     expect(h.screen()).toContain("IDLE");
+  });
+
+  test("8b. several tool calls in one turn print as separate bands, a blank row between them", async () => {
+    const h = await harness(
+      [
+        [
+          { type: "tool_call", call: { id: "a", name: "read", args: { path: "one.ts" } } },
+          { type: "tool_call", call: { id: "b", name: "read", args: { path: "two.ts" } } },
+          { type: "done", stop: "tool_use" },
+        ],
+      ],
+      { tools: [{ name: "read", description: "", schema: {}, run: async () => "content" }] },
+    );
+    h.press("read both\r");
+    await settle(h.agent);
+    const out = h.out.join("").replace(ANSI, "");
+    // The second block is printed starting with a plain blank row, then its band's top padding row.
+    expect(out).toMatch(/\r \r\n {20,}\r\n +● read two\.ts/);
   });
 
   test("9. tool blocks print above the region, and Ctrl-T expands them", async () => {

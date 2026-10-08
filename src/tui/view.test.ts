@@ -1,6 +1,7 @@
 import { expect, test, describe } from "bun:test";
 import { formatBlock, liveRegion, splitStable, STREAM_ROWS, wrapAnsi } from "./view.ts";
 import { toolBlock, toolFailed, toolSummary } from "./tools.ts";
+import { visibleLength } from "./style.ts";
 import type { RegionInput } from "./view.ts";
 
 const stripAnsi = (line: string): string => line.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
@@ -27,19 +28,19 @@ describe("live region", () => {
     expect(plain).toHaveLength(5);
     expect(plain[0]).toBe("");
     expect(plain[1]).toBe("─".repeat(18));
-    expect(plain[2]?.startsWith("> type a prompt")).toBe(true);
+    expect(plain[2]?.startsWith("type a prompt")).toBe(true);
     expect(plain[3]).toBe("─".repeat(18));
     expect(plain[4]).toBe(" IDLE ");
     // The placeholder's first letter wears the block cursor.
-    expect(region.lines[2]?.startsWith("> \x1b[7mt\x1b[0m")).toBe(true);
+    expect(region.lines[2]?.startsWith("\x1b[7mt\x1b[0m")).toBe(true);
     expect(region.row).toBe(2);
   });
 
   test("the block cursor sits on the character under it, or past the end of the line", () => {
     const mid = liveRegion(input({ editorLines: ["abc"], editorEmpty: false, editorCol: 1 }));
-    expect(mid.lines[2]).toBe("> a\x1b[7mb\x1b[0mc");
+    expect(mid.lines[2]).toBe("a\x1b[7mb\x1b[0mc");
     const end = liveRegion(input({ editorLines: ["abc"], editorEmpty: false, editorCol: 3 }));
-    expect(end.lines[2]).toBe("> abc\x1b[7m \x1b[0m");
+    expect(end.lines[2]).toBe("abc\x1b[7m \x1b[0m");
   });
 
   test("the place line goes under the bottom rule, above the status", () => {
@@ -81,13 +82,13 @@ describe("live region", () => {
         viewportRows: 6,
       }),
     );
-    expect(region.lines.map(stripAnsi).filter((line) => !line.startsWith("─"))).toEqual(["four", "", "> draft ", " IDLE "]);
+    expect(region.lines.map(stripAnsi).filter((line) => !line.startsWith("─"))).toEqual(["four", "", "draft ", " IDLE "]);
     expect(region.row).toBe(3);
   });
 
   test("a tiny viewport drops the chrome but keeps the editor and the status", () => {
     const region = liveRegion(input({ editorLines: ["x"], editorEmpty: false, editorCol: 1, viewportRows: 3 }));
-    expect(region.lines.map(stripAnsi)).toEqual(["> x ", " IDLE "]);
+    expect(region.lines.map(stripAnsi)).toEqual(["x ", " IDLE "]);
     expect(region.row).toBe(0);
   });
 
@@ -101,9 +102,9 @@ describe("live region", () => {
 
   test("clips styled rows before the terminal margin", () => {
     const region = liveRegion(
-      input({ editorLines: ["abcdef"], editorEmpty: false, editorCol: 6, viewportRows: 3, viewportCols: 6 }),
+      input({ editorLines: ["abcdefgh"], editorEmpty: false, editorCol: 8, viewportRows: 3, viewportCols: 6 }),
     );
-    expect(region.lines[0]).toBe("> a…\x1b[0m");
+    expect(region.lines[0]).toBe("abc…\x1b[0m");
     expect(region.col).toBe(4);
   });
 
@@ -130,16 +131,37 @@ describe("live region", () => {
     );
     const plain = region.lines.map(stripAnsi);
     expect(plain[0]).toBe("● bash {} …");
-    expect(plain[1]).toBe("Interrupted");
-    expect(plain[2]).toBe("[follow-up] next");
+    expect(plain[1]).toBe("");
+    expect(plain[2]).toBe("Interrupted");
+    expect(plain[3]).toBe("[follow-up] next");
+  });
+
+  test("an interruption sits after a blank row, in the same red as the input rules", () => {
+    const region = liveRegion(input({ open: { kind: "assistant", text: "partial", gap: false, inFence: false }, marker: "Interrupted", markerAlert: true }));
+    expect(region.lines.slice(0, 3)).toEqual(["partial", "", "\x1b[38;2;232;36;36mInterrupted\x1b[0m"]);
+    expect(region.lines[4]).toStartWith("\x1b[38;2;232;36;36m─");
+  });
+});
+
+describe("terminal widths", () => {
+  test("wide emoji and CJK take two columns, combining marks none", () => {
+    expect(visibleLength("ok ✅")).toBe(5);
+    expect(visibleLength("日本")).toBe(4);
+    expect(visibleLength("e\u0301")).toBe(1);
+    expect(visibleLength("\x1b[1mbold\x1b[0m")).toBe(4);
+  });
+
+  test("a band row with an emoji never spills past its width", () => {
+    const block = toolBlock({ name: "read", args: "a", output: `3: ## Phase 1 ✅ ${"x".repeat(40)}`, aborted: false }, false, 30);
+    for (const row of block.split("\n")) expect(visibleLength(row)).toBe(28);
   });
 });
 
 describe("formatBlock", () => {
-  test("user messages are light blue and keep the prompt mark on every row", () => {
-    expect(formatBlock("user", "help me")).toBe("\x1b[38;5;159m> help me\x1b[0m");
+  test("user messages are light blue on every row, with no prompt mark", () => {
+    expect(formatBlock("user", "help me")).toBe("\x1b[38;5;159mhelp me\x1b[0m");
     expect(formatBlock("user", "another\nmessage")).toBe(
-      "\x1b[38;5;159m> another\x1b[0m\n\x1b[38;5;159m> message\x1b[0m",
+      "\x1b[38;5;159manother\x1b[0m\n\x1b[38;5;159mmessage\x1b[0m",
     );
   });
 

@@ -97,7 +97,7 @@ describe("blocks come out in the order they happened", () => {
       for (const w of words(4, "ANSWER-2-")) { emit({ type: "message_delta", delta: w }); await wait(); }
       emit({ type: "message_end", message: {} });
     });
-    inOrder(text, ["> question", "think-a-0", "ANSWER-1-0", "think-b-0", "● bash", "ANSWER-2-0"]);
+    inOrder(text, ["question", "think-a-0", "ANSWER-1-0", "think-b-0", "● bash", "ANSWER-2-0"]);
   });
 
   test("two messages of one run are separate blocks, not concatenated", async () => {
@@ -150,6 +150,6 @@ describe("blocks come out in the order they happened", () => {
     release();
     await new Promise((r) => setTimeout(r, 20));
     app.render();
-    inOrder(vt.all().join("\n"), ["> go", "BEFORE-STEER", "> use rg instead", "AFTER-STEER"]);
+    inOrder(vt.all().join("\n"), ["go", "BEFORE-STEER", "use rg instead", "AFTER-STEER"]);
   });
 });

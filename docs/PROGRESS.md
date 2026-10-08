@@ -206,3 +206,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Lint: fixed the pre-existing test-file errors/warnings from 43bd5f2. `bun run check` passes (191 tests, zero warnings).
 - Assumptions: a global `~/.kinoko/config.json` written for a local model still applies its `maxOutputTokens`/`contextWindow` to anthropic (override per run with flags). Haiku 5.5 cache-read price is an estimate (0.1x input).
 - Build: rebuilt and installed `~/.local/bin/kinoko`.
+
+## TUI polish: amanita rules, no prompt mark, separate tool bands, widths, Shift+Enter — DONE
+- No "> " prompt mark in the editor or in the transcript echo; just the block cursor (user text stays light blue).
+- Input rules in amanita red `rgb(232,36,36)`; an interruption marker uses the same red, after a blank row (other markers keep inverse).
+- Tools run one at a time (the loop is sequential); each tool block now gets a blank row above it, so consecutive calls are separate bands.
+- Band overflow fixed: width math is per terminal column (`style.ts` `charWidth`: wide emoji/CJK = 2, combining = 0, code-point iteration); tabs in transcript blocks expand to 4 spaces.
+- Shift+Enter inserts a newline: Term pushes the kitty keyboard protocol (level 1) on start and pops it on stop; `CSI 13;2u` is Shift+Enter, and the parser understands CSI-u Esc/Ctrl/Alt keys. Ctrl+J (`\n`) is a newline everywhere; legacy `ESC CR` is Alt+Enter (follow-up/submit) as the spec says.
+- `bun run check` passes (197 tests, zero warnings). Rebuilt and installed `~/.local/bin/kinoko`.

@@ -23,6 +23,7 @@ export interface KeyContext {
  * docs/interruption.md is the spec:
  *   Enter          prompt when idle, steer when running
  *   Alt+Enter      follow-up when running, prompt when idle
+ *   Shift+Enter    newline (Ctrl+J and Ctrl+O too)
  *   Esc            abort while running, nothing while idle
  *   Ctrl-C         abort / clear the editor / quit on a second press
  *   Alt+Up         pull the last queued message back
@@ -38,8 +39,9 @@ export function actionFor(key: Key, ctx: KeyContext): KeyAction {
       return ctx.editorEmpty ? "quit" : "none";
     case "ctrl-t":
       return "toggle-tools";
-    case "shift-enter":
-      return ctx.running ? "follow-up" : "submit";
+    case "enter":
+      if (key.alt === true) return ctx.running ? "follow-up" : "submit";
+      return "editor";
     case "up":
       return key.alt === true ? "pull-queued" : "editor";
     default:

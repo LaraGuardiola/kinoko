@@ -35,7 +35,7 @@ an `AbortSignal`, nothing blocks the event loop, and the keyboard always wins:
 | `Alt+Up` | — | pull the newest queued message back into the editor |
 | `Ctrl-T` | expand or collapse tool output | same |
 | `Ctrl-P` / `Ctrl-N` | previous / next history entry | same |
-| `Ctrl-O` | newline inside the editor | same |
+| `Shift+Enter` / `Ctrl-J` / `Ctrl-O` | newline inside the editor | same |
 
 Queued messages are never lost: abort a run and they come back in the editor with an
 `Interrupted` marker. `docs/interruption.md` is the contract.

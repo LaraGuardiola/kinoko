@@ -18,8 +18,13 @@ describe("tui key bindings (docs/interruption.md)", () => {
   });
 
   test("2. Alt+Enter is a follow-up while running and a prompt when idle", () => {
-    expect(actionFor(key("shift-enter"), running)).toBe("follow-up");
-    expect(actionFor(key("shift-enter"), idle)).toBe("submit");
+    expect(actionFor(key("enter", { alt: true }), running)).toBe("follow-up");
+    expect(actionFor(key("enter", { alt: true }), idle)).toBe("submit");
+  });
+
+  test("2b. Shift+Enter goes to the editor, which inserts a newline, idle or running", () => {
+    expect(actionFor(key("shift-enter"), idle)).toBe("editor");
+    expect(actionFor(key("shift-enter"), running)).toBe("editor");
   });
 
   test("3. Esc aborts while running and does nothing when idle", () => {

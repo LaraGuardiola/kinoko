@@ -52,6 +52,8 @@ export interface RegionInput {
   /** A blank row goes before the running tool line. */
   toolGap?: boolean;
   marker: string;
+  /** The marker reports an interruption: red, like the input rules. */
+  markerAlert?: boolean;
   queued: QueuedView[];
   editorLines: string[];
   editorEmpty: boolean;
@@ -72,13 +74,15 @@ export interface Region {
 
 /** A finished block as terminal rows. Used both for scrollback and for the open block. */
 export function formatBlock(kind: BlockKind, text: string, inFence = false): string {
-  const body = inFence ? text.replace(/\n+$/, "") : text.replace(/^\n+|\n+$/g, "");
+  // A tab advances to a tab stop the width math cannot see: spaces keep the rows honest.
+  const trimmed = inFence ? text.replace(/\n+$/, "") : text.replace(/^\n+|\n+$/g, "");
+  const body = trimmed.replace(/\t/g, "    ");
   if (body === "") return "";
   switch (kind) {
     case "user":
       return body
         .split("\n")
-        .map((line) => `${ANSI.user}> ${line}${ANSI.reset}`)
+        .map((line) => `${ANSI.user}${line}${ANSI.reset}`)
         .join("\n");
     case "thinking":
       return thinkingBlock(body);
@@ -160,7 +164,10 @@ export function liveRegion(input: RegionInput): Region {
     if (input.toolGap) tail.push("");
     tail.push(`${toolHead(input.tool)} ${ANSI.dim}…${ANSI.reset}`);
   }
-  if (input.marker !== "") tail.push(`${ANSI.inverse}${input.marker}${ANSI.reset}`);
+  if (input.marker !== "") {
+    // A blank row keeps the note off whatever was streamed before it.
+    tail.push("", input.markerAlert ? `${ANSI.amanita}${input.marker}${ANSI.reset}` : `${ANSI.inverse}${input.marker}${ANSI.reset}`);
+  }
   for (const item of input.queued) {
     const tag = item.kind === "steer" ? "[steer]" : "[follow-up]";
     tail.push(`${ANSI.dim}${tag}${ANSI.reset} ${item.text}`);
@@ -169,9 +176,9 @@ export function liveRegion(input: RegionInput): Region {
   // cursor stays hidden). Empty, it shows the hint as a placeholder under the cursor.
   const placeholder = input.editorEmpty && input.editorLines.length === 1 && input.editorLines[0] === "";
   const editor = placeholder
-    ? [`> ${ANSI.inverse}${HINT[0]}${ANSI.reset}${ANSI.dim}${HINT.slice(1)}${ANSI.reset}`]
-    : input.editorLines.map((line, i) => `> ${i === input.editorRow ? withCursor(line, input.editorCol) : line}`);
-  const rule = `${ANSI.dim}${"─".repeat(Math.max(1, (input.viewportCols ?? 80) - 2))}${ANSI.reset}`;
+    ? [`${ANSI.inverse}${HINT[0]}${ANSI.reset}${ANSI.dim}${HINT.slice(1)}${ANSI.reset}`]
+    : input.editorLines.map((line, i) => (i === input.editorRow ? withCursor(line, input.editorCol) : line));
+  const rule = `${ANSI.amanita}${"─".repeat(Math.max(1, (input.viewportCols ?? 80) - 2))}${ANSI.reset}`;
   // A blank row keeps the transcript off the input.
   let head = ["", rule];
   let foot = [rule, ...(input.place ? [`${ANSI.dim}${input.place}${ANSI.reset}`] : []), input.status];
@@ -181,7 +188,7 @@ export function liveRegion(input: RegionInput): Region {
   if (width !== undefined) tail = tail.flatMap((line) => wrapAnsi(line, width));
   if (viewport === undefined || viewport < 2) {
     const rows = [...tail, ...head, ...editor, ...foot];
-    return region(rows, tail.length + head.length + input.editorRow, input.editorCol + 2, input.viewportCols);
+    return region(rows, tail.length + head.length + input.editorRow, input.editorCol, input.viewportCols);
   }
 
   // The region must stay shorter than the terminal, or its top scrolls out of reach and cannot be
@@ -199,14 +206,16 @@ export function liveRegion(input: RegionInput): Region {
   const visibleTail = contentRoom === 0 ? [] : tail.slice(-contentRoom);
   const rows = [...visibleTail, ...head, ...visibleEditor, ...foot];
   const row = visibleTail.length + head.length + input.editorRow - editorStartAt;
-  return region(rows, row, input.editorCol + 2, input.viewportCols);
+  return region(rows, row, input.editorCol, input.viewportCols);
 }
 
 const HINT = "type a prompt, enter to send, enter while running to steer";
 
 /** Draws the block cursor over the character at `col` (a space past the end of the line). */
 function withCursor(line: string, col: number): string {
-  return `${line.slice(0, col)}${ANSI.inverse}${line[col] ?? " "}${ANSI.reset}${line.slice(col + 1)}`;
+  const code = line.codePointAt(col);
+  const under = code === undefined ? " " : String.fromCodePoint(code);
+  return `${line.slice(0, col)}${ANSI.inverse}${under}${ANSI.reset}${line.slice(col + (code === undefined ? 1 : under.length))}`;
 }
 
 /** Model reasoning is display-only: muted and distinct from the answer. */
@@ -261,7 +270,7 @@ export const HELP = [
   "  Ctrl-T         expand or collapse tool output",
   "  Alt+Up         pull the last queued message back into the editor",
   "  Ctrl-P / N     previous / next history entry",
-  "  Ctrl-O         newline inside the editor",
+  "  Shift+Enter    newline inside the editor (also Ctrl-J, Ctrl-O)",
   "",
   "  /help  /model  /compact  /fork  /quit",
 ].join("\n");

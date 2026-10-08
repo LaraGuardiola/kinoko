@@ -81,7 +81,8 @@ const CTRL: Record<string, KeyName> = {
   "\x7f": "backspace",
   "\x08": "backspace",
   "\r": "enter",
-  "\n": "enter",
+  // Ctrl+J: the newline key every terminal can send, kitty protocol or not.
+  "\n": "shift-enter",
   "\t": "tab",
 };
 
@@ -150,8 +151,8 @@ export class KeyParser {
       }
 
       if (rest.startsWith("\x1b\r") || rest.startsWith("\x1b\n")) {
-        // Alt+Enter, and what most terminals send for Shift+Enter.
-        keys.push({ name: "shift-enter" });
+        // Alt+Enter in the legacy encoding (some terminals are set up to send it for Shift+Enter).
+        keys.push({ name: "enter", alt: true });
         i += 2;
         continue;
       }
@@ -221,6 +222,7 @@ function csi(s: string): null | { key: Key; length: number } {
   const params = body.slice(0, finalAt);
   const final = body[finalAt] ?? "";
   const length = 2 + finalAt + 1;
+  if (final === "u") return { key: kittyKey(params), length: length };
   // Keypad sequences are numbered and end in `~`: \x1b[3~ is delete.
   if (final === "~") {
     const name = CSI[`${params}~`];
@@ -235,6 +237,30 @@ function csi(s: string): null | { key: Key; length: number } {
   if (modifier === "3") key.alt = true;
   if (modifier === "5") key.ctrl = true;
   return { key: key, length: length };
+}
+
+/**
+ * The kitty keyboard protocol (`CSI code ; modifiers u`), which Term turns on so Shift+Enter is
+ * told apart from Enter. With it, Esc and Ctrl/Alt combinations arrive this way too.
+ */
+function kittyKey(params: string): Key {
+  const [codeText = "", modText = "1"] = params.split(";");
+  const code = Number(codeText.split(":")[0]);
+  const mods = Number(modText.split(":")[0]) - 1;
+  const shift = (mods & 1) !== 0;
+  const alt = (mods & 2) !== 0;
+  const ctrl = (mods & 4) !== 0;
+  if (code === 13) return shift || ctrl ? { name: "shift-enter" } : alt ? { name: "enter", alt: true } : { name: "enter" };
+  if (code === 27) return { name: "escape" };
+  if (code === 9) return { name: "tab" };
+  if (code === 127 || code === 8) return { name: "backspace" };
+  if (!Number.isFinite(code) || code < 32) return { name: "unknown" };
+  const char = String.fromCodePoint(code);
+  if (ctrl) {
+    const name = CTRL[String.fromCharCode(code & 0x1f)];
+    return name === undefined ? { name: "unknown" } : alt ? { name: name, alt: true } : { name: name };
+  }
+  return alt ? { name: "char", char: char, alt: true } : { name: "char", char: shift ? char.toUpperCase() : char };
 }
 
 export interface TermHandlers {
@@ -281,11 +307,12 @@ export class Term {
     process.stdin.resume();
     process.stdin.on("data", this.#onData);
     process.stdout.on("resize", this.#onResize);
-    this.write("\x1b[?2004h"); // bracketed paste on
+    // Bracketed paste on; kitty keyboard protocol level 1 (terminals without it ignore the push).
+    this.write("\x1b[?2004h\x1b[>1u");
   }
 
   stop(): void {
-    this.write("\x1b[?2004l\x1b[?25h"); // paste off, cursor visible again
+    this.write("\x1b[<u\x1b[?2004l\x1b[?25h"); // keyboard protocol popped, paste off, cursor back
     process.stdout.off("resize", this.#onResize);
     process.stdin.off("data", this.#onData);
     process.stdin.setRawMode?.(false);

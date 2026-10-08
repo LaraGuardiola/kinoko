@@ -63,9 +63,21 @@ describe("tui key parser", () => {
     ]);
   });
 
-  test("6. alt+enter is the shift+enter a terminal sends", () => {
-    expect(names("\x1b\r")).toEqual(["shift-enter"]);
-    expect(names("\x1b\n")).toEqual(["shift-enter"]);
+  test("6. legacy alt+enter stays alt+enter; ctrl+j is the newline key", () => {
+    expect(parse("\x1b\r")).toEqual([{ name: "enter", alt: true }]);
+    expect(names("\n")).toEqual(["shift-enter"]);
+    expect(names("\r")).toEqual(["enter"]);
+  });
+
+  test("6b. kitty keyboard protocol: shift+enter, alt+enter, esc and ctrl/alt keys", () => {
+    expect(names("\x1b[13;2u")).toEqual(["shift-enter"]);
+    expect(names("\x1b[13;5u")).toEqual(["shift-enter"]);
+    expect(parse("\x1b[13;3u")).toEqual([{ name: "enter", alt: true }]);
+    expect(names("\x1b[13u")).toEqual(["enter"]);
+    expect(names("\x1b[27u")).toEqual(["escape"]);
+    expect(names("\x1b[99;5u")).toEqual(["ctrl-c"]);
+    expect(names("\x1b[116;5u")).toEqual(["ctrl-t"]);
+    expect(parse("\x1b[98;3u")).toEqual([{ name: "char", char: "b", alt: true }]);
   });
 
   test("7. alt+character, and a lone escape held back until the next flush", () => {
