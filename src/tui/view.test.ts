@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
 import { formatBlock, liveRegion, splitStable, STREAM_ROWS, wrapAnsi } from "./view.ts";
-import { toolBlock, toolFailed, toolSummary } from "./tools.ts";
+import { pulseDot, pulseLevel, toolBlock, toolFailed, toolSummary } from "./tools.ts";
 import { visibleLength } from "./style.ts";
 import type { RegionInput } from "./view.ts";
 
@@ -146,6 +146,26 @@ describe("live region", () => {
     const region = liveRegion(input({ open: { kind: "assistant", text: "partial", gap: false }, marker: "Interrupted", markerAlert: true }));
     expect(region.lines.slice(0, 3)).toEqual(["partial", "", "\x1b[38;2;232;36;36mInterrupted\x1b[0m"]);
     expect(region.lines[4]).toStartWith("\x1b[38;2;232;36;36m─");
+  });
+});
+
+describe("tool in progress", () => {
+  test("the bullet fades from dim amber to the resting yellow and back, in quantized steps", () => {
+    expect(pulseLevel(0)).toBe(0);
+    expect(pulseLevel(99)).toBe(0); // one step lasts 100 ms: few repaints
+    expect(pulseLevel(600)).toBeCloseTo(1);
+    expect(pulseLevel(300)).toBeCloseTo(0.5);
+    expect(pulseLevel(1200)).toBe(0); // and round again
+    expect(pulseDot(0)).toBe("\x1b[38;2;70;58;22m");
+    expect(pulseDot(1)).toBe("\x1b[38;2;255;215;95m");
+  });
+
+  test("the running line takes the pulse colour; without a pulse the bullet keeps its own", () => {
+    const tool = { name: "write", args: "", output: "", aborted: false };
+    const lit = liveRegion(input({ tool, pulse: 0 }));
+    expect(lit.lines.find((l) => l.includes("write"))).toStartWith("\x1b[38;2;70;58;22m●");
+    const plain = liveRegion(input({ tool }));
+    expect(plain.lines.find((l) => l.includes("write"))).toStartWith("\x1b[38;5;221m●");
   });
 });
 

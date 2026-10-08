@@ -321,3 +321,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## TUI: the place line follows git during a run — DONE
 - The cwd/branch line was re-read only when a run ended, so a `git init` (or a checkout) made early in a long run did not show until the end, which looked like it needed a restart. It is now re-read after every tool call too: two small file reads, no git process.
 - Test (app.test 8e): a tool "inits a repo" mid-run; the branch shows while the run is still going. Verified the test fails without the fix. The harness gained a `place` option. `bun run check` passes (251 tests).
+
+## TUI: a tool call shows at once, its bullet pulsing until the result — DONE
+- Before, nothing showed while the model wrote a tool call (a `write` with a whole file can take minutes): the call only appeared once its args were complete and the tool was running, as a static line.
+- New StreamEvent / AgentEvent `tool_pending { name }`: openai-compat emits it on the first `tool_calls` chunk that carries the name, anthropic on `content_block_start` of a `tool_use`. The App shows `● name …` at once and keeps it until `tool_start` (then the running line, args known) and `tool_end` (the static result block, as before). A call cut off before it completes (no tool calls on the message) drops the line.
+- While a call is pending or running the bullet fades between dim amber rgb(70,58,22) and its resting yellow rgb(255,215,95) on a cosine, 1.2 s per cycle in 12 steps (`pulseLevel` / `pulseDot` in tools.ts), so the 33 ms render timer repaints about 10 times a second and only while a tool is in progress.
+- Tests: both providers announce the name first; pulse steps and colours; running line colour with and without a pulse; app.test 8f shows the line before the call exists (fails without the feature). `bun run check` passes (254 tests).

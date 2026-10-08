@@ -7,10 +7,28 @@ import type { ToolView } from "./view.ts";
 /** Rows of tool output shown before the block collapses (ctrl+t expands). */
 export const COMPACT_ROWS = 3;
 
-/** The tool line: name in bold yellow, what it acts on in bold white. */
-export function toolHead(tool: Pick<ToolView, "name" | "args">): string {
+/** The tool line: name in bold yellow, what it acts on in bold white. `dot` recolours the bullet. */
+export function toolHead(tool: Pick<ToolView, "name" | "args">, dot: string = ANSI.toolDot): string {
   const args = tool.args === "" ? "" : ` ${ANSI.white}${tool.args}`;
-  return `${ANSI.toolDot}●${ANSI.reset} ${ANSI.tool}${tool.name}${ANSI.reset}${args}${ANSI.reset}`;
+  return `${dot}●${ANSI.reset} ${ANSI.tool}${tool.name}${ANSI.reset}${args}${ANSI.reset}`;
+}
+
+/** One fade in and out of the bullet of a tool in progress, in this many frames. */
+const PULSE_MS = 1200;
+const PULSE_STEPS = 12;
+const DOT_DIM = [70, 58, 22];
+const DOT_LIT = [255, 215, 95]; // the bullet's resting yellow (256-colour 221)
+
+/** How lit the bullet is at `now`, 0..1 on a cosine, in PULSE_STEPS steps so frames stay few. */
+export function pulseLevel(now: number): number {
+  const step = Math.floor((now % PULSE_MS) / (PULSE_MS / PULSE_STEPS));
+  return 0.5 - 0.5 * Math.cos((2 * Math.PI * step) / PULSE_STEPS);
+}
+
+/** The bullet's colour at a pulse level: from a dim amber to the resting yellow. */
+export function pulseDot(level: number): string {
+  const [r, g, b] = DOT_DIM.map((dim, i) => Math.round(dim + (DOT_LIT[i]! - dim) * level));
+  return `\x1b[38;2;${r};${g};${b}m`;
 }
 
 /** What a call acts on, instead of its JSON: the path, the command, the pattern. */

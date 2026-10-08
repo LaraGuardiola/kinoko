@@ -98,6 +98,9 @@ describe("openai-compat", () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]).toEqual({ type: "tool_call", call: { id: "call_1", name: "read", args: { path: "src/main.ts" } } });
     expect(events.at(-1)).toEqual({ type: "done", stop: "tool_use", usage: undefined });
+    // The name is announced once, on the first chunk, long before the args are complete.
+    expect(events.filter((e) => e.type === "tool_pending")).toEqual([{ type: "tool_pending", name: "read" }]);
+    expect(events.findIndex((e) => e.type === "tool_pending")).toBe(0);
   });
 
   test("3. abort mid-stream stops within 100ms with no partial tool_call", async () => {

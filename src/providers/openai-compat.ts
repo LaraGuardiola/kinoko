@@ -142,7 +142,13 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
                 else yield { type: "text", delta: part.delta };
               }
             }
-            for (const tc of choice.delta?.tool_calls ?? []) merge(pending, tc);
+            for (const tc of choice.delta?.tool_calls ?? []) {
+              const fresh = !pending.get(tc.index ?? 0)?.name;
+              merge(pending, tc);
+              // Say a call is coming as soon as its name is known: its args may take minutes.
+              const name = pending.get(tc.index ?? 0)?.name;
+              if (fresh && name) yield { type: "tool_pending", name };
+            }
             if (choice.finish_reason) finish = choice.finish_reason;
           }
           if (parser.done) break;

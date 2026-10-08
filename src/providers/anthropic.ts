@@ -115,7 +115,12 @@ export function anthropic(opts: AnthropicOptions): Provider {
               if (ev.delta?.stop_details) refusal = ev.delta.stop_details.category;
             }
             const i = ev.index ?? 0;
-            if (ev.type === "content_block_start" && ev.content_block) blocks[i] = { ...ev.content_block };
+            if (ev.type === "content_block_start" && ev.content_block) {
+              blocks[i] = { ...ev.content_block };
+              // Say a call is coming as soon as its name is known: its input may take minutes.
+              const block = ev.content_block as { type?: string; name?: string };
+              if (block.type === "tool_use" && block.name) yield { type: "tool_pending", name: block.name };
+            }
             if (ev.type === "content_block_delta") {
               const block = blocks[i];
               const d = ev.delta;

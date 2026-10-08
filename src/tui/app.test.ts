@@ -341,6 +341,28 @@ describe("TUI app with the agent", () => {
     expect(h.app.statusLine).toContain("cache 64%");
   });
 
+  test("8f. a tool call shows (pulsing) as soon as its name streams, before its args are done", async () => {
+    const h = await harness(
+      [
+        [
+          { type: "tool_pending", name: "slow" },
+          { type: "text", delta: "" }, // the long args: nothing to show but time
+          { type: "text", delta: "" },
+          { type: "tool_call", call: { id: "s", name: "slow", args: {} } },
+          { type: "done", stop: "tool_use" },
+        ],
+        [{ type: "text", delta: "done" }, { type: "done", stop: "end" }],
+      ],
+      { tools: [slow], pace: 40 },
+    );
+    h.press("go\r");
+    await new Promise((r) => setTimeout(r, 60)); // the name is out, the call is not
+    expect(h.agent.messages.some((m) => m.role === "tool")).toBe(false);
+    h.app.render();
+    expect(h.screen()).toContain("● slow …");
+    await settle(h.agent);
+  });
+
   test("8e. the place line picks up a new repository after the tool call, while the run goes on", async () => {
     let branch = "";
     const { promise: initDone, resolve: ran } = Promise.withResolvers<void>();

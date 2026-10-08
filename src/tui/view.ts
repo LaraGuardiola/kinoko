@@ -8,7 +8,7 @@
 
 import { fenceOpener, isClosing, renderMarkdown } from "./markdown.ts";
 import { ANSI, clipAnsi, wrapAnsi } from "./style.ts";
-import { toolHead } from "./tools.ts";
+import { pulseDot, toolHead } from "./tools.ts";
 
 export { wrapAnsi } from "./style.ts";
 
@@ -54,6 +54,8 @@ export interface RegionInput {
   tool: ToolView | undefined;
   /** A blank row goes before the running tool line. */
   toolGap?: boolean;
+  /** How lit the bullet of the tool in progress is (0..1): it fades in and out until the result. */
+  pulse?: number;
   marker: string;
   /** The marker reports an interruption: red, like the input rules. */
   markerAlert?: boolean;
@@ -172,7 +174,7 @@ export function liveRegion(input: RegionInput): Region {
   }
   if (input.tool !== undefined) {
     if (input.toolGap) tail.push("");
-    tail.push(`${toolHead(input.tool)} ${ANSI.dim}…${ANSI.reset}`);
+    tail.push(`${toolHead(input.tool, input.pulse === undefined ? undefined : pulseDot(input.pulse))} ${ANSI.dim}…${ANSI.reset}`);
   }
   if (input.marker !== "") {
     // A blank row keeps the note off whatever was streamed before it.

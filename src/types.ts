@@ -36,6 +36,7 @@ export interface Message {
 export type StreamEvent =
   | { type: "text"; delta: string }
   | { type: "thinking"; delta: string }
+  | { type: "tool_pending"; name: string } // a tool call has begun streaming: only its name is known
   | { type: "tool_call"; call: ToolCall } // emitted ONLY when its JSON args are complete
   | { type: "replay"; data: unknown } // the finished message as the provider wants it back
   | { type: "done"; stop: StopReason; usage?: Usage }
