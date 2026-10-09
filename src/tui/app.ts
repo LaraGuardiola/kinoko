@@ -13,7 +13,7 @@ import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
 import { ABORTED, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
-import { pulseLevel, toolBlock, toolSummary } from "./tools.ts";
+import { errorBlock, pulseLevel, toolBlock, toolSummary } from "./tools.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
@@ -478,7 +478,11 @@ export class App {
       this.#marker = "Interrupted — your queued messages are back in the editor";
     } else if (reason === "aborted") {
       this.#marker = "Interrupted";
-    } else if (reason === "limit" || reason === "error") {
+    } else if (reason === "error") {
+      // A failed run says why where it happened, on a band like a failed tool's; the marker points at it.
+      this.#print("tool", errorBlock(detail ?? "unknown error", this.#width));
+      this.#marker = "Stopped — error";
+    } else if (reason === "limit") {
       // A run that stops on its own must say why, or it looks like the model gave up.
       this.#marker = `Stopped — ${detail ?? reason}`;
     }

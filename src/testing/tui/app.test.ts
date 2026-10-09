@@ -414,6 +414,16 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
   });
 
+  test("8g. a failed run prints the error on a red band, like a failed tool; the marker points at it", async () => {
+    const h = await harness([[{ type: "error", message: "HTTP 500: image input is not supported" }, { type: "done", stop: "error" }]]);
+    h.press("look\r");
+    await settle(h.agent);
+    expect(h.app.marker).toBe("Stopped — error");
+    const out = h.out.join("");
+    expect(out).toContain("\x1b[48;2;50;30;36m"); // the failed-tool red
+    expect(h.screen()).toContain("HTTP 500: image input is not supported");
+  });
+
   test("8d. the startup panel is followed by a blank row before the first prompt", async () => {
     const h = await harness([]);
     h.app.intro("Ask it to work on a coding task.");
