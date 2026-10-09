@@ -49,7 +49,8 @@ export type StreamEvent =
   | { type: "tool_call"; call: ToolCall } // emitted ONLY when its JSON args are complete
   | { type: "replay"; data: unknown } // the finished message as the provider wants it back
   | { type: "done"; stop: StopReason; usage?: Usage }
-  | { type: "error"; message: string };
+  // `retry`: transient (no answer, a 429/5xx, the connection lost mid-reply): the same request may work.
+  | { type: "error"; message: string; retry?: boolean };
 
 export interface ToolSpec {
   name: string;

@@ -283,3 +283,68 @@ describe("Agent loop with abort, steer and follow-up", () => {
     expect(systems).toEqual(["Model: a", "Model: b"]);
   });
 });
+
+// Fails `failures` times (a dropped connection after some text), then answers "ok".
+function flaky(failures: number, retry = true): { provider: RealProvider; calls: () => number } {
+  let calls = 0;
+  const provider = {
+    stream: async function* (): AsyncIterable<StreamEvent> {
+      calls++;
+      if (calls <= failures) {
+        yield { type: "text", delta: "half a rep" };
+        yield { type: "error", message: "the connection closed mid-reply", retry };
+        yield { type: "done", stop: "error" };
+        return;
+      }
+      yield { type: "text", delta: "ok" };
+      yield { type: "done", stop: "end" };
+    },
+  } as unknown as RealProvider;
+  return { provider, calls: () => calls };
+}
+
+describe("retries after a transient failure", () => {
+  test("the same request again after a growing wait; the partial reply is not kept; no turn spent", async () => {
+    const { provider, calls } = flaky(2);
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 1, maxCost: 100, retryMs: 1 });
+    const retries: Array<{ attempt: number; of: number; inMs: number; error: string }> = [];
+    agent.on((e) => {
+      if (e.type === "retry") retries.push({ attempt: e.attempt, of: e.of, inMs: e.inMs, error: e.error });
+    });
+    const result = await agent.prompt("hi");
+    expect(result.reason).toBe("done");
+    expect(calls()).toBe(3);
+    expect(retries).toEqual([
+      { attempt: 1, of: 3, inMs: 1, error: "the connection closed mid-reply" },
+      { attempt: 2, of: 3, inMs: 2, error: "the connection closed mid-reply" },
+    ]);
+    expect(agent.messages.map((m) => m.content)).toEqual(["hi", "ok"]);
+  });
+
+  test("gives up after `retries` attempts with the error; 0 never retries; a non-transient error is not retried", async () => {
+    const tooMany = flaky(9);
+    const agent = new Agent({ provider: tooMany.provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100, retries: 2, retryMs: 1 });
+    expect(await agent.prompt("hi")).toEqual({ reason: "error", detail: "the connection closed mid-reply" });
+    expect(tooMany.calls()).toBe(3);
+
+    const never = flaky(1);
+    await new Agent({ provider: never.provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100, retries: 0 }).prompt("hi");
+    expect(never.calls()).toBe(1);
+
+    const bad = flaky(1, false);
+    await new Agent({ provider: bad.provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100, retryMs: 1 }).prompt("hi");
+    expect(bad.calls()).toBe(1);
+  });
+
+  test("Esc during the wait stops the run at once", async () => {
+    const { provider, calls } = flaky(1);
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100, retryMs: 60_000 });
+    agent.on((e) => {
+      if (e.type === "retry") agent.abort();
+    });
+    const started = Date.now();
+    expect((await agent.prompt("hi")).reason).toBe("aborted");
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(calls()).toBe(1);
+  });
+});

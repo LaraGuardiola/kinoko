@@ -20,7 +20,7 @@ test("a resume starts with the session's last model, with the key of a known ent
   expect(resumeModel({ model: "x", baseUrl: "http://gone:9/v1" }, known)).toBeUndefined();
 });
 
-test("label names the configured provider; a non-string is dropped", async () => {
+test("label names the configured provider; a non-string is dropped; retries is read", async () => {
   const { loadConfig } = await import("../config.ts");
   const dir = `${process.cwd()}/.tmp-config-label-${process.pid}`;
   await Bun.write(`${dir}/.kinoko/config.json`, JSON.stringify({ label: "strata" }));
@@ -30,8 +30,9 @@ test("label names the configured provider; a non-string is dropped", async () =>
   process.chdir(dir);
   try {
     expect((await loadConfig()).label).toBe("strata");
-    await Bun.write(`${dir}/.kinoko/config.json`, JSON.stringify({ label: 7 }));
+    await Bun.write(`${dir}/.kinoko/config.json`, JSON.stringify({ label: 7, retries: 5 }));
     expect((await loadConfig()).label).toBeUndefined();
+    expect((await loadConfig()).retries).toBe(5); // retries: a number, like the other limits
   } finally {
     process.chdir(cwd);
     process.env.HOME = home;

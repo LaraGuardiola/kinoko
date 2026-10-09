@@ -94,6 +94,11 @@ function toUsage(raw: Chunk["usage"]): Usage | undefined {
   return out;
 }
 
+/** Statuses worth the same request again: rate limits, overload, a gateway or server hiccup. */
+export function transient(status: number): boolean {
+  return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
 function stopFor(reason: string | null | undefined): StreamEvent & { type: "done" } {
   if (reason === "length") return { type: "done", stop: "length" };
   return { type: "done", stop: "end" };
@@ -134,7 +139,7 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
         const message = res
           ? `HTTP ${res.status}: ${(await res.text().catch(() => "")) || res.statusText}`
           : `no answer from ${hostOf(baseUrl)} after ${elapsed(started)}: ${failure} (a server timeout, or the server stopped?)`;
-        yield { type: "error", message };
+        yield { type: "error", message, retry: !res || transient(res.status) };
         yield { type: "done", stop: "error" };
         return;
       }
@@ -191,7 +196,7 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
       } catch (e) {
         // Socket died mid-stream: any pending tool call has incomplete args, so drop it.
         if (!req.signal.aborted) {
-          yield { type: "error", message: `the connection to ${hostOf(baseUrl)} closed mid-reply after ${elapsed(started)}: ${errorText(e)}` };
+          yield { type: "error", message: `the connection to ${hostOf(baseUrl)} closed mid-reply after ${elapsed(started)}: ${errorText(e)}`, retry: true };
         }
         yield { type: "done", stop: req.signal.aborted ? "aborted" : "error" };
         return;
@@ -349,6 +354,9 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
     tools: req.tools.length
       ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }))
       : undefined,
+    // Several calls in one reply: OpenAI's default, off in llama.cpp. Without it the Qwen3.6 there
+    // announced "all files in parallel" and sent one call in 2 of 6 runs; with it, 0 of 3.
+    ...(req.tools.length ? { parallel_tool_calls: true } : {}),
   };
 }
 

@@ -124,6 +124,7 @@ export class App {
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
+  #retrying = false; // the marker says a retry is coming: the next reply's first token clears it
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
@@ -449,6 +450,19 @@ export class App {
         return;
       case "compacted":
         this.#marker = "compacted: full prompt re-read expected";
+        return;
+      case "retry":
+        // What streamed before the failure stays on screen; the model starts that reply over.
+        this.#closeBlock();
+        this.#pending = undefined;
+        this.#thinkingSeen = false;
+        this.#marker = `${e.error} · retry ${e.attempt}/${e.of} in ${Math.round(e.inMs / 1000)}s`;
+        this.#retrying = true;
+        this.render();
+        return;
+      case "first_token":
+        if (this.#retrying) this.#marker = "";
+        this.#retrying = false;
         return;
       case "run_end":
         this.#finishRun(e.reason, e.dropped, e.detail);
