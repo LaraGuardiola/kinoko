@@ -10,10 +10,10 @@ bun run src/main.ts --mode rpc     # JSONL over stdio, for editors and scripts
 
 ## What it is
 
-A thin loop around a model plus five tools. That is the whole product:
+A thin loop around a model plus six tools. That is the whole product:
 
 - **`src/loop.ts`** is the agent: a linear loop with `abort`, `steer` and `followUp`.
-- **`src/tools/`** are the five tools. Nothing else gets to touch the disk or a subprocess.
+- **`src/tools/`** are the six tools. Nothing else gets to touch the disk or a subprocess.
 - **Everything else is an extension** (`src/ext.ts`): policy, extra tools, slash commands.
 
 Small core, so you can read it in an afternoon. Roughly 2000 lines of core code, no framework, no
@@ -50,7 +50,7 @@ dropping a PNG, JPEG, GIF or WebP file path attaches that file. Each shows in th
 `[Image #N]`; on Enter, the images whose placeholders are still in the text go with the message
 (up to 3.75 MB each). The model must take images: a text-only engine answers with an error.
 
-## The five tools
+## The six tools
 
 | tool | what it does |
 | --- | --- |
@@ -59,6 +59,7 @@ dropping a PNG, JPEG, GIF or WebP file path attaches that file. Each shows in th
 | `edit` | exact-substring edits, ambiguous matches refused, all-or-nothing |
 | `bash` | runs in its own process group; abort kills the whole group |
 | `search` | one tool for grep + glob + find: smart-case, .gitignore aware, token budgeted |
+| `todo` | the model's plan: the whole list each call (pending, in progress, done), shown in the side panel |
 
 `search` has three backends and no index: `rg` from `PATH`, a pinned ripgrep downloaded once to
 `~/.kinoko/bin`, or a pure-Bun fallback. `bun run scripts/probe-engine.ts` tells you what your local
@@ -104,6 +105,23 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 `examples/ext/` ships four: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
 `plan-mode.ts` (read-only), `web.ts` (`web_search` and `web_fetch`: no API key, Brave, DuckDuckGo
 then Bing, pages turned into readable text) and `hello.ts`.
+
+## The side panel
+
+On a window two thirds of the screen wide or more, the screen splits in two columns: the transcript
+on the left, and on the right, from the screen's top row down to the input's rule, the model's
+**plan** (the newest `todo` call: done, in progress, pending, with a progress bar) above the working
+tree's **changes** (every file that differs from HEAD, new files included, with its added and removed
+lines, read with git after each tool). The input and the status line keep the full width below both.
+While the column is on, `todo` calls get no block in the transcript: the column is where the plan is.
+
+Tile the window narrower and the column goes; widen it and it comes back. The window's share of the
+screen comes from the terminal itself (XTWINOPS `14;2t` and `15t`: foot, xterm, kitty...; 140 columns
+when it does not answer), and where the input sits on the screen from a cursor position request. The
+column is erased before anything scrolls, so the scrollback keeps only the transcript. One caveat of
+keeping the terminal's own scrollback: when the window gets narrower while the column is on, the
+terminal re-wraps the screen before kinoko hears of it; kinoko redraws the screen, but rows the
+re-wrap pushed into the scrollback keep pieces of the column.
 
 ## Config layers
 

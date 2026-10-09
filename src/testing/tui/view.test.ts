@@ -60,7 +60,7 @@ describe("live region", () => {
   test("finished history is NOT part of the region any more (it lives in the scrollback)", () => {
     const region = liveRegion(input({ viewportRows: 10 }));
     expect(region.lines.join("\n")).not.toContain("answer");
-    expect(Object.keys(region).toSorted()).toEqual(["col", "lines", "row"]);
+    expect(Object.keys(region).toSorted()).toEqual(["col", "lines", "row", "upper"]);
   });
 
   test("the open block renders above the editor, the thinking style is dim italic", () => {
@@ -272,6 +272,10 @@ describe("tool blocks", () => {
     expect(toolSummary("bash", { cmd: "ls  -la\n| wc" })).toBe("ls -la | wc");
     expect(toolSummary("search", { pattern: "foo", path: "src" })).toBe("foo in src");
     expect(toolSummary("mytool", { a: 1 })).toBe('{"a":1}');
+    // A todo call: how far the plan is and the step at hand, never its JSON.
+    const items = [{ text: "read", status: "done" }, { text: "write the parser", status: "in_progress" }, { text: "tests", status: "pending" }];
+    expect(toolSummary("todo", { items })).toBe("1/3 · write the parser");
+    expect(toolSummary("todo", { items: [{ text: "a", status: "done" }] })).toBe("1/1 · all done");
   });
 
   test("name in bold yellow, argument in bold white", () => {
@@ -305,5 +309,19 @@ describe("tool blocks", () => {
   test("the tool dot is yellow, like the name", () => {
     const region = liveRegion(input({ tool: { name: "bash", args: "ls", output: "", aborted: false } }));
     expect(region.lines[0]?.startsWith("\x1b[38;5;221m●")).toBe(true);
+  });
+});
+
+const strip = (s: string): string => s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
+
+describe("beside a side column", () => {
+  test("the streamed text takes tailCols; the rules, editor and status keep the full width; upper counts the rows above the rule", () => {
+    const r = liveRegion(input({ open: { kind: "assistant", text: "word ".repeat(20).trim(), gap: false }, tailCols: 30, viewportCols: 80, viewportRows: 30, place: "~/p" }));
+    const rows = r.lines.map(strip);
+    const rule = rows.findIndex((row) => row.startsWith("───"));
+    expect(r.upper).toBe(rule); // the streamed rows and the blank row before the rule
+    for (const row of rows.slice(0, rule)) expect(row.length).toBeLessThanOrEqual(28);
+    expect(rows[rule]!.length).toBe(78);
+    expect(rows.at(-1)).toContain("IDLE");
   });
 });

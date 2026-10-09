@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { Renderer } from "../../tui/render.ts";
+import { Renderer, reflowedUp } from "../../tui/render.ts";
 
 /** Collects every write, with a clock the test drives. */
 function harness(start = 0): { renderer: Renderer; out: string[]; tick: (ms: number) => boolean } {
@@ -128,5 +128,60 @@ describe("tui renderer", () => {
     renderer.flush();
     renderer.release();
     expect(out[1]).toBe("\x1b[2B\r\n\x1b[?25h");
+  });
+
+  test("8. after the window got narrower, the way up counts the rows the terminal re-wrapped", () => {
+    // Rows of 40 columns (plus the margin) in a terminal now 20 wide: 3 rows each.
+    const wide = "x".repeat(40);
+    expect(reflowedUp([wide, wide, "short"], 2, 0, 20)).toBe(6);
+    expect(reflowedUp([wide, "short"], 1, 30, 20)).toBe(4); // the cursor is on its row's second part
+    let cols = 80;
+    const out: string[] = [];
+    const renderer = new Renderer({ write: (text) => out.push(text), columns: () => cols, now: () => 1000 });
+    renderer.update({ lines: [wide, wide, "> "], row: 2, col: 2 });
+    renderer.flush();
+    cols = 20; // the user tiled the window to a quarter
+    renderer.update({ lines: ["> "], row: 0, col: 2 });
+    renderer.flush();
+    expect(out[1]).toStartWith(`${SYNC_ON}\x1b[6A\r\x1b[J`); // not just the 2 rows that were drawn
+    cols = 80; // wider again: nothing was re-wrapped, the plain way up
+    renderer.update({ lines: ["a", "> "], row: 1, col: 2 });
+    renderer.flush();
+    expect(out[2]).toStartWith(`${SYNC_ON}\r\x1b[J`);
+  });
+
+  test("9. the side column: from the screen's top row down beside the upper rows, once the position is known", () => {
+    const out: string[] = [];
+    let cols = 60;
+    let rows = 20;
+    const renderer = new Renderer({ write: (t) => out.push(t), columns: () => cols, rows: () => rows, now: () => 1000 });
+    const side = { col: 41, upper: 2, rows: (h: number) => Array.from({ length: h }, (_, i) => `S${i}`), key: "k", text: 36 };
+    const state = { lines: ["stream", "", "rule", "> ", "status"], row: 3, col: 2, side };
+    renderer.update(state);
+    renderer.flush();
+    expect(out[0]).not.toContain("S0"); // where the region is on the screen is not known yet
+    renderer.position(14); // the editor row (3) is on screen row 14: the region starts on row 11
+    renderer.update({ ...state, side: { ...side, key: "k2" } });
+    renderer.flush();
+    const frame = out.at(-1)!;
+    expect(frame).toContain("\x1b[1;41HS0"); // the column's first row: the screen's top
+    expect(frame).toContain("\x1b[12;41HS11"); // its last: beside the blank row above the rule (11 + 2 - 1)
+    expect(frame).not.toContain("S12");
+    expect(frame.endsWith("\x1b[14;4H\x1b[?2026l")).toBe(true); // the cursor back on the editor row
+
+    // Printing above: the column is erased first, so the rows that scroll away carry none of it.
+    renderer.printAbove("a long line of transcript text that wraps at the column");
+    const print = out.at(-1)!;
+    expect(print.indexOf("\x1b[1;41H\x1b[K")).toBeLessThan(print.indexOf("a long line"));
+    expect(print).toContain(" a long line of transcript text that \r\n wraps at the column"); // 36 columns beside it
+    expect(print).toContain("\x1b[16;4H"); // two rows printed: the region, and the cursor, two rows lower
+
+    // The window resized under it: the screen again from the top, from what was printed.
+    cols = 50;
+    rows = 18;
+    renderer.flush();
+    const redraw = out.at(-1)!;
+    expect(redraw).toContain("\x1b[H\x1b[2J");
+    expect(redraw).toContain("a long line of transcript text");
   });
 });

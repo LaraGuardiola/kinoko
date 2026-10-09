@@ -92,6 +92,12 @@ describe("tui key parser", () => {
     expect(names("\x1b[116;5u")).toEqual(["ctrl-t"]);
     expect(names("\x1b[118;5u")).toEqual(["ctrl-v"]);
     expect(names("\x16")).toEqual(["ctrl-v"]);
+    // The terminal's size answers (SIZE_QUERY): window and screen in pixels; others are not keys.
+    expect(parse("\x1b[4;814;1502t\x1b[5;1080;1920t")).toEqual([
+      { name: "size-report", size: { of: "window", width: 1502, height: 814 } },
+      { name: "size-report", size: { of: "screen", width: 1920, height: 1080 } },
+    ]);
+    expect(names("\x1b[8;24;80t")).toEqual(["unknown"]);
     expect(parse("\x1b[98;3u")).toEqual([{ name: "char", char: "b", alt: true }]);
   });
 

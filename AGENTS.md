@@ -1,7 +1,7 @@
 # Kinoko: agent rules
 
 Kinoko ("mushroom") is a tiny, fast, hackable coding-agent harness (CLI/TUI) in TypeScript on Bun.
-Pi-style: small core, five tools (read, write, edit, bash, search), everything else is an extension.
+Pi-style: small core, six tools (read, write, edit, bash, search, todo), everything else is an extension.
 
 ## How we work
 - The phased build is finished (`docs/phases/` is history, not a to-do list). We are now polishing and
@@ -48,9 +48,9 @@ src/main.ts        CLI entry, modes (tui | print | rpc)     src/args.ts  command
 src/types.ts       shared contracts (Message, Provider, Tool, StreamEvent...)
 src/loop.ts        Agent class: linear loop + abort/steer/followUp
 src/providers/     one file per wire protocol + models.json (data, not code)
-src/tools/         read, write, edit, bash, search, budget, tracker, registry
+src/tools/         read, write, edit, bash, search, todo, budget, tracker, registry
 src/context.ts     AGENTS.md / skills discovery      src/prompt.ts  system prompt builder
 src/session.ts     append-only JSONL (id + parentId)  src/compact.ts threshold compaction
 src/ext.ts         extension loader + event bus       src/config.ts  layered config
-src/tui/           raw-ANSI renderer, editor, markdown-lite, slash menu
+src/tui/           raw-ANSI renderer, editor, markdown-lite, slash menu, side panel (plan + git changes)
 src/testing/       the tests, same layout as src/ (src/testing/tui/app.test.ts tests src/tui/app.ts)
