@@ -321,12 +321,12 @@ describe("TUI app with the agent", () => {
           { type: "done", stop: "end", usage: { input: 1200, output: 40, cacheRead: 300 } },
         ],
       ],
-      { model: "qwen-local" },
+      { model: "/home/u/Downloads/qwen-local-Q4_K_M.gguf" },
     );
     h.press("hi\r");
     await settle(h.agent);
     const line = h.app.statusLine;
-    expect(line).toContain("qwen-local");
+    expect(line).toContain("IDLE\x1b[2m | \x1b[0mqwen-local-Q4_K_M\x1b[2m"); // the name, not the file path
     expect(line).toContain("1,240/1,000 tok 124%"); // input + output, and how full the window is
     expect(line).toContain("40 generated");
     expect(line).toContain("cache 25%");

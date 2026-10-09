@@ -8,6 +8,8 @@ Pi-style: small core, five tools (read, write, edit, bash, search), everything e
   finishing the project: bug fixes, rough edges, small features the user asks for.
 - Before starting: read this file and the latest entries of `docs/PROGRESS.md`.
 - Do only what was asked. If something was not asked for, do not build it.
+- Every change gets its own branch off main (`feat/...`, `fix/...`), even a small one. Commit there;
+  merge into main (`--no-ff`, "Merge branch '<name>': <what>") only when the user says so.
 - After finishing: run the checks below and append a short entry to `docs/PROGRESS.md`
   (what changed, what is NOT done, assumptions). If the change touches runtime behavior, rebuild and
   reinstall the binary (`bun run build && install -m 755 kinoko-out/kinoko ~/.local/bin/kinoko`):

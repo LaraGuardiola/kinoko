@@ -20,6 +20,7 @@ const PERSONA = [
 
 export interface PromptInput {
   cwd: string;
+  model: string; // the id as the engine knows it; shown as modelName()
   date: string; // frozen at session start; never refreshed mid-session
   tools: ToolSpec[];
   context: ContextFile[];
@@ -29,12 +30,22 @@ export interface PromptInput {
 export function buildSystemPrompt(input: PromptInput): string {
   const blocks: string[] = [PERSONA.join("\n")];
   blocks.push(`Tools: ${input.tools.map((t) => t.name).join(", ") || "none"}.`);
-  blocks.push(`Date: ${input.date}\nWorking directory: ${input.cwd}`);
+  // Without it a model asked what it is guesses, then goes looking (ps, config files) and confabulates.
+  blocks.push(`Date: ${input.date}\nModel: ${modelName(input.model)} (Kinoko is the harness, this is the model)\nWorking directory: ${input.cwd}`);
   const context = renderContext(input.context);
   if (context) blocks.push(context);
   const skills = renderSkills(input.skills);
   if (skills) blocks.push(`${skills}\nLoad a skill body with read only when its description matches the task.`);
   return blocks.join("\n\n");
+}
+
+/**
+ * A model id as people read it: llama.cpp names a model by its file path, so the directory, the
+ * file type and a shard suffix go ("/models/Qwen3.6-35B-Q4_K_M-00001-of-00002.gguf" -> "Qwen3.6-35B-Q4_K_M").
+ */
+export function modelName(id: string): string {
+  const file = id.split(/[/\\]/).at(-1) || id;
+  return file.replace(/\.(gguf|safetensors|bin|pt|onnx)$/i, "").replace(/-\d{5}-of-\d{5}$/, "");
 }
 
 /** The fixed part, exposed so a test can hold it to the ~40 line budget. */

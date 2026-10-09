@@ -29,6 +29,7 @@ import type { Agent, RunResult } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Session } from "../session.ts";
 import type { Image, Message } from "../types.ts";
+import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 
 
@@ -589,7 +590,7 @@ export class App {
         this.render();
         return true;
       case "model":
-        this.#print("system", `model: ${this.#model}  context: ${this.#window} tokens`);
+        this.#print("system", `model: ${modelName(this.#model)}  context: ${this.#window} tokens`);
         this.render();
         return true;
       case "compact": {
@@ -736,9 +737,9 @@ export class App {
       .then((saved) => {
         this.#saved = saved;
         if (page) this.#menu.refresh(page, redraw());
-        this.#marker = `removed ${entry.model} at ${hostOf(entry.baseUrl)}`;
+        this.#marker = `removed ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}`;
       })
-      .catch(() => (this.#marker = `could not remove ${entry.model}`))
+      .catch(() => (this.#marker = `could not remove ${modelName(entry.model)}`))
       .finally(() => this.render());
   }
 
@@ -763,9 +764,9 @@ export class App {
         ?.save(entry)
         .then((saved) => {
           this.#saved = saved;
-          this.#marker = `model: ${entry.model} at ${host}, saved`;
+          this.#marker = `model: ${modelName(entry.model)} at ${host}, saved`;
         })
-        .catch(() => (this.#marker = `model: ${entry.model} at ${host} (could not save it)`))
+        .catch(() => (this.#marker = `model: ${modelName(entry.model)} at ${host} (could not save it)`))
         .finally(() => this.render());
     };
     const asking = servedPage(host, undefined, keep);
@@ -790,7 +791,7 @@ export class App {
     }
     this.#agent.setModel(entry.model);
     this.#model = entry.model;
-    this.#marker = `model: ${entry.model}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`;
+    this.#marker = `model: ${modelName(entry.model)}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`;
     if (entry.contextWindow) this.#useWindow(entry.contextWindow);
     else this.#learnWindow(entry);
   }
@@ -814,7 +815,7 @@ export class App {
         const window = served.find((s) => s.id === entry.model)?.contextWindow;
         if (this.#model !== entry.model) return; // another pick came first
         if (!window) {
-          this.#marker = `model: ${entry.model} (its context window is unknown: keeping ${this.#window.toLocaleString("en-US")})`;
+          this.#marker = `model: ${modelName(entry.model)} (its context window is unknown: keeping ${this.#window.toLocaleString("en-US")})`;
           return;
         }
         this.#useWindow(window);

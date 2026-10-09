@@ -9,6 +9,7 @@
 import { fenceOpener, isClosing, renderMarkdown } from "./markdown.ts";
 import { ANSI, clipAnsi, wrapAnsi } from "./style.ts";
 import { pulseDot, toolHead } from "./tools.ts";
+import { modelName } from "../prompt.ts";
 
 export { wrapAnsi } from "./style.ts";
 
@@ -269,7 +270,7 @@ export function statusLine(parts: {
   const full = parts.contextWindow > 0 ? ` ${Math.round((used / parts.contextWindow) * 100)}%` : "";
   return [
     parts.running ? "RUNNING" : "IDLE",
-    parts.model,
+    modelName(parts.model),
     `${used.toLocaleString("en-US")}/${parts.contextWindow.toLocaleString("en-US")} tok${full}`,
     `${parts.tokens.output.toLocaleString("en-US")} generated`,
     `cache ${cache}%`,
