@@ -17,6 +17,8 @@ export interface Config {
   // Hard cap on thinking tokens per reply (openai-compat `reasoning_budget_tokens`, as Strata and
   // llama.cpp-style engines read it). Unset: the engine's own default. Effort alone is only a hint.
   thinkingBudget?: number;
+  // The configured provider's name in the models menu (strata, llama.cpp); its host when unset.
+  label?: string;
 }
 
 export const DEFAULTS: Config = {
@@ -42,6 +44,7 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "maxOutputTokens",
   "reasoningEffort",
   "thinkingBudget",
+  "label",
 ]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);
 const PROVIDERS: ReadonlySet<string> = new Set(["openai-compat", "anthropic"]);
@@ -115,6 +118,7 @@ export interface SavedModel {
   apiKey: string;
   provider?: ProviderName; // openai-compat when absent
   contextWindow?: number;
+  label?: string; // the provider's name in the models menu (strata, llama.cpp); its host when absent
 }
 
 /** Models added from the TUI live in ~/.kinoko/models.json; it holds API keys, so it is 0600. */
@@ -152,4 +156,23 @@ export async function saveModel(entry: SavedModel, home = process.env.HOME ?? ""
 /** Removes the entry with this endpoint and model, and returns the list as now saved. */
 export async function removeModel(entry: SavedModel, home = process.env.HOME ?? ""): Promise<SavedModel[]> {
   return writeSaved((await loadSavedModels(home)).filter((m) => !sameModel(m, entry)), home);
+}
+
+/**
+ * The entry a resumed session starts with: the model it last switched to, with the key and provider
+ * of a known entry at that endpoint (the configured one first). Undefined when the session never
+ * switched, or switched to an endpoint no longer known (then the configured model stands).
+ */
+export function resumeModel(
+  last: { model: string; baseUrl: string; contextWindow?: number } | undefined,
+  known: SavedModel[],
+): SavedModel | undefined {
+  if (last === undefined) return undefined;
+  const exact = known.find((m) => m.baseUrl === last.baseUrl && m.model === last.model);
+  const sameEndpoint = exact ?? known.find((m) => m.baseUrl === last.baseUrl);
+  if (sameEndpoint === undefined) return undefined;
+  // Another model's window says nothing about this one: only the session's or this model's own.
+  const { contextWindow: _theirs, ...endpoint } = sameEndpoint;
+  const contextWindow = last.contextWindow ?? exact?.contextWindow;
+  return { ...endpoint, model: last.model, ...(contextWindow ? { contextWindow } : {}) };
 }

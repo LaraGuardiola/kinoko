@@ -94,6 +94,9 @@ export function sessionLines(facts: SessionFacts, width: number): string[] {
   const results = all.filter((m) => m.role === "tool").length;
   const sent = all.reduce((n, m) => n + (m.usage?.input ?? 0), 0);
   const generated = all.reduce((n, m) => n + (m.usage?.output ?? 0), 0);
+  // How much of what was sent the engine read from its cache instead of processing it again.
+  const cached = all.reduce((n, m) => n + (m.usage?.cacheRead ?? 0), 0);
+  const hit = sent > 0 ? `${Math.round((cached / sent) * 100)}% (${num(cached)} of ${num(sent)} sent)` : "nothing sent yet";
   const full = facts.window > 0 ? ` (${Math.round((facts.context / facts.window) * 100)}%)` : "";
   const rows = [
     ["File", facts.path],
@@ -103,6 +106,7 @@ export function sessionLines(facts: SessionFacts, width: number): string[] {
     ["Tools", `${num(calls)} calls, ${num(results)} results`],
     ["Context", `${num(facts.context)} / ${num(facts.window)}${full}`],
     ["Tokens", `${num(sent)} sent, ${num(generated)} generated`],
+    ["Cached", hit],
   ];
   const source = ["| Session | |", "|---|---|", ...rows.map(([k, v]) => `| ${cell(k ?? "")} | ${cell(v ?? "")} |`)];
   return renderTable(source, width, (text) => text);

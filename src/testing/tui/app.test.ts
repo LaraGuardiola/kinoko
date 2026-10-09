@@ -328,7 +328,7 @@ describe("TUI app with the agent", () => {
     const line = h.app.statusLine;
     expect(line).toContain("IDLE\x1b[2m | \x1b[0mqwen-local-Q4_K_M\x1b[2m"); // the name, not the file path
     expect(line).toContain("1,240/1,000 tok 124%"); // input + output, and how full the window is
-    expect(line).toContain("40 generated");
+    expect(line).toContain("↑ 1,200 ↓ 40"); // sent, generated
     expect(line).toContain("cache 25%");
     expect(line.startsWith("IDLE")).toBe(true); // level with the rows above, no extra margin
     expect(line).not.toContain("\x1b[7m"); // no inverse background on the state
@@ -358,7 +358,7 @@ describe("TUI app with the agent", () => {
     // Before the fix this read 3,450 (1,050 + 1,150 + 1,300) for a 1,300-token conversation.
     expect(h.app.statusLine).toContain("1,300/1,000 tok");
     // Generated is a session total: every round's output, thinking included.
-    expect(h.app.statusLine).toContain("200 generated");
+    expect(h.app.statusLine).toContain("↑ 3,300 ↓ 200");
     // The hit rate stays a session total: 2,100 cached of 3,300 sent.
     expect(h.app.statusLine).toContain("cache 64%");
   });
@@ -422,6 +422,22 @@ describe("TUI app with the agent", () => {
     const out = h.out.join("");
     expect(out).toContain("\x1b[48;2;50;30;36m"); // the failed-tool red
     expect(h.screen()).toContain("HTTP 500: image input is not supported");
+  });
+
+  test("8h. a resumed session's status line keeps its totals: sent, generated and the cache hit rate", async () => {
+    const h = await harness([]);
+    h.app.replay(
+      [
+        { id: "1", role: "user", content: "hi" },
+        { id: "2", role: "assistant", content: "a", usage: { input: 1000, output: 100, cacheRead: 0 } },
+        { id: "3", role: "user", content: "more" },
+        { id: "4", role: "assistant", content: "b", usage: { input: 1400, output: 52, cacheRead: 1100 } },
+      ],
+      "resumed",
+    );
+    expect(h.app.statusLine).toContain("1,452/1,000 tok");
+    expect(h.app.statusLine).toContain("↑ 2,400 ↓ 152");
+    expect(h.app.statusLine).toContain("cache 46%");
   });
 
   test("8d. the startup panel is followed by a blank row before the first prompt", async () => {
@@ -638,6 +654,8 @@ describe("slash menu", () => {
     h.press("go\r");
     await settle(h.agent);
     expect(h.calls()[0]?.model).toBe("beta");
+    // The session remembers it, so a resume starts with beta.
+    expect((await Session.load(h.session.path)).model?.model).toBe("beta");
   });
 
   test("Esc on a page goes back to the root; Esc on the root closes it and empties the input", async () => {
@@ -692,7 +710,7 @@ function host(served: Served[]) {
   return { models, connected, saved, remote };
 }
 
-/** Opens /models and goes down to its last item, "+ add model". */
+/** Opens /models and goes up to its last item, "+ add provider". */
 async function toAdd(h: Harness): Promise<void> {
   h.press("/models\r");
   await new Promise((r) => setTimeout(r, 10));
@@ -700,22 +718,26 @@ async function toAdd(h: Harness): Promise<void> {
   h.press("\r");
 }
 
-describe("adding a model", () => {
+describe("adding a provider", () => {
   const ESC = "\x1b";
 
-  test("endpoint, key, then a model the endpoint serves: switched to, saved, used by the next request", async () => {
+  test("name, endpoint, key, then a model it serves: switched to, saved under its name, used next", async () => {
     const remote = host([{ id: "remote-coder", contextWindow: 64_000 }]);
     const h = await harness([], { models: [], modelsHost: remote.models });
     await toAdd(h);
-    expect(h.app.menuPage).toBe("Add model · 1/3");
+    expect(h.app.menuPage).toBe("Add provider · 1/4");
+    h.press("\r"); // a provider needs a name: nothing typed stays here
+    expect(h.app.menuPage).toBe("Add provider · 1/4");
+    h.press("llama.cpp\r");
+    expect(h.app.menuPage).toBe("Add provider · 2/4");
     h.press("127.0.0.1:9999/v1\r");
-    expect(h.app.menuPage).toBe("Add model · 2/3");
+    expect(h.app.menuPage).toBe("Add provider · 3/4");
     h.press("sk-secret\r");
     await new Promise((r) => setTimeout(r, 10));
-    expect(h.app.menuPage).toBe("Add model · 3/3 · 127.0.0.1:9999");
+    expect(h.app.menuPage).toBe("Add provider · 4/4 · 127.0.0.1:9999");
     h.press("\r");
     await new Promise((r) => setTimeout(r, 10));
-    const entry = { model: "remote-coder", baseUrl: "http://127.0.0.1:9999/v1", apiKey: "sk-secret", contextWindow: 64_000 };
+    const entry = { model: "remote-coder", baseUrl: "http://127.0.0.1:9999/v1", apiKey: "sk-secret", contextWindow: 64_000, label: "llama.cpp" };
     expect(remote.connected).toEqual([entry]);
     expect(remote.saved).toEqual([entry]);
     expect(h.app.statusLine).toContain("remote-coder");
@@ -729,21 +751,23 @@ describe("adding a model", () => {
     const remote = host([]);
     const h = await harness([], { models: [], modelsHost: remote.models });
     await toAdd(h);
+    h.press("box\r");
     h.press("box:8080\r");
     h.press("\r"); // no key
     await new Promise((r) => setTimeout(r, 10));
-    expect(h.app.menuPage).toBe("Add model · 3/3 · box:8080");
+    expect(h.app.menuPage).toBe("Add provider · 4/4 · box:8080");
     await new Promise((r) => setTimeout(r, 40));
     h.app.render();
     expect(frame(h).join("\n")).toContain("did not list its models"); // it answered, with nothing
     h.press("my-model\r");
     await new Promise((r) => setTimeout(r, 10));
-    expect(remote.saved).toEqual([{ model: "my-model", baseUrl: "http://box:8080", apiKey: "", contextWindow: undefined }]);
+    expect(remote.saved).toEqual([{ model: "my-model", baseUrl: "http://box:8080", apiKey: "", contextWindow: undefined, label: "box" }]);
   });
 
   test("the key is shown as dots; Esc at any step goes back to the root", async () => {
     const h = await harness([], { models: [], modelsHost: host([]).models });
     await toAdd(h);
+    h.press("x\r");
     h.press("x\r");
     h.press("abc");
     await new Promise((r) => setTimeout(r, 40));
@@ -772,9 +796,9 @@ describe("removing a saved model", () => {
     const h = await harness([], { models: [], modelsHost: models });
     h.press("/models\r");
     await new Promise((r) => setTimeout(r, 10));
-    // Items: test-model (configured, fixed), coder (removable), + add model.
+    // By provider name: 127.0.0.1:8081 (coder, removable), local:8081 (test-model, configured), + add provider.
     h.press("\x1b[3~"); // Del on the configured one: nothing
-    h.press("\x1b[B"); // down to "coder"
+    h.press("\x1b[A"); // up to "coder", over the header
     h.press("\x1b[3~");
     await new Promise((r) => setTimeout(r, 40));
     h.app.render();
@@ -791,7 +815,7 @@ describe("removing a saved model", () => {
   });
 });
 
-test("adding a model at an endpoint where nothing answers says so before asking for an id", async () => {
+test("adding a provider at an endpoint where nothing answers says so before asking for an id", async () => {
   const models: ModelsHost = {
     endpoint: "http://local:8081/v1",
     saved: [],
@@ -806,7 +830,8 @@ test("adding a model at an endpoint where nothing answers says so before asking 
   const h = await harness([], { models: [], modelsHost: models });
   h.press("/models\r");
   await new Promise((r) => setTimeout(r, 10));
-  h.press("\x1b[A\r"); // "+ add model"
+  h.press("\x1b[A\r"); // "+ add provider"
+  h.press("local\r");
   h.press("127.0.0.1:8080/v1\r");
   h.press("\r");
   await new Promise((r) => setTimeout(r, 50));
