@@ -14,7 +14,7 @@ const DURATION_MS = 10_000;
 const FRAME_MS = 33; // ~30fps
 
 const SENTENCES = [
-  "Reading the phase spec now.",
+  "Reading the project notes now.",
   "The interesting part is the state machine:",
   "",
   "- `delta.reasoning_content` becomes a thinking event",

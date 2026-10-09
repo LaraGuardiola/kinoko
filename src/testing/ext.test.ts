@@ -59,6 +59,15 @@ describe("extension loader", () => {
     expect(log).toEqual(["user:a-first.ts", "user:z-second.ts"]);
   });
 
+  test("1b. run from $HOME, the shared ext dir is loaded once", async () => {
+    const home = `${ROOT}/same-home`;
+    rmSync(home, { recursive: true, force: true });
+    writeOrderProbe(`${home}/.kinoko/ext`, "web.ts", "user");
+    const { ext } = extBus();
+    const loaded = await loadExtensions(ext, { cwd: home, home: home });
+    expect(loaded.map((p) => p.slice(p.lastIndexOf("/") + 1))).toEqual(["web.ts"]);
+  });
+
   test("2. a broken extension is skipped, the good ones still load", async () => {
     const home = `${ROOT}/broken-home`;
     const cwd = `${ROOT}/broken-project`;

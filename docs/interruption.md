@@ -4,7 +4,7 @@ The user must always be able to cut the model, queue guidance for it, and never 
 The AbortSignal of a run reaches: the provider fetch, every tool, every subprocess (own process
 group), ripgrep, and compaction.
 
-## Agent semantics (Phase 2 implements and tests EVERY item)
+## Agent semantics (every item is implemented and tested)
 1. ABORT: one AbortController per run. abort() while idle is a no-op. After an abort the agent is
    "idle" within 100ms and reusable for the next prompt().
 2. ABORT mid-stream: keep the partial assistant text as a message with stop "aborted" and NO tool calls.
@@ -21,9 +21,9 @@ group), ripgrep, and compaction.
    editor. Nothing the user typed is lost.
 7. Tools of one batch run one at a time, in the order the model called them (a read after a write sees the write).
 8. A thrown tool error becomes a tool message "ERROR: ...", never a crash.
-9. Aborting during compaction leaves the history unchanged (Phase 5).
+9. Aborting during compaction leaves the history unchanged.
 
-## Key bindings (Phase 9)
+## Key bindings
 - Enter while IDLE: send as prompt.
 - Enter while RUNNING: steer. Shown in a "queued" area above the editor, tagged [steer].
 - Alt+Enter while RUNNING: followUp, tagged [follow-up]. Alt+Enter while idle: same as Enter.
@@ -33,5 +33,5 @@ group), ripgrep, and compaction.
   one-line "Interrupted" marker.
 - Alt+Up: pull the last queued message back into the editor.
 
-## RPC (Phase 10)
+## RPC
 Commands `abort`, `steer`, `follow_up` must work while a run is in progress.

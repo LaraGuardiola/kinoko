@@ -87,6 +87,16 @@ describe("context discovery", () => {
     expect(renderSkills([])).toBe("");
   });
 
+  test("4b. skills are unique: cwd == home scans once, and a project skill shadows a home one", async () => {
+    rmSync(ROOT, { recursive: true, force: true });
+    write(`${HOME}/.agents/skills/omarchy/SKILL.md`, "---\nname: omarchy\n---\n");
+    expect((await discoverSkills(HOME, HOME)).map((s) => s.name)).toEqual(["omarchy"]);
+
+    write(`${ROOT}/proj/.agents/skills/mine/SKILL.md`, "---\nname: omarchy\ndescription: project\n---\n");
+    const skills = await discoverSkills(`${ROOT}/proj`, HOME);
+    expect(skills.map((s) => s.description)).toEqual(["project"]);
+  });
+
   test("5. frontmatter reads name and description, quoting included", () => {
     expect(frontmatter('---\nname: "quoted"\ndescription: \'single\'\n---\nbody')).toEqual({
       name: "quoted",

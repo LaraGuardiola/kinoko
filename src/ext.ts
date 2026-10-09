@@ -5,6 +5,7 @@
 
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import { uniqueDirs } from "./context.ts";
 import type { Message, ProviderRequest, Tool } from "./types.ts";
 import type { RunResult } from "./loop.ts";
 
@@ -162,7 +163,7 @@ function isBlock(value: unknown): value is ToolCallBlock {
  */
 export async function loadExtensions(k: Extensions, opts: LoadOptions): Promise<string[]> {
   const home = opts.home ?? process.env.HOME ?? "";
-  const dirs = [join(home, ".kinoko", "ext"), join(opts.cwd, ".kinoko", "ext")];
+  const dirs = uniqueDirs([join(home, ".kinoko", "ext"), join(opts.cwd, ".kinoko", "ext")]);
   const paths: string[] = [];
   for (const dir of dirs) {
     for (const name of listTs(dir)) paths.push(join(dir, name));

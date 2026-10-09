@@ -4,13 +4,15 @@ Kinoko ("mushroom") is a tiny, fast, hackable coding-agent harness (CLI/TUI) in 
 Pi-style: small core, five tools (read, write, edit, bash, search), everything else is an extension.
 
 ## How we work
-- The project is built in phases. Task specs live in `docs/phases/NN-*.md`.
-- Do ONLY the phase you are given. Never start the next one.
-- Before starting: read this file and `docs/PROGRESS.md`, and list `src/`.
-- After finishing: run the checks below, append a short entry to `docs/PROGRESS.md`
-  (done / NOT done / assumptions), then reply with: files created, how to run, what is missing. Stop.
-- Do not ask questions. Pick sensible defaults and state assumptions in one line.
-- If something is not in the phase spec, do not build it.
+- The phased build is finished (`docs/phases/` is history, not a to-do list). We are now polishing and
+  finishing the project: bug fixes, rough edges, small features the user asks for.
+- Before starting: read this file and the latest entries of `docs/PROGRESS.md`.
+- Do only what was asked. If something was not asked for, do not build it.
+- After finishing: run the checks below and append a short entry to `docs/PROGRESS.md`
+  (what changed, what is NOT done, assumptions). If the change touches runtime behavior, rebuild and
+  reinstall the binary (`bun run build && install -m 755 kinoko-out/kinoko ~/.local/bin/kinoko`):
+  the `kinoko` command on this machine is that binary, not the source.
+- Pick sensible defaults and state assumptions in one line instead of stopping to ask.
 
 ## Hard rules
 - Bun + strict TypeScript. ZERO runtime dependencies.

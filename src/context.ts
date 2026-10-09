@@ -1,8 +1,8 @@
 // Context discovery: project instructions and the skills index.
 // Both are read ONCE at session start and then never change, so the prompt prefix stays byte-stable.
 
-import { readdirSync } from "node:fs";
-import { basename, dirname, join, parse } from "node:path";
+import { readdirSync, realpathSync } from "node:fs";
+import { basename, dirname, join, parse, resolve } from "node:path";
 
 export interface ContextFile {
   path: string;
@@ -45,8 +45,27 @@ export async function discoverSkills(cwd: string, home?: string): Promise<SkillE
   const roots = [join(cwd, SKILLS_REL), join(home ?? process.env.HOME ?? "", SKILLS_REL)].filter(
     (root) => !root.startsWith("/.agents"), // no home configured
   );
-  const paths = roots.flatMap(skillPathsOf);
-  return (await Promise.all(paths.map(skillOf))).filter((s) => s !== undefined);
+  const paths = uniqueDirs(roots).flatMap(skillPathsOf);
+  const found = (await Promise.all(paths.map(skillOf))).filter((s) => s !== undefined);
+  const seen = new Set<string>();
+  return found.filter((s) => !seen.has(s.name) && seen.add(s.name)); // a project skill shadows a home one
+}
+
+/** Directories deduped by real path, first wins: run from $HOME, project and user dirs are one. */
+export function uniqueDirs(dirs: string[]): string[] {
+  const seen = new Set<string>();
+  return dirs.filter((dir) => {
+    const real = realOrResolved(dir);
+    return !seen.has(real) && seen.add(real);
+  });
+}
+
+function realOrResolved(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
 }
 
 /** Every `<root>/<name>/SKILL.md` path, sorted, so the index order is stable. */

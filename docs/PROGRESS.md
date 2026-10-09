@@ -1,5 +1,8 @@
 # Progress
 
+One entry per finished change: what is done, what is NOT done, assumptions.
+Phases 1-10 built the core; everything after them is polish.
+
 ## Phase 1: skeleton, shared types, provider, print mode, lint ✅ DONE
 
 Created all files specified in the phase spec:
@@ -389,3 +392,8 @@ Deferred, for whenever an Anthropic model is actually needed:
 - `examples/ext/web.test.ts` stays next to its example: an example is copied to `~/.kinoko/ext/` on its own, and its test travels with it.
 - AGENTS.md: the test-location rule and the architecture map say so.
 - `bun run check` passes (286 tests, the same count as before the move).
+
+## Unique skills and extensions; out of the phases — DONE
+- Run from `$HOME`, the project dirs (`<cwd>/.agents/skills`, `<cwd>/.kinoko/ext`) are the user dirs, so every skill and extension was listed twice. `uniqueDirs` (context.ts) dedupes the scanned dirs by real path (symlinks included), and skills are unique by name, a project skill shadowing a home one. Same-named extensions in different dirs still both load (different files, different code).
+- AGENTS.md: the phased build is over; the workflow is now polish, with a rebuild of `~/.local/bin/kinoko` after runtime changes (the user saw the old duplicates because the installed binary predated the fix). Phase references dropped from `docs/interruption.md` and `docs/engines/strata.md`; the stale root `PROGRESS.md` (an early phase-1 copy of this file) removed.
+- Tests: cwd == home for skills and extensions, project skill shadowing (context.test, ext.test). `bun run check` passes (288 tests). Rebuilt and installed the binary.

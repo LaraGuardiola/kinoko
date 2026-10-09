@@ -1,7 +1,7 @@
 # Strata (local inference engine) with Kinoko
 
 Strata exposes the same kind of API as llama.cpp, so Kinoko needs NO new provider: the existing
-`openai-compat` provider (Phase 1) is the integration. Only configuration and a few details change.
+`openai-compat` provider is the integration. Only configuration and a few details change.
 
 ## Config (`~/.kinoko/config.json` or `./.kinoko/config.json`)
 { "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any", "model": "qwen3.8-flash-next-coder-iq1_m-120k",
@@ -27,7 +27,7 @@ Strata exposes the same kind of API as llama.cpp, so Kinoko needs NO new provide
   => Kinoko never sends two provider requests at once (compaction included), and an aborted request
   must really free the engine, otherwise the next request queues behind a "zombie" generation.
 - The FIRST message of a chat is read in full (~1 min per 30,000 tokens); follow-up messages start in
-  seconds. => the prompt prefix is precious: keep history append-only and byte-stable (see Phase 5).
+  seconds. => the prompt prefix is precious: keep history append-only and byte-stable.
 - Thinking is selectable: off / low / medium / high ("reasoning effort"). Off is fastest.
 - Typical speed on a 12 GB card: ~50-90 tokens/s writing, ~1,600-2,600 tokens/s reading the prompt.
   The first token can take many seconds on a long prompt: NEVER use short request timeouts.
