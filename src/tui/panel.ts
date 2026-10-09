@@ -1,6 +1,7 @@
-// The side panel: the model's plan on top, the working tree's changes below, in a column on the
-// right of the live region, on a background a step lighter than the terminal's. It shows only when
-// the window has room for it (two thirds of the screen or more), and goes as soon as it does not.
+// The side panel: the model's plan and the working tree's changes, side by side in a band above the
+// input, on a background a step lighter than the terminal's. It shows only when the window has room
+// for it (two thirds of the screen or more), and goes as soon as it does not. The input, the rules
+// and the status line stay where they always are: the band only pushes the transcript up.
 // Pure: the App gathers the facts, this lays them out.
 
 import { ORANGE } from "./menu.ts";
@@ -21,21 +22,10 @@ export const WIDE_COLS = 140;
 /** Under this the left column would be too cramped, whatever the share. */
 const MIN_COLS = 100;
 
-export interface Region {
-  lines: string[];
-  row: number;
-  col: number;
-}
-
 /** True when the panel has room: the window's share of the screen if known, else its columns. */
 export function wideEnough(cols: number, share: number | undefined): boolean {
   if (cols < MIN_COLS) return false;
   return share === undefined ? cols >= WIDE_COLS : share >= WIDE_SHARE - 0.005;
-}
-
-/** The panel's columns: about a third of the window, within reason. */
-export function panelWidth(cols: number): number {
-  return Math.max(32, Math.min(56, Math.round(cols * 0.3)));
 }
 
 export interface PanelFacts {
@@ -44,53 +34,46 @@ export interface PanelFacts {
   changes: FileChange[] | undefined;
 }
 
-/** The rows the panel would like: padding, both sections, the rule between them. */
-export function panelHeight(facts: PanelFacts, width: number): number {
-  const inner = width - 2;
-  return fixedRows(facts) + Math.max(1, planRows(facts.todos, inner).length) + Math.max(1, changeRows(facts.changes, inner).length);
-}
+/** Between the two columns: a thin rule with a column of air each side. */
+const DIVIDER = ` ${RULE}│${ANSI.reset} `;
 
-/** Padding top and bottom, two headers, the rule between the sections, and the progress bar once there is a plan. */
-function fixedRows(facts: PanelFacts): number {
-  return facts.todos.length > 0 ? 6 : 5;
+/** The two columns' widths inside `inner`: the plan gets a little more, its lines are longer. */
+export function columns(inner: number): [number, number] {
+  const plan = Math.round((inner - 3) * 0.55);
+  return [plan, inner - 3 - plan];
 }
 
 /**
- * Exactly `height` rows, each `width` columns on the panel background. When both sections do not
- * fit, each gets about half, the plan keeping the item in progress in view and the changes their
- * first files; a "… N more" row says what was left out.
+ * The band: `width` columns, at most `maxRows` rows (padding included), the plan on the left and
+ * the changes on the right, each column cut to the room with a "… N more" row (the plan keeping
+ * its first unfinished item in view).
  */
-export function panelRows(facts: PanelFacts, width: number, height: number): string[] {
+export function panelBand(facts: PanelFacts, width: number, maxRows: number): string[] {
   const inner = width - 2;
-  const plan = planRows(facts.todos, inner);
-  const changes = changeRows(facts.changes, inner);
-  const [planRoom, changeRoom] = splitRoom(plan.length, changes.length, Math.max(2, height - fixedRows(facts)));
-  const rows = [
-    "",
-    planHeader(facts.todos, inner),
-    ...(facts.todos.length > 0 ? [progressBar(facts.todos, inner)] : []),
-    ...fitPlan(plan, facts.todos, planRoom, inner),
-    `${RULE}${"─".repeat(inner)}${ANSI.reset}`,
-    changesHeader(facts.changes, inner),
-    ...fitList(changes, changeRoom, (n) => `${ANSI.dim}… ${n} more file${n === 1 ? "" : "s"}${ANSI.reset}`),
+  const [planWidth, changesWidth] = columns(inner);
+  const plan = planRows(facts.todos, planWidth);
+  const changes = changeRows(facts.changes, changesWidth);
+  const bar = facts.todos.length > 0 ? 1 : 0;
+  // Each column: its header (and the plan's bar), then its rows; padding above and below the band.
+  const want = Math.max(1 + bar + plan.length, 1 + changes.length);
+  const room = Math.max(1, Math.min(want, maxRows - 2));
+  const left = [
+    planHeader(facts.todos, planWidth),
+    ...(bar ? [progressBar(facts.todos, planWidth)] : []),
+    ...fitPlan(plan, facts.todos, Math.max(1, room - 1 - bar), planWidth),
   ];
-  while (rows.length < height) rows.push("");
-  return rows.slice(0, height).map((row) => paint(row, inner));
+  const right = [
+    changesHeader(facts.changes, changesWidth),
+    ...fitList(changes, Math.max(1, room - 1), (n) => `${ANSI.dim}… ${n} more file${n === 1 ? "" : "s"}${ANSI.reset}`),
+  ];
+  const body = Array.from({ length: room }, (_, i) => `${cell(left[i] ?? "", planWidth)}${DIVIDER}${cell(right[i] ?? "", changesWidth)}`);
+  return ["", ...body, ""].map((row) => paint(row, inner));
 }
 
-/**
- * The live region with the panel on its right: the left column keeps everything it had (editor,
- * status, streaming text), the panel runs the full height beside it, both anchored to the bottom.
- */
-export function besidePanel(left: Region, panel: string[], leftWidth: number, gap = 2): Region {
-  const height = Math.max(left.lines.length, panel.length);
-  const lead = height - left.lines.length;
-  const lines = Array.from({ length: height }, (_, i) => {
-    const l = i < lead ? "" : (left.lines[i - lead] ?? "");
-    const pad = " ".repeat(Math.max(0, leftWidth - visibleLength(l)));
-    return `${l}${pad}${" ".repeat(gap)}${panel[i - (height - panel.length)] ?? ""}`;
-  });
-  return { lines, row: left.row + lead, col: left.col };
+/** One column's row, clipped and padded to its width, so the divider stays straight. */
+function cell(content: string, width: number): string {
+  const fitted = clipAnsi(content, width);
+  return `${fitted}${" ".repeat(Math.max(0, width - visibleLength(fitted)))}`;
 }
 
 // ---- the plan ----
@@ -119,15 +102,6 @@ function planRows(todos: Todo[], inner: number): string[] {
     const lines = wrapWords(todo.text, Math.max(1, inner - 2));
     return lines.map((line, i) => `${i === 0 ? mark : " "} ${style}${line}${ANSI.reset}`);
   });
-}
-
-/** Rows for each section: all they need when both fit; else a section that needs less than half gets it, the other the rest. */
-export function splitRoom(plan: number, changes: number, room: number): [number, number] {
-  if (plan + changes <= room) return [plan, changes];
-  const half = Math.ceil(room / 2);
-  if (plan <= half) return [plan, room - plan];
-  if (changes <= room - half) return [room - changes, changes];
-  return [half, room - half];
 }
 
 /** The plan cut to `room` rows around the first unfinished item, so the work at hand stays seen. */

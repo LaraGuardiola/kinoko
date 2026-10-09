@@ -1,14 +1,16 @@
-// The side panel's state: what the App tells it (the terminal's size reports, the model's todo
+// The panel's state: what the App tells it (the terminal's size reports, the model's todo
 // calls, a resumed history) and what it fetches itself (the working tree's changes, asynchronously,
 // one git run at a time). panel.ts draws it.
 
 import type { Message, ToolCall } from "../types.ts";
 import { gitChanges } from "./changes.ts";
 import type { FileChange } from "./changes.ts";
-import { besidePanel, panelHeight, panelRows, panelWidth, wideEnough } from "./panel.ts";
-import type { Region } from "./panel.ts";
+import { panelBand, wideEnough } from "./panel.ts";
 import { TODO_TOOL, latestTodos, todosOf } from "./todos.ts";
 import type { Todo } from "./todos.ts";
+
+/** The share of the window's rows the band may take at most. */
+const PANEL_SHARE = 0.4;
 
 export type ChangesSource = (signal: AbortSignal) => Promise<FileChange[] | undefined>;
 
@@ -90,19 +92,13 @@ export class SidePanel {
   }
 
   /**
-   * The live region with the panel beside it. `build` lays out the left column for a given width
-   * (the App's own region, narrowed); `rows` caps the height, as the region must stay shorter than
-   * the terminal.
+   * The band for a window `cols` wide and `rows` tall, or nothing when it has no room. It takes at
+   * most PANEL_SHARE of the rows, so the streaming text above it keeps some too.
    */
-  region(cols: number, rows: number | undefined, build: (leftCols: number) => Region): Region {
-    const width = panelWidth(cols);
-    const gap = 2;
-    // The renderer keeps a column of margin each side: the two columns share what is left.
-    const leftCols = cols - width - gap;
-    const left = build(leftCols);
-    const facts = { todos: this.#todos, changes: this.#changes };
-    const want = Math.max(left.lines.length, panelHeight(facts, width));
-    const height = rows === undefined ? want : Math.min(rows, want);
-    return besidePanel(left, panelRows(facts, width, height), leftCols - 2, gap);
+  band(cols: number | undefined, rows: number | undefined): string[] {
+    if (!this.visible(cols) || cols === undefined) return [];
+    const most = Math.max(6, Math.floor((rows ?? 24) * PANEL_SHARE));
+    // The renderer keeps a column of margin each side.
+    return panelBand({ todos: this.#todos, changes: this.#changes }, cols - 2, most);
   }
 }

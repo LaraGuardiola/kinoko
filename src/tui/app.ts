@@ -584,13 +584,6 @@ export class App {
 
   #state(): { lines: string[]; row: number; col: number } {
     const cols = this.#viewportCols;
-    // Wide enough: the plan and the changes in a column on the right, the rest narrowed beside it.
-    if (cols !== undefined && this.#side.visible(cols)) return this.#side.region(cols, this.#viewportRows, (left) => this.#region(left));
-    return this.#region(cols);
-  }
-
-  /** The live region for `cols` columns: the open block, the tool, the editor, the status... */
-  #region(cols: number | undefined): { lines: string[]; row: number; col: number } {
     // The block cursor may sit one column past the text, plus the renderer's margins.
     const editorWidth = Math.max(1, (cols ?? 80) - 3);
     const view = this.#editor.view(wrapTo(editorWidth));
@@ -610,6 +603,8 @@ export class App {
       place: this.#place,
       thinking: this.#thinking,
       menu: this.#menuRows(),
+      // Wide enough: the plan and the changes in a band above the input.
+      panel: this.#side.band(cols, this.#viewportRows),
       viewportRows: this.#viewportRows,
       viewportCols: cols,
     });

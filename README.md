@@ -108,10 +108,12 @@ then Bing, pages turned into readable text), `todo.ts` (the model's plan, see th
 
 ## The side panel
 
-On a window two thirds of the screen wide or more, a column on the right of the live region shows
+On a window two thirds of the screen wide or more, a band above the input shows, side by side,
 the model's **plan** (the newest call to the `todo` tool from `examples/ext/todo.ts`: done, in
 progress, pending, with a progress bar) and the working tree's **changes** (every file that differs
 from HEAD, new files included, with its added and removed lines, read with git after each tool).
+The input and the status line stay where they are: the band only pushes the transcript up, and
+takes at most 40% of the window's rows (a long plan keeps the step at hand in view).
 Tile the window narrower and it goes; widen it and it comes back. The window's share of the screen
 comes from the terminal itself (XTWINOPS `14;2t` and `15t`: foot, xterm, kitty...); a terminal that
 does not answer gets the panel from 140 columns.

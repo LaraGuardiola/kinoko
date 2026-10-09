@@ -311,3 +311,24 @@ describe("tool blocks", () => {
     expect(region.lines[0]?.startsWith("\x1b[38;5;221m●")).toBe(true);
   });
 });
+
+const strip = (s: string): string => s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
+
+describe("the plan and changes band", () => {
+  test("sits between the streamed text and the input; the input and status stay below it", () => {
+    const r = liveRegion(input({ open: { kind: "assistant", text: "streaming", gap: false }, panel: ["BAND1", "BAND2"], editorLines: ["typed"], editorRow: 0, editorCol: 2 }));
+    const rows = r.lines.map(strip);
+    const at = (text: string): number => rows.findIndex((row) => row.includes(text));
+    expect(at("streaming")).toBeLessThan(at("BAND1"));
+    expect(at("BAND2")).toBe(at("BAND1") + 1);
+    expect(at("BAND2")).toBeLessThan(at("typed"));
+    expect(rows[r.row]).toContain("typed"); // the cursor stays on the editor row
+  });
+
+  test("a short window drops the band before it drops any of the input", () => {
+    const band = Array.from({ length: 8 }, (_, i) => `BAND${i}`);
+    const r = liveRegion(input({ panel: band, viewportRows: 9, viewportCols: 80 }));
+    expect(r.lines.map(strip).some((row) => row.includes("BAND"))).toBe(false);
+    expect(r.lines.length).toBeLessThanOrEqual(9);
+  });
+});

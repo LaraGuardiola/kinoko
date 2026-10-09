@@ -71,6 +71,8 @@ export interface RegionInput {
   thinking?: string;
   /** The slash menu's rows, between the rule under the editor and the place line. */
   menu?: string[];
+  /** The plan and changes band (panel.ts), full width, between the streamed text and the input. */
+  panel?: string[];
   viewportRows?: number;
   viewportCols?: number;
 }
@@ -199,9 +201,10 @@ export function liveRegion(input: RegionInput): Region {
   const viewport = input.viewportRows;
   const width = input.viewportCols === undefined ? undefined : Math.max(1, input.viewportCols - 2);
   if (width !== undefined) tail = tail.flatMap((line) => wrapAnsi(line, width));
+  let band = input.panel ?? [];
   if (viewport === undefined || viewport < 2) {
-    const rows = [...tail, ...head, ...editor, ...foot];
-    return region(rows, tail.length + head.length + input.editorRow, input.editorCol, input.viewportCols);
+    const rows = [...tail, ...band, ...head, ...editor, ...foot];
+    return region(rows, tail.length + band.length + head.length + input.editorRow, input.editorCol, input.viewportCols);
   }
 
   // The region must stay shorter than the terminal, or its top scrolls out of reach and cannot be
@@ -212,13 +215,15 @@ export function liveRegion(input: RegionInput): Region {
     head = [];
     foot = [input.status];
   }
-  const editorRoom = Math.max(1, viewport - head.length - foot.length);
+  // The band goes first when rows run short: the input never gives way to it.
+  if (viewport < head.length + foot.length + band.length + 2) band = [];
+  const editorRoom = Math.max(1, viewport - head.length - foot.length - band.length);
   const editorStartAt = Math.max(0, Math.min(input.editorRow - editorRoom + 1, editor.length - editorRoom));
   const visibleEditor = editor.length <= editorRoom ? editor : editor.slice(editorStartAt, editorStartAt + editorRoom);
-  const contentRoom = Math.max(0, viewport - visibleEditor.length - head.length - foot.length);
+  const contentRoom = Math.max(0, viewport - visibleEditor.length - head.length - foot.length - band.length);
   const visibleTail = contentRoom === 0 ? [] : tail.slice(-contentRoom);
-  const rows = [...visibleTail, ...head, ...visibleEditor, ...foot];
-  const row = visibleTail.length + head.length + input.editorRow - editorStartAt;
+  const rows = [...visibleTail, ...band, ...head, ...visibleEditor, ...foot];
+  const row = visibleTail.length + band.length + head.length + input.editorRow - editorStartAt;
   return region(rows, row, input.editorCol, input.viewportCols);
 }
 
