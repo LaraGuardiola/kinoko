@@ -110,7 +110,6 @@ async function harness(
     rebuild: () => agent,
     clipboard: opts.clipboard,
     cwd: ROOT,
-    desktopCopy: async () => true, // never the real clipboard
   });
   return {
     app: app,
@@ -947,34 +946,5 @@ describe("@ file references", () => {
     h.press("\r"); // closed: Enter sends as usual
     await settle(h.agent);
     expect(h.calls()[0]!.messages.at(-1)!.content).toBe("@refdir/sub/");
-  });
-});
-
-const OSC52 = new RegExp(`${String.fromCharCode(27)}]52;c;([A-Za-z0-9+/=]*)${String.fromCharCode(7)}`, "g");
-
-describe("copying code", () => {
-  test("Alt+C copies the newest block without line numbers; again, the one before; any other key starts over", async () => {
-    const answer = "Two:\n```ts\nconst a = 1;\nconst b = 2;\n```\nand\n```bash\nbun test\n```";
-    const h = await harness([[{ type: "text", delta: answer }, { type: "done", stop: "end" }]]);
-    h.press("show me\r");
-    await settle(h.agent);
-    const copies = (): string[] =>
-      h.out.flatMap((chunk) => [...chunk.matchAll(OSC52)].map((m) => Buffer.from(m[1]!, "base64").toString()));
-    h.press("\x1bc"); // Alt+C, legacy encoding
-    expect(copies()).toEqual(["bun test"]);
-    expect(h.app.marker).toBe("copied Bash, 1 line (block 2 of 2) · alt+c again for the one before");
-    h.press("\x1b[99;3u"); // Alt+C, kitty encoding: the one before
-    expect(copies().at(-1)).toBe("const a = 1;\nconst b = 2;");
-    expect(h.app.marker).toStartWith("copied TypeScript, 2 lines (block 1 of 2)");
-    h.press("x"); // anything else: the next Alt+C is the newest again
-    h.press("\x1bc");
-    expect(copies().at(-1)).toBe("bun test");
-    expect(h.app.editorText).toBe("x"); // Alt+C typed nothing
-  });
-
-  test("with no code block yet it says so", async () => {
-    const h = await harness([]);
-    h.press("\x1bc");
-    expect(h.app.marker).toBe("no code block to copy yet");
   });
 });

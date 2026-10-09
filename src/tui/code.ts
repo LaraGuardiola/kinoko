@@ -1,6 +1,7 @@
 // A fenced code block drawn like an editor pane: a panel with its own background, the language's
-// full name in the top-right corner, a line-number gutter and syntax colours. Long lines soft-wrap
-// at token boundaries with a hanging indent, so the background never breaks.
+// full name in the top-right corner and syntax colours. Long lines soft-wrap at token boundaries
+// with a hanging indent, so the background never breaks. No line numbers and no margin before the
+// code: a terminal cannot make them unselectable, and a mouse copy must come out as the code itself.
 
 import { highlightLine } from "./highlight.ts";
 import type { HighlightState } from "./highlight.ts";
@@ -9,12 +10,7 @@ import { cells, visibleLength, wrapAnsi } from "./style.ts";
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const PANEL = `${ESC}48;2;36;38;52m`;
-const GUTTER = `${ESC}38;2;92;98;124m`;
 const LABEL = `${ESC}3m${ESC}38;2;150;156;182m`;
-const HINT = `${ESC}38;2;92;98;124m`;
-/** Next to the language: the key that copies a block without its line numbers. */
-export const COPY_HINT = "alt+c ⧉";
-const FG_OFF = `${ESC}39m`;
 
 export interface CodeOptions {
   lang: string;
@@ -28,29 +24,24 @@ export function codeBlock(lines: string[], opts: CodeOptions): string[] {
   const color = opts.color ?? true;
   if (!color) return lines.map((line) => `  ${line}`);
   const width = Math.max(12, opts.width);
-  const digits = String(Math.max(1, lines.length)).length;
-  // " 12  code…  ": one column of padding each side, the gutter, two spaces before the code.
+  // The label and blank rows keep a column of padding each side; code rows start at the very edge.
   const inner = width - 2;
-  const codeWidth = Math.max(4, inner - digits - 2);
+  const codeWidth = Math.max(4, width - 1);
   const name = languageName(opts.lang);
-  // The language sits in the top-right corner, a couple of columns in from the edge, then the copy key.
-  const tail = `${name === "" ? "" : `${LABEL}${name}${RESET}  `}${HINT}${COPY_HINT}${RESET}`;
-  const label = `${" ".repeat(Math.max(0, inner - visibleLength(tail) - 2))}${tail}`;
+  // The language sits in the top-right corner, a couple of columns in from the edge.
+  const label = name === "" ? "" : `${" ".repeat(Math.max(0, inner - name.length - 2))}${LABEL}${name}${RESET}`;
   // A padding row above the label keeps it off the pane's top edge.
   const rows: string[] = [row("", inner), row(label, inner)];
   let state: HighlightState = {};
-  lines.forEach((line, index) => {
+  for (const line of lines) {
     const lit = highlightLine(line, opts.lang, state);
     state = lit.state;
     // A continuation row hangs two columns deeper than the line's own indentation, like an editor's
     // soft wrap, so it reads as the same line and not as the next one.
     const indent = /^ */.exec(line)?.[0].length ?? 0;
     const pieces = wrapCode(lit.text, codeWidth, Math.min(indent + 2, Math.floor(codeWidth / 2)));
-    pieces.forEach((piece, n) => {
-      const number = n === 0 ? String(index + 1).padStart(digits) : " ".repeat(digits);
-      rows.push(row(`${GUTTER}${number}${FG_OFF}  ${piece}`, inner));
-    });
-  });
+    for (const piece of pieces) rows.push(codeRow(piece, width));
+  }
   rows.push(row("", inner));
   return rows;
 }
@@ -131,6 +122,12 @@ const NAMES: Record<string, string> = {
 export function languageName(lang: string): string {
   if (lang === "") return "";
   return NAMES[lang.toLowerCase()] ?? `${lang[0]?.toUpperCase() ?? ""}${lang.slice(1)}`;
+}
+
+/** A code row: the background from the panel's left edge, the code, then padding to `width`. */
+function codeRow(content: string, width: number): string {
+  const body = content.replaceAll(RESET, `${RESET}${PANEL}`);
+  return `${PANEL}${body}${" ".repeat(Math.max(0, width - visibleLength(content)))}${RESET}`;
 }
 
 /** One panel row: the background, a padding column each side, the content padded to `inner`. */

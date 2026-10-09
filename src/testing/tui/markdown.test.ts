@@ -78,17 +78,18 @@ describe("markdown: tables", () => {
 describe("markdown: code blocks", () => {
   const code = ["intro", "```ts", "const a = 1; // one", "function f() { return \"s\"; }", "```", "after"].join("\n");
 
-  test("an editor pane: language label, numbered lines, every row the full width", () => {
+  test("an editor pane: language label, code from the edge with no line numbers, every row the full width", () => {
     const out = rows(code, 40);
     expect(out[0]).toBe("intro");
     expect(out.at(-1)).toBe("after");
     const pane = out.slice(1, -1);
     for (const row of pane) expect(visibleLength(row)).toBe(40);
-    // A padding row, then the full language name top right and the copy key, two columns in from the edge.
+    // A padding row, then the full language name top right, two columns in from the edge.
     expect(strip(pane[0] ?? "").trim()).toBe("");
-    expect(strip(pane[1] ?? "")).toMatch(/ {10,}TypeScript {2}alt\+c ⧉ {3}$/);
-    expect(strip(pane[2] ?? "")).toStartWith(" 1  const a = 1;");
-    expect(strip(pane[3] ?? "")).toStartWith(" 2  function f()");
+    expect(strip(pane[1] ?? "")).toMatch(/ {20,}TypeScript {3}$/);
+    // Nothing before the code: a mouse copy is the code itself.
+    expect(strip(pane[2] ?? "")).toStartWith("const a = 1;");
+    expect(strip(pane[3] ?? "")).toStartWith("function f()");
     // The panel background is never cut mid-row by a full reset.
     for (const row of pane) expect(row.slice(0, -4)).not.toMatch(new RegExp(`${ESC}\\[0m(?!${ESC}\\[48)`));
   });
@@ -99,19 +100,20 @@ describe("markdown: code blocks", () => {
     expect(out).toContain(`${SYNTAX.keyword}const`);
   });
 
-  test("a run with no break opportunity is cut by column, with an empty gutter", () => {
+  test("a run with no break opportunity is cut by column, the rest hanging two columns in", () => {
     const out = rows(`\`\`\`\n${"x".repeat(50)}\n\`\`\``, 30);
-    expect(out).toHaveLength(6); // top padding, label row, three cut rows, bottom padding
+    expect(out).toHaveLength(5); // top padding, label row, two cut rows, bottom padding
     for (const row of out) expect(visibleLength(row)).toBe(30);
-    expect(strip(out[3] ?? "")).toStartWith("      x");
+    expect(strip(out[2] ?? "")).toStartWith("xxx");
+    expect(strip(out[3] ?? "")).toStartWith("  xxx");
   });
 
   test("long lines soft-wrap at token boundaries, hanging under their own indentation", () => {
     const line = '  const errors = messages.filter(m => m.role === "tool").some(m => m.text.startsWith("E"));';
     const out = rows(`\`\`\`ts\n${line}\n\`\`\``, 62).map(strip);
-    expect(out[2]?.trimEnd()).toBe(' 1    const errors = messages.filter(m => m.role === "tool")');
+    expect(out[2]?.trimEnd()).toBe('  const errors = messages.filter(m => m.role === "tool")');
     // The continuation hangs two columns past the line's indentation and starts at the dot.
-    expect(out[3]).toStartWith("        .some(m => m.text");
+    expect(out[3]).toStartWith("    .some(m => m.text");
     for (const row of out) expect(row.length).toBe(62);
   });
 
@@ -124,7 +126,7 @@ describe("markdown: code blocks", () => {
 
   test("a fence still streaming (no closing line) renders what has arrived", () => {
     const out = rows("```py\ndef f():", 30);
-    expect(strip(out[2] ?? "")).toStartWith(" 1  def f():");
+    expect(strip(out[2] ?? "")).toStartWith("def f():");
   });
 });
 

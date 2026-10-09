@@ -10,7 +10,6 @@ export type KeyAction =
   | "pull-queued" // Alt+Up
   | "toggle-tools" // Ctrl-T
   | "paste-image" // Ctrl-V
-  | "copy-code" // Alt+C
   | "submit" // Enter
   | "follow-up" // Alt+Enter while running
   | "editor" // everything the editor handles
@@ -30,7 +29,6 @@ export interface KeyContext {
  *   Ctrl-C         abort / clear the editor / quit on a second press
  *   Alt+Up         pull the last queued message back
  *   Ctrl-V         paste the clipboard image as [Image #N]
- *   Alt+C          copy the last code block (again: the one before)
  */
 export function actionFor(key: Key, ctx: KeyContext): KeyAction {
   switch (key.name) {
@@ -50,8 +48,6 @@ export function actionFor(key: Key, ctx: KeyContext): KeyAction {
       return "editor";
     case "up":
       return key.alt === true ? "pull-queued" : "editor";
-    case "char":
-      return key.alt === true && key.char === "c" ? "copy-code" : "editor";
     default:
       return "editor";
   }

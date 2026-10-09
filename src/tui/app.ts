@@ -32,8 +32,6 @@ import type { Image, Message } from "../types.ts";
 import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
-import { desktopCopy, osc52, snippets } from "./copy.ts";
-import { languageName } from "./code.ts";
 
 
 
@@ -65,8 +63,6 @@ export interface AppOptions {
   clipboard?: (signal: AbortSignal) => Promise<Image | string>;
   /** Where a pasted relative image path is read from. */
   cwd?: string;
-  /** The desktop clipboard tool for Alt+C (OSC 52 goes through `write`). Tests pass a fake. */
-  desktopCopy?: (text: string) => Promise<boolean>;
 }
 
 /** What the models page needs from outside the TUI: other endpoints, and somewhere to save them. */
@@ -110,9 +106,6 @@ export class App {
   #clipboard: (signal: AbortSignal) => Promise<Image | string>;
   #cwd: string;
   #files: FilePicker;
-  #write: (text: string) => void;
-  #desktopCopy: (text: string) => Promise<boolean>;
-  #copied: number | undefined; // Alt+C pressed in a row: how many blocks back the last copy was
 
   #running = false;
   // The block being streamed (thinking or answer).
@@ -151,8 +144,6 @@ export class App {
     this.#clipboard = opts.clipboard ?? ((signal) => clipboardImage(signal));
     this.#cwd = opts.cwd ?? process.cwd();
     this.#files = new FilePicker(this.#cwd, () => this.render());
-    this.#write = opts.write;
-    this.#desktopCopy = opts.desktopCopy ?? ((text) => desktopCopy(text));
     this.#agent.on((e) => this.#onAgentEvent(e));
     this.#refreshPlace();
   }
@@ -246,8 +237,6 @@ export class App {
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
     if (this.#menuKey(key)) return;
     if (this.#fileKey(key)) return;
-    // Alt+C walks back through the blocks only while pressed in a row; any other key starts over.
-    if (!(key.name === "char" && key.alt === true && key.char === "c")) this.#copied = undefined;
     const action = actionFor(key, {
       running: this.#running || this.#agent.state === "running",
       editorEmpty: this.#editor.empty,
@@ -278,9 +267,6 @@ export class App {
         return;
       case "paste-image":
         void this.#pasteImage();
-        return;
-      case "copy-code":
-        this.#copyCode();
         return;
       case "editor": {
         if (key.name === "paste" && this.#pastedImage(key.char ?? "")) return;
@@ -377,29 +363,6 @@ export class App {
   #addImage(image: Image | string): void {
     if (typeof image === "string") this.#marker = `Image not attached: ${image}`;
     else this.#editor.insert(`${this.#images.add(image)} `);
-    this.render();
-  }
-
-  /**
-   * Alt+C: the newest code block, as the model wrote it, goes to the clipboard; pressed again
-   * right away, the one before, and so on (wrapping back to the newest).
-   */
-  #copyCode(): void {
-    const all = snippets(this.#agent.messages);
-    if (all.length === 0) {
-      this.#marker = "no code block to copy yet";
-      this.render();
-      return;
-    }
-    const back = this.#copied === undefined ? 0 : (this.#copied + 1) % all.length;
-    const block = all[all.length - 1 - back]!;
-    this.#copied = back;
-    this.#write(osc52(block.code));
-    void this.#desktopCopy(block.code);
-    const lines = block.code.split("\n").length;
-    const what = languageName(block.lang) || "code";
-    const more = all.length > 1 ? " · alt+c again for the one before" : "";
-    this.#marker = `copied ${what}, ${lines} line${lines === 1 ? "" : "s"} (block ${all.length - back} of ${all.length})${more}`;
     this.render();
   }
 

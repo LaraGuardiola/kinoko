@@ -72,7 +72,6 @@ const KEYS: Array<[string, string]> = [
   ["Ctrl-D", "Quit when the input is empty"],
   ["Ctrl-T", "Expand or collapse tool output"],
   ["Ctrl-V", "Paste the clipboard image as [Image #N] (also drop an image file)"],
-  ["Alt+C", "Copy the last code block, without line numbers; again for the one before"],
   ["Alt+Up", "Pull the last queued message back into the input"],
   ["Ctrl-P / Ctrl-N", "Previous / next history entry"],
   ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],

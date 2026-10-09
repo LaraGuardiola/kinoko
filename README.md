@@ -35,7 +35,6 @@ an `AbortSignal`, nothing blocks the event loop, and the keyboard always wins:
 | `Alt+Up` | — | pull the newest queued message back into the editor |
 | `Ctrl-T` | expand or collapse tool output | same |
 | `Ctrl-V` | paste the clipboard image as `[Image #N]` | same |
-| `Alt+C` | copy the last code block as written (no line numbers); again for the one before | same |
 | `@` | reference a file: lists the directory as you type (Tab/Enter completes) | same |
 | `Ctrl-P` / `Ctrl-N` | previous / next history entry | same |
 | `Shift+Enter` / `Ctrl-J` / `Ctrl-O` | newline inside the editor | same |
