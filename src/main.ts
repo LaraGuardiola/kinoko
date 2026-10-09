@@ -1,5 +1,6 @@
-import { DEFAULTS, loadConfig, loadSavedModels, removeModel, saveModel, thinkingLabel } from "./config.ts";
+import { DEFAULTS, loadConfig, loadSavedModels, removeModel, resumeModel, saveModel, thinkingLabel } from "./config.ts";
 import type { SavedModel } from "./config.ts";
+import type { Provider } from "./types.ts";
 import { listModels, openaiCompat } from "./providers/openai-compat.ts";
 import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
@@ -233,14 +234,20 @@ const configured: SavedModel = {
   provider: config.provider,
   contextWindow: config.contextWindow,
 };
+const saved = await loadSavedModels();
+const connect = (entry: SavedModel): Provider =>
+  (entry.provider === "anthropic" ? anthropic : openaiCompat)({ ...providerOptions, baseUrl: entry.baseUrl, apiKey: entry.apiKey });
+// A resumed session starts with the model it last switched to (endpoint and window too), not the default.
+const start = resumeModel(session.model, [configured, ...saved]) ?? configured;
+const startWindow = start.contextWindow ?? config.contextWindow;
 const agent = new Agent({
-  provider: (config.provider === "anthropic" ? anthropic : openaiCompat)(providerOptions),
-  model: config.model,
+  provider: connect(start),
+  model: start.model,
   system,
   tools: [...defaultTools(), ...ext.tools()],
   maxTurns: config.maxTurns,
   maxCost: config.maxCost,
-  contextWindow: config.contextWindow,
+  contextWindow: startWindow,
   session,
   extensions: ext,
 });
@@ -258,16 +265,16 @@ if (tui) {
   const app = new App({
     agent: agent,
     write: (text) => term.write(text),
-    model: config.model,
-    contextWindow: config.contextWindow,
+    model: start.model,
+    contextWindow: startWindow,
     thinking: thinkingLabel(config.reasoningEffort, config.thinkingBudget),
     thinkingProfile: THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name,
     // A configured budget says the engine takes one: then the menu's profiles send theirs.
     budgets: config.thinkingBudget !== undefined,
     models: {
-      endpoint: config.baseUrl,
-      saved: [configured, ...(await loadSavedModels())],
-      connect: (entry) => (entry.provider === "anthropic" ? anthropic : openaiCompat)({ ...providerOptions, baseUrl: entry.baseUrl, apiKey: entry.apiKey }),
+      endpoint: start.baseUrl,
+      saved: [configured, ...saved],
+      connect: connect,
       discover: listModels,
       // The configured model stays first: it is always there to go back to, and cannot be removed.
       save: async (entry) => [configured, ...(await saveModel(entry))],
@@ -300,7 +307,7 @@ if (tui) {
 } else if (mode === "rpc") {
   const rpc = new Rpc({
     agent: agent,
-    model: config.model,
+    model: start.model,
     write: (text) => process.stdout.write(text),
     // stdin closed: the client is gone, so the run and the process end here.
     onClose: () => {

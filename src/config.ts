@@ -153,3 +153,22 @@ export async function saveModel(entry: SavedModel, home = process.env.HOME ?? ""
 export async function removeModel(entry: SavedModel, home = process.env.HOME ?? ""): Promise<SavedModel[]> {
   return writeSaved((await loadSavedModels(home)).filter((m) => !sameModel(m, entry)), home);
 }
+
+/**
+ * The entry a resumed session starts with: the model it last switched to, with the key and provider
+ * of a known entry at that endpoint (the configured one first). Undefined when the session never
+ * switched, or switched to an endpoint no longer known (then the configured model stands).
+ */
+export function resumeModel(
+  last: { model: string; baseUrl: string; contextWindow?: number } | undefined,
+  known: SavedModel[],
+): SavedModel | undefined {
+  if (last === undefined) return undefined;
+  const exact = known.find((m) => m.baseUrl === last.baseUrl && m.model === last.model);
+  const sameEndpoint = exact ?? known.find((m) => m.baseUrl === last.baseUrl);
+  if (sameEndpoint === undefined) return undefined;
+  // Another model's window says nothing about this one: only the session's or this model's own.
+  const { contextWindow: _theirs, ...endpoint } = sameEndpoint;
+  const contextWindow = last.contextWindow ?? exact?.contextWindow;
+  return { ...endpoint, model: last.model, ...(contextWindow ? { contextWindow } : {}) };
+}

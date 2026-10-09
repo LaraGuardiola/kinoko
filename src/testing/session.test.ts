@@ -79,6 +79,17 @@ describe("session log", () => {
     expect(reloaded.activeBranch()[0]!.images).toEqual(images);
   });
 
+  test("2c. the last model switched to survives a resume; a session that never switched has none", async () => {
+    const session = await Session.create({ cwd: CWD, model: "m", home: HOME });
+    expect(session.model).toBeUndefined();
+    await session.setModel({ model: "a", baseUrl: "http://x/v1" });
+    await session.setModel({ model: "b", baseUrl: "http://y/v1", contextWindow: 65536 });
+    await session.append({ id: "u1", role: "user", content: "hi" });
+    const reloaded = await Session.load(session.path);
+    expect(reloaded.model).toEqual({ model: "b", baseUrl: "http://y/v1", contextWindow: 65536 });
+    expect(reloaded.activeBranch().map((m) => m.id)).toEqual(["u1"]);
+  });
+
   test("3. a resumed aborted run keeps every tool call paired with exactly one result", async () => {
     rmSync(HOME, { recursive: true, force: true });
     // Aborting inside the first tool cuts it off mid-run, so the second call never starts.

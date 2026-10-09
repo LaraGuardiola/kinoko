@@ -22,7 +22,15 @@ type Record =
   | { type: "session"; meta: SessionMeta }
   | { type: "message"; message: Message }
   | { type: "head"; id: string }
-  | { type: "compaction"; summary: string; keepFrom: string };
+  | { type: "compaction"; summary: string; keepFrom: string }
+  | ({ type: "model" } & SessionModel);
+
+/** The model a session switched to (the models menu), so a resume picks up where it was. */
+export interface SessionModel {
+  model: string;
+  baseUrl: string;
+  contextWindow?: number;
+}
 
 export interface SessionOptions {
   cwd: string;
@@ -97,6 +105,7 @@ export class Session {
   #log: Message[] = []; // append order, the whole history
   #head: string | undefined;
   #compaction: { summary: string; keepFrom: string } | undefined;
+  #model: SessionModel | undefined;
 
   private constructor(path: string, meta: SessionMeta) {
     this.path = path;
@@ -145,6 +154,16 @@ export class Session {
     await this.#write({ type: "head", id });
   }
 
+  /** Records a model switch; the last one is what a resume starts with. */
+  async setModel(model: SessionModel): Promise<void> {
+    await this.#write({ type: "model", ...model });
+  }
+
+  /** The last model switched to; undefined when the session kept the one it started with. */
+  get model(): SessionModel | undefined {
+    return this.#model;
+  }
+
   /** Nothing was ever said in it: not worth keeping, nor offering to resume. */
   get empty(): boolean {
     return this.#log.length === 0;
@@ -191,6 +210,9 @@ export class Session {
       this.#head = record.id;
     } else if (record.type === "compaction") {
       this.#compaction = { summary: record.summary, keepFrom: record.keepFrom };
+    } else if (record.type === "model") {
+      const { type: _type, ...model } = record;
+      this.#model = model;
     }
   }
 }

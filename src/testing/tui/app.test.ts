@@ -328,7 +328,7 @@ describe("TUI app with the agent", () => {
     const line = h.app.statusLine;
     expect(line).toContain("IDLE\x1b[2m | \x1b[0mqwen-local-Q4_K_M\x1b[2m"); // the name, not the file path
     expect(line).toContain("1,240/1,000 tok 124%"); // input + output, and how full the window is
-    expect(line).toContain("40 generated");
+    expect(line).toContain("↑ 1,200 ↓ 40"); // sent, generated
     expect(line).toContain("cache 25%");
     expect(line.startsWith("IDLE")).toBe(true); // level with the rows above, no extra margin
     expect(line).not.toContain("\x1b[7m"); // no inverse background on the state
@@ -358,7 +358,7 @@ describe("TUI app with the agent", () => {
     // Before the fix this read 3,450 (1,050 + 1,150 + 1,300) for a 1,300-token conversation.
     expect(h.app.statusLine).toContain("1,300/1,000 tok");
     // Generated is a session total: every round's output, thinking included.
-    expect(h.app.statusLine).toContain("200 generated");
+    expect(h.app.statusLine).toContain("↑ 3,300 ↓ 200");
     // The hit rate stays a session total: 2,100 cached of 3,300 sent.
     expect(h.app.statusLine).toContain("cache 64%");
   });
@@ -422,6 +422,22 @@ describe("TUI app with the agent", () => {
     const out = h.out.join("");
     expect(out).toContain("\x1b[48;2;50;30;36m"); // the failed-tool red
     expect(h.screen()).toContain("HTTP 500: image input is not supported");
+  });
+
+  test("8h. a resumed session's status line keeps its totals: sent, generated and the cache hit rate", async () => {
+    const h = await harness([]);
+    h.app.replay(
+      [
+        { id: "1", role: "user", content: "hi" },
+        { id: "2", role: "assistant", content: "a", usage: { input: 1000, output: 100, cacheRead: 0 } },
+        { id: "3", role: "user", content: "more" },
+        { id: "4", role: "assistant", content: "b", usage: { input: 1400, output: 52, cacheRead: 1100 } },
+      ],
+      "resumed",
+    );
+    expect(h.app.statusLine).toContain("1,452/1,000 tok");
+    expect(h.app.statusLine).toContain("↑ 2,400 ↓ 152");
+    expect(h.app.statusLine).toContain("cache 46%");
   });
 
   test("8d. the startup panel is followed by a blank row before the first prompt", async () => {
@@ -638,6 +654,8 @@ describe("slash menu", () => {
     h.press("go\r");
     await settle(h.agent);
     expect(h.calls()[0]?.model).toBe("beta");
+    // The session remembers it, so a resume starts with beta.
+    expect((await Session.load(h.session.path)).model?.model).toBe("beta");
   });
 
   test("Esc on a page goes back to the root; Esc on the root closes it and empties the input", async () => {

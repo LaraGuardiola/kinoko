@@ -168,6 +168,12 @@ export class App {
     this.#images.startAfter(messages.reduce((n, m) => n + (m.images?.length ?? 0), 0));
     const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
     if (usage) this.#tokens.context = usage.input + usage.output;
+    // The session's totals so far: what was sent, read from the cache and generated.
+    for (const m of messages) {
+      this.#tokens.input += m.usage?.input ?? 0;
+      this.#tokens.cacheRead += m.usage?.cacheRead ?? 0;
+      this.#tokens.output += m.usage?.output ?? 0;
+    }
     this.render();
   }
 
@@ -794,6 +800,13 @@ export class App {
     this.#marker = `model: ${modelName(entry.model)}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`;
     if (entry.contextWindow) this.#useWindow(entry.contextWindow);
     else this.#learnWindow(entry);
+    this.#recordModel(entry, entry.contextWindow);
+  }
+
+  /** The session remembers the switch (and the window, once known), so a resume starts with it. */
+  #recordModel(entry: SavedModel, contextWindow: number | undefined): void {
+    const record = { model: entry.model, baseUrl: entry.baseUrl, ...(contextWindow ? { contextWindow } : {}) };
+    void this.#session?.setModel(record).catch(() => undefined);
   }
 
   #useWindow(window: number): void {
@@ -819,6 +832,7 @@ export class App {
           return;
         }
         this.#useWindow(window);
+        this.#recordModel(entry, window);
         const saved = this.#saved.some((m) => m.baseUrl === entry.baseUrl && m.model === entry.model && !host.fixed(m));
         if (saved) this.#saved = await host.save({ ...entry, contextWindow: window });
       })

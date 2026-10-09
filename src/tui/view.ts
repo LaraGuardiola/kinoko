@@ -272,7 +272,8 @@ export function statusLine(parts: {
     parts.running ? "RUNNING" : "IDLE",
     modelName(parts.model),
     `${used.toLocaleString("en-US")}/${parts.contextWindow.toLocaleString("en-US")} tok${full}`,
-    `${parts.tokens.output.toLocaleString("en-US")} generated`,
+    // Up: sent to the model (every request's whole prompt). Down: what it generated.
+    `↑ ${parts.tokens.input.toLocaleString("en-US")} ↓ ${parts.tokens.output.toLocaleString("en-US")}`,
     `cache ${cache}%`,
     parts.cost > 0 ? `$${parts.cost.toFixed(4)}` : "",
   ]
