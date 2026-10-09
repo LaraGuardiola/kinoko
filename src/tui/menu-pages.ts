@@ -75,6 +75,7 @@ const KEYS: Array<[string, string]> = [
   ["Alt+Up", "Pull the last queued message back into the input"],
   ["Ctrl-P / Ctrl-N", "Previous / next history entry"],
   ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],
+  ["@", "Reference a file: lists the directory as you type; arrows, Tab or Enter to complete"],
 ];
 
 /** /help: one table for the keys, one for the menu (built from ROOT, so it cannot fall behind). */

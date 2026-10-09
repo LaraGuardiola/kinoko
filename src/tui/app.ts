@@ -31,6 +31,7 @@ import type { Session } from "../session.ts";
 import type { Image, Message } from "../types.ts";
 import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
+import { FilePicker } from "./files.ts";
 
 
 
@@ -104,6 +105,7 @@ export class App {
   #images = new ImageRegistry();
   #clipboard: (signal: AbortSignal) => Promise<Image | string>;
   #cwd: string;
+  #files: FilePicker;
 
   #running = false;
   // The block being streamed (thinking or answer).
@@ -141,6 +143,7 @@ export class App {
     this.#placeOf = opts.place;
     this.#clipboard = opts.clipboard ?? ((signal) => clipboardImage(signal));
     this.#cwd = opts.cwd ?? process.cwd();
+    this.#files = new FilePicker(this.#cwd, () => this.render());
     this.#agent.on((e) => this.#onAgentEvent(e));
     this.#refreshPlace();
   }
@@ -233,6 +236,7 @@ export class App {
   handleKey(key: Key): void {
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
     if (this.#menuKey(key)) return;
+    if (this.#fileKey(key)) return;
     const action = actionFor(key, {
       running: this.#running || this.#agent.state === "running",
       editorEmpty: this.#editor.empty,
@@ -632,7 +636,31 @@ export class App {
     if (page) return pageRows(page, this.#menu.index, this.#menu.text, this.#menu.armed);
     const items = this.#rootItems() ?? [];
     this.#menu.clamp(items.length);
-    return items.length === 0 ? [] : listRows(items, this.#menu.index);
+    if (items.length > 0) return listRows(items, this.#menu.index);
+    this.#files.sync(this.#editor.text, this.#editor.cursor);
+    if (!this.#files.open) return [];
+    const empty = this.#files.entries === undefined ? "reading…" : "no matches";
+    return listRows(this.#files.items(), this.#files.index, `Files · ${this.#files.where}`, empty, undefined, "Tab or Enter to complete · Esc to close");
+  }
+
+  /** The keys the "@" file picker takes while it is open: arrows, Tab/Enter to complete, Esc. */
+  #fileKey(key: Key): boolean {
+    this.#files.sync(this.#editor.text, this.#editor.cursor);
+    if (!this.#files.open || key.alt) return false;
+    if (key.name === "up" || key.name === "down") {
+      this.#files.move(key.name === "up" ? -1 : 1);
+    } else if (key.name === "tab" || key.name === "enter") {
+      const edit = this.#files.accept();
+      if (edit === undefined) return key.name === "tab"; // nothing to complete: Enter sends as usual
+      const text = this.#editor.text;
+      this.#editor.setText(text.slice(0, edit.start) + edit.text + text.slice(edit.end), edit.start + edit.text.length);
+    } else if (key.name === "escape") {
+      this.#files.dismiss();
+    } else {
+      return false;
+    }
+    this.render();
+    return true;
   }
 
   /** The keys an open menu takes; false hands the key to the rest of the app. */

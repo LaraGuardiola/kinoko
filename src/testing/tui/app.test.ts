@@ -911,3 +911,40 @@ describe("pasted images", () => {
     expect(sent.images).toEqual([shot]);
   });
 });
+
+describe("@ file references", () => {
+  test("@ lists the directory under the input; arrows and Enter complete, then Enter sends", async () => {
+    mkdirSync(`${ROOT}/refdir/sub`, { recursive: true });
+    writeFileSync(`${ROOT}/refdir/notes.md`, "x");
+    const h = await harness([[{ type: "done", stop: "end" }]]);
+    h.press("check @refdir/");
+    await tick();
+    h.app.render();
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    const rows = frame(h).join("\n");
+    expect(rows).toContain("Files · refdir/");
+    expect(rows).toContain("sub/");
+    h.press("\x1b[B"); // down to notes.md
+    h.press("\r"); // completes, does not send
+    expect(h.app.editorText).toBe("check @refdir/notes.md ");
+    expect(h.agent.state).toBe("idle");
+    h.press("please\r");
+    await settle(h.agent);
+    expect(h.calls()[0]!.messages.at(-1)!.content).toBe("check @refdir/notes.md please");
+  });
+
+  test("Tab opens a directory in place; Esc closes the list and keeps the text", async () => {
+    mkdirSync(`${ROOT}/refdir/sub`, { recursive: true });
+    const h = await harness([]);
+    h.press("@refdir/s");
+    await tick();
+    h.press("\t");
+    expect(h.app.editorText).toBe("@refdir/sub/");
+    h.press("\x1b");
+    expect(h.app.editorText).toBe("@refdir/sub/");
+    h.press("\r"); // closed: Enter sends as usual
+    await settle(h.agent);
+    expect(h.calls()[0]!.messages.at(-1)!.content).toBe("@refdir/sub/");
+  });
+});

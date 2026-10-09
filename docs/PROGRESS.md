@@ -432,3 +432,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Menu: `MenuItem.header` rows are never selected, the arrows step over them (`Menu.move(delta, count, skip)`), the count leaves them out, Enter on one does nothing.
 - The user's own setup got names: `label: "strata"` in `~/.kinoko/config.json`, `"llama.cpp"` on the :8085 entry of `~/.kinoko/models.json` (backups: `*.bak`).
 - Tests: models-menu (grouping, order, picks, unnamed provider, loading title), menu (headers), app (the four add steps, removal and window learning with headers), config (label). `bun run check` passes (312 tests).
+
+## feat/reference-files: @ file references (branch feat/reference-files)
+- Typing `@` (at the start or after a space, so an email is left alone) opens a list under the input, where the slash menu goes: the directory being typed (`@` the cwd, `@src/tu` lists `src/` narrowed by "tu"; `~/` and absolute paths work), names starting with the text first, directories first (with a `/`), dotfiles only when the text starts with a dot, at most 200. Arrows move, Tab or Enter completes: a directory in place (the list follows into it), a file as `@path ` (the space closes it). Esc closes it for that word; Enter with nothing to complete sends as usual. Typing a path by hand works too.
+- `src/tui/files.ts`: `atQuery`, `splitQuery`, `narrow` (pure) and `FilePicker` (async `readdir`, cached per directory, read again on each fresh `@`). The reference is sent as text; the model reads the file with its read tool (no contents inlined).
+- `/help` and the README keys table list `@`.
+- Tests: files.test (word detection, narrowing, the picker with a fake lister: completion, caching, Esc), app.test (list on screen, Enter completes without sending, Tab into a directory, Esc). `bun run check` passes (317 tests). Rebuilt and installed the binary from this branch.
