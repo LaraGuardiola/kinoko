@@ -34,6 +34,8 @@ import type { Image, Message } from "../types.ts";
 import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
+import { compactingNote } from "./sprout.ts";
+import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
 
@@ -123,6 +125,7 @@ export class App {
   #pending: { name: string; args: string } | undefined; // a call the model is still writing
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
+  #compacting: CompactProgress | undefined; // a summary on its way: the note animates
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
@@ -279,6 +282,13 @@ export class App {
       case "pull-queued":
         this.#pullQueued();
         return;
+      case "send-now":
+        // The reply being streamed is cut and the steer goes in now; nothing to cut: it waits.
+        if (!this.#agent.sendNow()) this.render();
+        return;
+      case "cancel-queued":
+        this.#takeBack(this.#agent.unqueue("all"));
+        return;
       case "submit":
         void this.#submit();
         return;
@@ -388,10 +398,15 @@ export class App {
 
   /** Alt+Up: pull the newest queued message back into the editor. */
   #pullQueued(): void {
-    const last = this.#queued.pop();
-    if (last === undefined) return;
+    this.#takeBack(this.#agent.unqueue("last"));
+  }
+
+  /** Queued messages taken back from the agent go into the editor, before what is typed there. */
+  #takeBack(texts: string[]): void {
+    if (texts.length === 0) return;
     const current = this.#editor.text.trim();
-    this.#editor.setText(current === "" ? last.text : `${last.text}\n${current}`);
+    const back = texts.join("\n");
+    this.#editor.setText(current === "" ? back : `${back}\n${current}`);
     this.render();
   }
 
@@ -447,8 +462,14 @@ export class App {
       case "delivered":
         this.#echoUser(e.text);
         return;
+      case "compacting":
+        this.#compacting = { phase: e.phase, done: e.done, total: e.total ?? this.#compacting?.total };
+        this.render();
+        return;
       case "compacted":
-        this.#marker = "compacted: full prompt re-read expected";
+        this.#compacting = undefined;
+        if (e.keep >= 0) this.#marker = `compacted · ${e.keep} message${e.keep === 1 ? "" : "s"} kept as they were`;
+        this.render();
         return;
       case "run_end":
         this.#finishRun(e.reason, e.dropped, e.detail);
@@ -625,8 +646,10 @@ export class App {
       // Until the result is in, the bullet fades in and out (the render timer repaints each step).
       pulse: this.#tool || this.#pending !== undefined ? pulseLevel(Date.now()) : undefined,
       toolGap: this.#printedAny,
-      marker: this.#marker,
-      markerAlert: this.#marker.startsWith("Interrupted"),
+      // While compacting: mushrooms and how far it is (the clock moves them on each frame).
+      marker: this.#compacting ? compactingNote(this.#compacting, Date.now()) : this.#marker,
+      markerAlert: !this.#compacting && this.#marker.startsWith("Interrupted"),
+      markerCream: this.#compacting !== undefined || this.#marker.startsWith("compacted"),
       queued: this.#queued,
       editorLines: view.lines,
       editorRow: view.row,
@@ -657,7 +680,7 @@ export class App {
         return true;
       case "compact": {
         const done = await this.#agent.compactNow();
-        this.#marker = done ? "compacted: full prompt re-read expected" : "nothing to compact yet";
+        if (!done) this.#marker = "nothing to compact yet";
         this.render();
         return true;
       }

@@ -73,6 +73,8 @@ const KEYS: Array<[string, string]> = [
   ["Ctrl-T", "Expand or collapse tool output"],
   ["Ctrl-V", "Paste the clipboard image as [Image #N] (also drop an image file)"],
   ["Alt+Up", "Pull the last queued message back into the input"],
+  ["Alt+X", "Send the waiting steer now: cuts the reply being written (thinking included)"],
+  ["Alt+C", "Cancel the queued messages: they go back into the input"],
   ["Ctrl-P / Ctrl-N", "Previous / next history entry"],
   ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],
   ["@", "Reference a file: lists the directory as you type; arrows, Tab or Enter to complete"],

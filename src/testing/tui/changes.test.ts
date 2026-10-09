@@ -32,14 +32,19 @@ describe("working tree changes", () => {
     writeFileSync(`${ROOT}/blob.bin`, new Uint8Array([1, 0, 2]));
     const { git, asked } = fakeGit({
       "rev-parse --show-toplevel": `${ROOT}\n`,
+      "rev-parse --short HEAD": "7bb6068\n",
       "diff HEAD --numstat --no-renames": "5\t1\tsrc/z.ts\n",
-      "ls-files --others --exclude-standard": "new.ts\nblob.bin\n",
+      // kinoko's own spilled tool output is not the project's work
+      "ls-files --others --exclude-standard": "new.ts\nblob.bin\n.kinoko/spill/abc.txt\n",
     });
-    expect(await gitChanges(`${ROOT}/sub`, signal, git)).toEqual([
-      { path: "blob.bin", added: 0, removed: 0, binary: true, fresh: true },
-      { path: "new.ts", added: 3, removed: 0, fresh: true },
-      { path: "src/z.ts", added: 5, removed: 1 },
-    ]);
+    expect(await gitChanges(`${ROOT}/sub`, signal, git)).toEqual({
+      files: [
+        { path: "blob.bin", added: 0, removed: 0, binary: true, fresh: true },
+        { path: "new.ts", added: 3, removed: 0, fresh: true },
+        { path: "src/z.ts", added: 5, removed: 1 },
+      ],
+      head: "7bb6068",
+    });
     expect(asked[0]).toEqual(["rev-parse", "--show-toplevel"]);
   });
 
@@ -50,7 +55,7 @@ describe("working tree changes", () => {
       "diff --numstat --no-renames": "2\t1\ta.ts\n",
       "ls-files --others --exclude-standard": "",
     });
-    expect(await gitChanges(ROOT, signal, git)).toEqual([{ path: "a.ts", added: 6, removed: 1 }]);
+    expect(await gitChanges(ROOT, signal, git)).toEqual({ files: [{ path: "a.ts", added: 6, removed: 1 }] }); // no HEAD: no hash
     expect(await gitChanges(ROOT, signal, fakeGit({}).git)).toBeUndefined();
   });
 });

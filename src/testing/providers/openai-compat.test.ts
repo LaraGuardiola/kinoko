@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { listModels, openaiCompat } from "../../providers/openai-compat.ts";
+import { isLocal, listModels, openaiCompat } from "../../providers/openai-compat.ts";
 import type { ProviderRequest, StreamEvent } from "../../types.ts";
 
 let server: ReturnType<typeof Bun.serve>;
-let mode: "text" | "split-tool" | "length-tool" | "hang" = "text";
+let mode: "text" | "split-tool" | "length-tool" | "hang" | "progress" = "text";
 let lastBody: Record<string, unknown> = {};
 let baseUrl: string;
 
@@ -15,7 +15,14 @@ beforeAll(() => {
       const stream = new ReadableStream<Uint8Array>({
         async start(ctl) {
           const enc = (s: string): void => ctl.enqueue(new TextEncoder().encode(s));
-          if (mode === "text") {
+          if (mode === "progress") {
+            enc(`data: ${JSON.stringify({ choices: [], prompt_progress: { total: 100, cache: 0, processed: 40 } })}\n\n`);
+            enc(`data: ${JSON.stringify({ choices: [], prompt_progress: { total: 100, cache: 0, processed: 100 } })}\n\n`);
+            enc(chunk({ content: "done" }));
+            enc(finishChunk());
+            enc("data: [DONE]\n\n");
+            ctl.close();
+          } else if (mode === "text") {
             enc(chunk({ content: "Hel" }));
             enc(chunk({ content: "lo, " }));
             enc(chunk({ content: "world" }));
@@ -52,7 +59,7 @@ afterAll(() => {
   server?.stop(true);
 });
 
-function setMode(m: "text" | "split-tool" | "length-tool" | "hang"): void {
+function setMode(m: "text" | "split-tool" | "length-tool" | "hang" | "progress"): void {
   mode = m;
 }
 
@@ -210,6 +217,27 @@ describe("openai-compat: truncation, thinking and effort", () => {
     const error = events.find((e) => e.type === "error");
     expect(error?.type === "error" && error.message).toMatch(/^no answer from 127\.0\.0\.1:9 after \d+s: .+\(a server timeout, or the server stopped\?\)$/);
     expect(events.at(-1)).toEqual({ type: "done", stop: "error" });
+  });
+
+  test("the server's prompt progress becomes progress events, before the reply", async () => {
+    setMode("progress");
+    const events = await collect(new AbortController().signal);
+    expect(events.filter((e) => e.type === "progress")).toEqual([
+      { type: "progress", done: 40, total: 100 },
+      { type: "progress", done: 100, total: 100 },
+    ]);
+    expect(events.findIndex((e) => e.type === "progress")).toBeLessThan(events.findIndex((e) => e.type === "text"));
+  });
+
+  test("a local server is asked for its prompt progress (OpenAI's own API would reject the field)", async () => {
+    setMode("text");
+    for await (const _ of openaiCompat({ baseUrl, apiKey: "k" }).stream(mkReq(new AbortController().signal))) void _;
+    expect(lastBody.return_progress).toBe(true);
+    expect(isLocal("http://127.0.0.1:8085/v1")).toBe(true);
+    expect(isLocal("http://192.168.1.20:8080/v1")).toBe(true);
+    expect(isLocal("http://localhost:1234/v1")).toBe(true);
+    expect(isLocal("https://api.openai.com/v1")).toBe(false);
+    expect(isLocal("https://openrouter.ai/api/v1")).toBe(false);
   });
 });
 

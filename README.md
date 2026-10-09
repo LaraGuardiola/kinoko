@@ -33,6 +33,8 @@ an `AbortSignal`, nothing blocks the event loop, and the keyboard always wins:
 | `Ctrl-C` | clear the editor, then quit | abort |
 | `Ctrl-D` | quit (empty editor) | — |
 | `Alt+Up` | — | pull the newest queued message back into the editor |
+| `Alt+X` | — | send the waiting steer **now**: cuts the reply being written, thinking included |
+| `Alt+C` | — | cancel the queued messages: they go back into the editor |
 | `Ctrl-T` | expand or collapse tool output | same |
 | `Ctrl-V` | paste the clipboard image as `[Image #N]` | same |
 | `@` | reference a file: lists the directory as you type (Tab/Enter completes) | same |

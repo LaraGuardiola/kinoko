@@ -32,14 +32,18 @@ export function parseTodos(args: unknown): Todo[] {
 export function planText(todos: Todo[]): string {
   const done = todos.filter((t) => t.status === "done").length;
   const list = todos.map((t) => `${MARKS[t.status]} ${t.text}`).join("\n");
-  const next = done === todos.length ? "All done." : "Keep it current: send the whole list again when an item starts or finishes.";
+  // "All done." alone read as "the plan is over": new work then went on with no plan at all.
+  const next =
+    done === todos.length
+      ? "All done. If more work comes up (a fix, a check, a follow-up), add it to this same list (keep the done items) and send it again."
+      : "Keep it current: send the whole list again when an item starts or finishes, adding any new work to it.";
   return `Plan: ${done}/${todos.length} done\n${list}\n${next}`;
 }
 
 export const todoTool: Tool = {
   name: TODO_TOOL,
   description:
-    "Keep a short plan for a task with several steps. Send the WHOLE list every time. Mark the step you start as in_progress (one at a time) and each finished step as done. Skip it for one-step tasks.",
+    "Keep a short plan for a task with several steps. Send the WHOLE list every time. Mark the step you start as in_progress (one at a time) and each finished step as done. When new work comes up (a fix, a check, a follow-up), add it to the same list, keeping the done items, even after everything was done. Skip it for one-step tasks.",
   schema: {
     type: "object",
     properties: {

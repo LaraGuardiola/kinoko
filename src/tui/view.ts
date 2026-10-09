@@ -60,6 +60,8 @@ export interface RegionInput {
   marker: string;
   /** The marker reports an interruption: red, like the input rules. */
   markerAlert?: boolean;
+  /** A quiet note (compaction): cream, no background. */
+  markerCream?: boolean;
   queued: QueuedView[];
   editorLines: string[];
   editorRow: number;
@@ -186,11 +188,17 @@ export function liveRegion(input: RegionInput): Region {
   }
   if (input.marker !== "") {
     // A blank row keeps the note off whatever was streamed before it.
-    tail.push("", input.markerAlert ? `${ANSI.amanita}${input.marker}${ANSI.reset}` : `${ANSI.inverse}${input.marker}${ANSI.reset}`);
+    const style = input.markerAlert ? ANSI.amanita : input.markerCream ? ANSI.cream : ANSI.inverse;
+    tail.push("", `${style}${input.marker}${ANSI.reset}`);
   }
-  for (const item of input.queued) {
-    const tag = item.kind === "steer" ? "[steer]" : "[follow-up]";
-    tail.push(`${ANSI.dim}${tag}${ANSI.reset} ${item.text}`);
+  if (input.queued.length > 0) {
+    // A row of air, the keys that act on the queue, then the messages waiting, in cream.
+    const steering = input.queued.some((item) => item.kind === "steer");
+    tail.push("", `${ANSI.dim}${steering ? "alt+x send now · " : ""}alt+c cancel · alt+↑ edit the last${ANSI.reset}`);
+    for (const item of input.queued) {
+      const tag = item.kind === "steer" ? "[steer]" : "[follow-up]";
+      tail.push(`${ANSI.cream}${tag} ${item.text}${ANSI.reset}`);
+    }
   }
   // The editor sits between two rules, with a block cursor drawn in place (the terminal's own
   // cursor stays hidden).

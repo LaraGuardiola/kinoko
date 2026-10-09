@@ -37,6 +37,8 @@ export interface PanelFacts {
   todos: Todo[];
   /** undefined: not a git repository. */
   changes: FileChange[] | undefined;
+  /** The last commit's short hash, shown beside the title. */
+  head?: string;
 }
 
 
@@ -61,7 +63,7 @@ export function panelRows(facts: PanelFacts, width: number, height: number): str
     ...(facts.todos.length > 0 ? [progressBar(facts.todos, inner)] : []),
     ...fitPlan(plan, facts.todos, planRoom, inner),
     `${RULE}${"─".repeat(inner)}${ANSI.reset}`,
-    changesHeader(facts.changes, inner),
+    changesHeader(facts.changes, inner, facts.head),
     ...fitList(changes, changeRoom, (n) => `${ANSI.dim}… ${n} more file${n === 1 ? "" : "s"}${ANSI.reset}`),
   ];
   while (rows.length < height) rows.push("");
@@ -120,8 +122,8 @@ function fitPlan(rows: string[], todos: Todo[], room: number, inner: number): st
 
 // ---- the changes ----
 
-function changesHeader(changes: FileChange[] | undefined, inner: number): string {
-  const title = `${ANSI.bold}${ORANGE}Changes${ANSI.reset}`;
+function changesHeader(changes: FileChange[] | undefined, inner: number, head?: string): string {
+  const title = `${ANSI.bold}${ORANGE}Changes${ANSI.reset}${head ? ` ${ANSI.dim}${head}${ANSI.reset}` : ""}`;
   if (changes === undefined || changes.length === 0) return title;
   const added = changes.reduce((n, c) => n + c.added, 0);
   const removed = changes.reduce((n, c) => n + c.removed, 0);

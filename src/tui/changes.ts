@@ -12,6 +12,13 @@ export interface FileChange {
   fresh?: boolean;
 }
 
+/** The working tree as the panel shows it: what changed, and the commit it changed from. */
+export interface TreeState {
+  files: FileChange[];
+  /** HEAD's short hash; undefined before the first commit. */
+  head?: string;
+}
+
 export type Git = (args: string[], cwd: string, signal: AbortSignal) => Promise<string | undefined>;
 
 /** Runs git; undefined when it fails (not a repository, no HEAD yet, no git at all). */
@@ -65,18 +72,20 @@ function merge(lists: FileChange[][]): FileChange[] {
 }
 
 /**
- * The working tree against HEAD, new files included, sorted by path; undefined outside a git
- * repository. Paths are relative to the repository root, as git prints them.
+ * The working tree against HEAD, new files included, sorted by path, and HEAD's short hash;
+ * undefined outside a git repository. Paths are relative to the repository root, as git prints
+ * them. kinoko's own files (`.kinoko/`: spilled tool output) are not the project's changes.
  */
-export async function gitChanges(cwd: string, signal: AbortSignal, git: Git = runGit): Promise<FileChange[] | undefined> {
+export async function gitChanges(cwd: string, signal: AbortSignal, git: Git = runGit): Promise<TreeState | undefined> {
   const root = (await git(["rev-parse", "--show-toplevel"], cwd, signal))?.trim();
   if (!root) return undefined;
+  const head = (await git(["rev-parse", "--short", "HEAD"], root, signal))?.trim() || undefined;
   const opts = ["--numstat", "--no-renames"];
-  const head = await git(["diff", "HEAD", ...opts], root, signal);
+  const sinceHead = await git(["diff", "HEAD", ...opts], root, signal);
   // A repository without a commit has no HEAD: what is staged plus what is not.
   const tracked =
-    head !== undefined
-      ? parseNumstat(head)
+    sinceHead !== undefined
+      ? parseNumstat(sinceHead)
       : merge([parseNumstat((await git(["diff", "--cached", ...opts], root, signal)) ?? ""), parseNumstat((await git(["diff", ...opts], root, signal)) ?? "")]);
   const untracked = ((await git(["ls-files", "--others", "--exclude-standard"], root, signal)) ?? "").split("\n").filter((p) => p !== "");
   const fresh = await Promise.all(
@@ -85,5 +94,6 @@ export async function gitChanges(cwd: string, signal: AbortSignal, git: Git = ru
       return lines === undefined ? { path, added: 0, removed: 0, binary: true, fresh: true } : { path, added: lines, removed: 0, fresh: true };
     }),
   );
-  return [...tracked, ...fresh].toSorted((a, b) => a.path.localeCompare(b.path));
+  const files = [...tracked, ...fresh].filter((c) => !c.path.startsWith(".kinoko/") && !c.path.includes("/.kinoko/"));
+  return { files: files.toSorted((a, b) => a.path.localeCompare(b.path)), ...(head ? { head } : {}) };
 }

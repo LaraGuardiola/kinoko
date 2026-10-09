@@ -4,16 +4,17 @@
 
 import type { Message, ToolCall } from "../types.ts";
 import { gitChanges } from "./changes.ts";
-import type { FileChange } from "./changes.ts";
+import type { FileChange, TreeState } from "./changes.ts";
 import { panelRows, panelWidth, wideEnough } from "./panel.ts";
 import { TODO_TOOL, latestTodos, todosOf } from "./todos.ts";
 import type { Todo } from "./todos.ts";
 
-export type ChangesSource = (signal: AbortSignal) => Promise<FileChange[] | undefined>;
+export type ChangesSource = (signal: AbortSignal) => Promise<TreeState | undefined>;
 
 export class SidePanel {
   #todos: Todo[] = [];
   #changes: FileChange[] | undefined = [];
+  #head: string | undefined;
   #window: number | undefined; // pixels, from the terminal's reports
   #screen: number | undefined;
   #source: ChangesSource;
@@ -74,8 +75,9 @@ export class SidePanel {
     }
     this.#fetching = true;
     void this.#source(AbortSignal.timeout(10_000))
-      .then((changes) => {
-        this.#changes = changes;
+      .then((tree) => {
+        this.#changes = tree?.files;
+        this.#head = tree?.head;
       })
       .catch(() => undefined)
       .finally(() => {
@@ -100,7 +102,7 @@ export class SidePanel {
   column(cols: number | undefined): { width: number; rows: (height: number) => string[]; key: string } | undefined {
     if (cols === undefined || !this.visible(cols)) return undefined;
     const width = panelWidth(cols);
-    const facts = { todos: this.#todos, changes: this.#changes };
+    const facts = { todos: this.#todos, changes: this.#changes, head: this.#head };
     return { width, rows: (height) => panelRows(facts, width, height), key: JSON.stringify([width, facts]) };
   }
 }

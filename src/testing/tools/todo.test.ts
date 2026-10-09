@@ -14,8 +14,12 @@ describe("todo tool", () => {
       { items: [{ text: "read the loop", status: "done" }, { text: "write the parser", status: "in_progress" }, { text: "tests", status: "pending" }] },
       ctx,
     );
-    expect(out).toBe("Plan: 1/3 done\n[x] read the loop\n[>] write the parser\n[ ] tests\nKeep it current: send the whole list again when an item starts or finishes.");
-    expect(planText([{ text: "a", status: "done" }])).toEndWith("All done.");
+    expect(out).toBe(
+      "Plan: 1/3 done\n[x] read the loop\n[>] write the parser\n[ ] tests\nKeep it current: send the whole list again when an item starts or finishes, adding any new work to it.",
+    );
+    // All done is not the end of the plan: new work goes into the same list.
+    expect(planText([{ text: "a", status: "done" }])).toContain("All done. If more work comes up");
+    expect(todoTool.description).toContain("add it to the same list, keeping the done items, even after everything was done");
   });
 
   test("a list that is not one is refused with what to fix", () => {

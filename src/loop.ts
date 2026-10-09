@@ -30,6 +30,7 @@ export type AgentEvent =
   | { type: "tool_end"; call: ToolCall }
   | { type: "queue_change"; steer: string[]; followUp: string[] }
   | { type: "delivered"; text: string } // a queued steer/follow-up just reached the model
+  | { type: "compacting"; phase: "reading" | "writing"; done: number; total?: number } // a summary on its way
   | { type: "compacted"; keep: number } // head of the history replaced by a summary, tail kept
   | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[]; detail?: string };
 
@@ -50,6 +51,10 @@ export class Agent {
   #cost = 0;
   #abortController: AbortController | null = null;
   #steerQueue: Queued[] = [];
+  /** The reply being streamed: `sendNow` cuts it (and only it) to deliver a steer at once. */
+  #turn: AbortController | undefined;
+  #cutForSteer = false;
+  #queued = 0; // orders the two queues, for taking back the newest
   #followUpQueue: Queued[] = [];
   #malformedCount = 0;
   #nudges = 0; // cut-off or looping replies in a row, each answered with a nudge
@@ -145,14 +150,37 @@ export class Agent {
 
   steer(text: string, images?: Image[]): void {
     if (!text.trim()) return;
-    this.#steerQueue.push({ text: text, images: images });
+    this.#steerQueue.push({ text: text, images: images, seq: ++this.#queued });
     this.#notifyQueueChange();
   }
 
   followUp(text: string, images?: Image[]): void {
     if (!text.trim()) return;
-    this.#followUpQueue.push({ text: text, images: images });
+    this.#followUpQueue.push({ text: text, images: images, seq: ++this.#queued });
     this.#notifyQueueChange();
+  }
+
+  /**
+   * Delivers the queued steer now: the reply being streamed is cut (its text and thinking so far
+   * are kept, unfinished tool calls are not) and the steer becomes the next message. False when
+   * there is no steer, or no reply streaming (a steer during tools goes right after them anyway).
+   */
+  sendNow(): boolean {
+    if (this.#state !== "running" || this.#steerQueue.length === 0 || this.#turn === undefined) return false;
+    this.#cutForSteer = true;
+    this.#turn.abort();
+    return true;
+  }
+
+  /** Takes queued messages back (the newest, or all), so they are never delivered; their texts in order. */
+  unqueue(which: "last" | "all"): string[] {
+    const all = [...this.#steerQueue, ...this.#followUpQueue].toSorted((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+    const taken = which === "all" ? all : all.slice(-1);
+    if (taken.length === 0) return [];
+    this.#steerQueue = this.#steerQueue.filter((q) => !taken.includes(q));
+    this.#followUpQueue = this.#followUpQueue.filter((q) => !taken.includes(q));
+    this.#notifyQueueChange();
+    return taken.map((q) => q.text);
   }
 
   async prompt(text: string, images?: Image[]): Promise<RunResult> {
@@ -196,6 +224,7 @@ export class Agent {
 
       // The turn's own signal lets a loop guard cut this one reply without aborting the run.
       const turn = new AbortController();
+      this.#turn = turn;
       const req: ProviderRequest = {
         model: this.#model,
         system: this.#system(this.#model),
@@ -247,23 +276,27 @@ export class Agent {
         }
       }
 
+      this.#turn = undefined;
       if (this.#abortController!.signal.aborted) {
         await this.#emitPartialAssistant(streamEvents);
         return this.#handleAbort();
       }
+      const cut = this.#cutForSteer;
+      this.#cutForSteer = false;
 
       // Reactive trigger: the provider rejected the prompt, so shrink and retry the same turn.
       if (overflow && (await this.#compact())) continue;
 
       const text = joinOf(streamEvents, "text");
-      // A reply cut by a loop guard keeps neither its looping thinking nor its unfinished calls.
-      const toolCalls = looping ? [] : callsOf(streamEvents);
+      // A reply cut by a loop guard keeps neither its looping thinking nor its unfinished calls; one
+      // cut for a steer keeps what it thought and said so far, but no calls (they may be half written).
+      const toolCalls = looping || cut ? [] : callsOf(streamEvents);
 
       const assistantMsg: Message = {
         id: crypto.randomUUID(),
         role: "assistant",
         content: text,
-        stop: looping ? "length" : stopReason,
+        stop: looping ? "length" : cut ? "aborted" : stopReason,
         usage,
       };
       const thinking = joinOf(streamEvents, "thinking");
@@ -380,8 +413,12 @@ export class Agent {
       model: this.#model,
       system: this.#system(this.#model),
       signal: this.#abortController!.signal,
+      onProgress: (p) => this.#emit({ type: "compacting", ...p }),
     });
-    if (!result) return false;
+    if (!result) {
+      this.#emit({ type: "compacted", keep: -1 }); // nothing done: the progress note goes
+      return false;
+    }
     if (this.#session) result.summary = await this.#session.markCompaction(result.summary, result.keepFrom);
     const before = this.#messages.length;
     this.#messages = result.view;
@@ -460,6 +497,7 @@ export class Agent {
 interface Queued {
   text: string;
   images?: Image[];
+  seq?: number;
 }
 
 function userMessage(q: Queued): Message {
