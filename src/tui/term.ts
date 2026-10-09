@@ -144,7 +144,8 @@ export class KeyParser {
       }
 
       if (rest.startsWith("\x1bO") && rest.length >= 3) {
-        const name = CSI[rest[2] ?? ""];
+        // \x1bOM is the keypad Enter in application keypad mode.
+        const name = rest[2] === "M" ? "enter" : CSI[rest[2] ?? ""];
         keys.push(name === undefined ? { name: "unknown" } : { name: name });
         i += 3;
         continue;
@@ -247,7 +248,7 @@ function csi(s: string): null | { key: Key; length: number } {
  */
 function kittyKey(params: string): Key {
   const [codeText = "", modText = "1"] = params.split(";");
-  const code = Number(codeText.split(":")[0]);
+  const code = keypadToMain(Number(codeText.split(":")[0]));
   const mods = Number(modText.split(":")[0]) - 1;
   const shift = (mods & 1) !== 0;
   const alt = (mods & 2) !== 0;
@@ -256,13 +257,21 @@ function kittyKey(params: string): Key {
   if (code === 27) return { name: "escape" };
   if (code === 9) return { name: "tab" };
   if (code === 127 || code === 8) return { name: "backspace" };
-  if (!Number.isFinite(code) || code < 32) return { name: "unknown" };
+  // Functional keys the protocol numbers in the private use area (F13+, media...) type nothing.
+  if (!Number.isFinite(code) || code < 32 || (code >= 0xe000 && code <= 0xf8ff)) return { name: "unknown" };
   const char = String.fromCodePoint(code);
   if (ctrl) {
     const name = CTRL[String.fromCharCode(code & 0x1f)];
     return name === undefined ? { name: "unknown" } : alt ? { name: name, alt: true } : { name: name };
   }
   return alt ? { name: "char", char: char, alt: true } : { name: "char", char: shift ? char.toUpperCase() : char };
+}
+
+/** Kitty numbers keypad keys 57399 (KP_0) to 57416 (KP_Separator); each acts as its main-block twin. */
+const KEYPAD = "0123456789./*-+\r=,";
+function keypadToMain(code: number): number {
+  const twin = KEYPAD[code - 57399];
+  return twin === undefined ? code : twin.charCodeAt(0);
 }
 
 export interface TermHandlers {

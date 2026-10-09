@@ -70,6 +70,18 @@ describe("tui key parser", () => {
     expect(names("\r")).toEqual(["enter"]);
   });
 
+  test("6a. the keypad Enter acts as Enter, and keypad keys type their main-block twin", () => {
+    expect(names("\x1b[57414u")).toEqual(["enter"]);
+    expect(names("\x1b[57414;2u")).toEqual(["shift-enter"]);
+    expect(parse("\x1b[57414;3u")).toEqual([{ name: "enter", alt: true }]);
+    expect(names("\x1bOM")).toEqual(["enter"]);
+    expect(parse("\x1b[57400u\x1b[57409u")).toEqual([
+      { name: "char", char: "1" },
+      { name: "char", char: "." },
+    ]);
+    expect(names("\x1b[57376u")).toEqual(["unknown"]); // F13: types nothing
+  });
+
   test("6b. kitty keyboard protocol: shift+enter, alt+enter, esc and ctrl/alt keys", () => {
     expect(names("\x1b[13;2u")).toEqual(["shift-enter"]);
     expect(names("\x1b[13;5u")).toEqual(["shift-enter"]);

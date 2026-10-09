@@ -397,3 +397,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Run from `$HOME`, the project dirs (`<cwd>/.agents/skills`, `<cwd>/.kinoko/ext`) are the user dirs, so every skill and extension was listed twice. `uniqueDirs` (context.ts) dedupes the scanned dirs by real path (symlinks included), and skills are unique by name, a project skill shadowing a home one. Same-named extensions in different dirs still both load (different files, different code).
 - AGENTS.md: the phased build is over; the workflow is now polish, with a rebuild of `~/.local/bin/kinoko` after runtime changes (the user saw the old duplicates because the installed binary predated the fix). Phase references dropped from `docs/interruption.md` and `docs/engines/strata.md`; the stale root `PROGRESS.md` (an early phase-1 copy of this file) removed.
 - Tests: cwd == home for skills and extensions, project skill shadowing (context.test, ext.test). `bun run check` passes (288 tests). Rebuilt and installed the binary.
+
+## Keypad Enter acts as Enter — DONE
+- With the kitty protocol on, keypad keys arrive with their own codes (KP_Enter is `CSI 57414u`, Shift+KP_Enter `CSI 57414;2u`), in the private use area, and were typed as that character. `kittyKey` now maps KP_0..KP_Separator (57399-57416) to their main-block twin, so the keypad Enter submits / newlines like Enter, and other private-use functional keys (F13+, media) type nothing. `ESC O M` (application keypad Enter) is Enter too.
+- Tests: term.test 6a. `bun run check` passes (289 tests). Rebuilt and installed the binary.
