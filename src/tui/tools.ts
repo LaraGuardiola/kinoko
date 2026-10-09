@@ -77,6 +77,14 @@ export function toolBlock(tool: ToolView, full: boolean, width = 80): string {
   return band(rows, toolFailed(tool.output) ? ANSI.bgErr : ANSI.bgOk, inner);
 }
 
+/** A run that failed (the provider's error): its message on the same red band as a failed tool. */
+export function errorBlock(detail: string, width = 80): string {
+  const inner = Math.max(3, width - 4);
+  const head = `${ANSI.amanita}●${ANSI.reset} ${ANSI.bold}Stopped${ANSI.reset}`;
+  const body = detail.split("\n").flatMap((row) => wrapAnsi(row, inner - 2)).map((row) => `  ${row}`);
+  return band(["", ...wrapAnsi(head, inner), ...body, ""], ANSI.bgErr, inner);
+}
+
 /** Paints rows on a background `inner` wide; a reset inside a row must not end the band. */
 function band(rows: string[], bg: string, inner: number): string {
   return rows

@@ -13,7 +13,7 @@ import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
 import { ABORTED, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
-import { pulseLevel, toolBlock, toolSummary } from "./tools.ts";
+import { errorBlock, pulseLevel, toolBlock, toolSummary } from "./tools.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
@@ -28,7 +28,8 @@ import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Session } from "../session.ts";
-import type { Message } from "../types.ts";
+import type { Image, Message } from "../types.ts";
+import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 
 
 
@@ -56,6 +57,10 @@ export interface AppOptions {
   onQuit?: () => void;
   /** Rebuilds the agent after /fork moved the session head. */
   rebuild?: () => Agent;
+  /** Reads the clipboard image for Ctrl+V (an Image, or why not). Tests pass a fake. */
+  clipboard?: (signal: AbortSignal) => Promise<Image | string>;
+  /** Where a pasted relative image path is read from. */
+  cwd?: string;
 }
 
 /** What the models page needs from outside the TUI: other endpoints, and somewhere to save them. */
@@ -95,6 +100,9 @@ export class App {
   #onQuit: (() => void) | undefined;
   #placeOf: (() => Promise<string>) | undefined;
   #place = "";
+  #images = new ImageRegistry();
+  #clipboard: (signal: AbortSignal) => Promise<Image | string>;
+  #cwd: string;
 
   #running = false;
   // The block being streamed (thinking or answer).
@@ -130,6 +138,8 @@ export class App {
     this.#rebuild = opts.rebuild;
     this.#onQuit = opts.onQuit;
     this.#placeOf = opts.place;
+    this.#clipboard = opts.clipboard ?? ((signal) => clipboardImage(signal));
+    this.#cwd = opts.cwd ?? process.cwd();
     this.#agent.on((e) => this.#onAgentEvent(e));
     this.#refreshPlace();
   }
@@ -154,6 +164,7 @@ export class App {
   replay(messages: Message[], note: string): void {
     this.#print("system", note);
     for (const block of replayBlocks(messages, this.#viewportCols)) this.#print(block.kind, block.text);
+    this.#images.startAfter(messages.reduce((n, m) => n + (m.images?.length ?? 0), 0));
     const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
     if (usage) this.#tokens.context = usage.input + usage.output;
     this.render();
@@ -243,7 +254,11 @@ export class App {
       case "follow-up":
         this.#followUp();
         return;
+      case "paste-image":
+        void this.#pasteImage();
+        return;
       case "editor": {
+        if (key.name === "paste" && this.#pastedImage(key.char ?? "")) return;
         // Enter submits (as a steer or a prompt, decided in #submit); the rest edits.
         if (this.#editor.handle(key) === "submit") void this.#submit();
         this.render();
@@ -270,7 +285,7 @@ export class App {
     if (this.#agent.state === "running") {
       // Already running: this is a steer. It shows in the queued area until it reaches the model
       // ("delivered"), and only then joins the transcript.
-      this.#agent.steer(text);
+      this.#agent.steer(text, this.#images.attached(text));
       this.render();
       return;
     }
@@ -288,7 +303,7 @@ export class App {
     this.#running = true;
     this.#marker = "";
     if (this.#agent.state === "running") {
-      this.#agent.followUp(text);
+      this.#agent.followUp(text, this.#images.attached(text));
       this.render();
       return;
     }
@@ -297,7 +312,7 @@ export class App {
   }
 
   async #run(text: string): Promise<void> {
-    await this.#agent.prompt(text);
+    await this.#agent.prompt(text, this.#images.attached(text));
     this.#running = false;
     this.render();
   }
@@ -305,6 +320,39 @@ export class App {
   #quit(): void {
     this.#renderer.release();
     this.#onQuit?.();
+  }
+
+  // ---- images ----
+
+  /** Ctrl+V: the clipboard image goes in at the cursor as [Image #N]. */
+  async #pasteImage(): Promise<void> {
+    this.#addImage(await this.#clipboard(AbortSignal.timeout(5_000)));
+  }
+
+  /**
+   * A paste that is one image file's path (a file dropped on the terminal) attaches the file; an
+   * empty paste (the terminal found no text: the clipboard holds an image) reads the clipboard.
+   * False when the paste is plain text for the editor.
+   */
+  #pastedImage(paste: string): boolean {
+    if (paste.trim() === "") {
+      void this.#pasteImage();
+      return true;
+    }
+    const path = imagePathOf(paste);
+    if (path === undefined) return false;
+    void imageFromFile(path, this.#cwd).then((image) => {
+      if (image === undefined) this.#editor.insert(paste); // no such file: it was text after all
+      else this.#addImage(image);
+      this.render();
+    });
+    return true;
+  }
+
+  #addImage(image: Image | string): void {
+    if (typeof image === "string") this.#marker = `Image not attached: ${image}`;
+    else this.#editor.insert(`${this.#images.add(image)} `);
+    this.render();
   }
 
   /** Alt+Up: pull the newest queued message back into the editor. */
@@ -430,7 +478,11 @@ export class App {
       this.#marker = "Interrupted — your queued messages are back in the editor";
     } else if (reason === "aborted") {
       this.#marker = "Interrupted";
-    } else if (reason === "limit" || reason === "error") {
+    } else if (reason === "error") {
+      // A failed run says why where it happened, on a band like a failed tool's; the marker points at it.
+      this.#print("tool", errorBlock(detail ?? "unknown error", this.#width));
+      this.#marker = "Stopped — error";
+    } else if (reason === "limit") {
       // A run that stops on its own must say why, or it looks like the model gave up.
       this.#marker = `Stopped — ${detail ?? reason}`;
     }

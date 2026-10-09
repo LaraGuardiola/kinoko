@@ -71,6 +71,7 @@ const KEYS: Array<[string, string]> = [
   ["Ctrl-C", "Abort / clear the input / quit on a second press"],
   ["Ctrl-D", "Quit when the input is empty"],
   ["Ctrl-T", "Expand or collapse tool output"],
+  ["Ctrl-V", "Paste the clipboard image as [Image #N] (also drop an image file)"],
   ["Alt+Up", "Pull the last queued message back into the input"],
   ["Ctrl-P / Ctrl-N", "Previous / next history entry"],
   ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],

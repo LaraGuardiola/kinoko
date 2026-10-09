@@ -261,7 +261,10 @@ export function wire(messages: Message[]): object[] {
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]!;
     if (m.role === "user" || m.role === "system") {
-      if (m.content !== "") out.push({ role: "user", content: m.content });
+      if (m.images?.length) {
+        const images = m.images.map((img) => ({ type: "image", source: { type: "base64", media_type: img.mime, data: img.data } }));
+        out.push({ role: "user", content: [...images, { type: "text", text: m.content }] });
+      } else if (m.content !== "") out.push({ role: "user", content: m.content });
       continue;
     }
     if (m.role === "tool") continue; // gathered right after their assistant message

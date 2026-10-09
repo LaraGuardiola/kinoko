@@ -71,6 +71,14 @@ describe("session log", () => {
     expect(forked.activeBranch().map((m) => m.id)).toEqual(["m1", "m2"]);
   });
 
+  test("2b. a message's images survive a resume", async () => {
+    const session = await Session.create({ cwd: CWD, model: "m", home: HOME });
+    const images = [{ mime: "image/png", data: "iVBORw0KGgo=" }];
+    await session.append({ id: "u1", role: "user", content: "see [Image #1]", images: images });
+    const reloaded = await Session.load(session.path);
+    expect(reloaded.activeBranch()[0]!.images).toEqual(images);
+  });
+
   test("3. a resumed aborted run keeps every tool call paired with exactly one result", async () => {
     rmSync(HOME, { recursive: true, force: true });
     // Aborting inside the first tool cuts it off mid-run, so the second call never starts.

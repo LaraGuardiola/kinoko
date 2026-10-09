@@ -5,6 +5,7 @@ import type { Extensions } from "./ext.ts";
 import { CallGuard, MAX_NUDGES, NUDGE_EMPTY, NUDGE_LENGTH, NUDGE_REPEAT, RepeatGuard, STOP_CALLS, WARN_CALLS, repeatNote, sameErrorNote } from "./guard.ts";
 import type { Session } from "./session.ts";
 import type {
+  Image,
   Message,
   Provider,
   ProviderRequest,
@@ -48,8 +49,8 @@ export class Agent {
   #turns = 0;
   #cost = 0;
   #abortController: AbortController | null = null;
-  #steerQueue: string[] = [];
-  #followUpQueue: string[] = [];
+  #steerQueue: Queued[] = [];
+  #followUpQueue: Queued[] = [];
   #malformedCount = 0;
   #nudges = 0; // cut-off or looping replies in a row, each answered with a nudge
   #calls = new CallGuard();
@@ -132,7 +133,7 @@ export class Agent {
   }
 
   #notifyQueueChange(): void {
-    this.#emit({ type: "queue_change", steer: [...this.#steerQueue], followUp: [...this.#followUpQueue] });
+    this.#emit({ type: "queue_change", steer: this.#steerQueue.map((q) => q.text), followUp: this.#followUpQueue.map((q) => q.text) });
   }
 
   abort(): void {
@@ -140,19 +141,19 @@ export class Agent {
     this.#abortController?.abort();
   }
 
-  steer(text: string): void {
+  steer(text: string, images?: Image[]): void {
     if (!text.trim()) return;
-    this.#steerQueue.push(text);
+    this.#steerQueue.push({ text: text, images: images });
     this.#notifyQueueChange();
   }
 
-  followUp(text: string): void {
+  followUp(text: string, images?: Image[]): void {
     if (!text.trim()) return;
-    this.#followUpQueue.push(text);
+    this.#followUpQueue.push({ text: text, images: images });
     this.#notifyQueueChange();
   }
 
-  async prompt(text: string): Promise<RunResult> {
+  async prompt(text: string, images?: Image[]): Promise<RunResult> {
     if (this.#state === "running") {
       throw new Error("Agent already running");
     }
@@ -165,7 +166,7 @@ export class Agent {
     this.#calls = new CallGuard();
 
     try {
-      const result = await this.#run(text);
+      const result = await this.#run({ text: text, images: images });
       this.#emit({ type: "run_end", reason: result.reason, dropped: result.dropped, detail: result.detail });
       this.#ext?.emit("run_end", result);
       return result;
@@ -175,10 +176,9 @@ export class Agent {
     }
   }
 
-  async #run(initialPrompt: string): Promise<RunResult> {
-    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: initialPrompt };
-    await this.#push(userMsg);
-    this.#emit({ type: "run_start", prompt: initialPrompt });
+  async #run(initial: Queued): Promise<RunResult> {
+    await this.#push(userMessage(initial));
+    this.#emit({ type: "run_start", prompt: initial.text });
 
     while (true) {
       if (this.#abortController!.signal.aborted) {
@@ -344,10 +344,10 @@ export class Agent {
   }
 
   /** A queued message leaves the queue and becomes the next user message, in that order. */
-  async #deliver(text: string): Promise<void> {
+  async #deliver(queued: Queued): Promise<void> {
     this.#notifyQueueChange();
-    await this.#push({ id: crypto.randomUUID(), role: "user", content: text });
-    this.#emit({ type: "delivered", text: text });
+    await this.#push(userMessage(queued));
+    this.#emit({ type: "delivered", text: queued.text });
   }
 
   /** Appends to the in-memory history and, when a session is open, to the append-only log. */
@@ -446,12 +446,24 @@ export class Agent {
   }
 
   #handleAbort(): RunResult {
-    const dropped = [...this.#steerQueue, ...this.#followUpQueue];
+    const dropped = [...this.#steerQueue, ...this.#followUpQueue].map((q) => q.text);
     this.#steerQueue = [];
     this.#followUpQueue = [];
     this.#notifyQueueChange();
     return { reason: "aborted", dropped: dropped.length ? dropped : undefined };
   }
+}
+
+/** A user message waiting in a queue (or starting a run), with the images it carries. */
+interface Queued {
+  text: string;
+  images?: Image[];
+}
+
+function userMessage(q: Queued): Message {
+  const msg: Message = { id: crypto.randomUUID(), role: "user", content: q.text };
+  if (q.images !== undefined && q.images.length > 0) msg.images = q.images;
+  return msg;
 }
 
 function joinOf(events: StreamEvent[], kind: "text" | "thinking"): string {

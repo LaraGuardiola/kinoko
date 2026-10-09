@@ -32,6 +32,7 @@ export type KeyName =
   | "ctrl-l"
   | "ctrl-t" // expand/collapse tool output
   | "ctrl-o" // newline while idle (Alt+Enter is taken by follow-up)
+  | "ctrl-v" // paste an image from the clipboard
   | "unknown";
 
 export interface Key {
@@ -78,6 +79,7 @@ const CTRL: Record<string, KeyName> = {
   "\x0c": "ctrl-l",
   "\x14": "ctrl-t",
   "\x0f": "ctrl-o",
+  "\x16": "ctrl-v",
   "\x7f": "backspace",
   "\x08": "backspace",
   "\r": "enter",

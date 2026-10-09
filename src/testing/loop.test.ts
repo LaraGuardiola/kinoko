@@ -249,4 +249,21 @@ describe("Agent loop with abort, steer and follow-up", () => {
     expect((await agent.prompt("go")).reason).toBe("limit");
     expect(agent.messages.filter((m) => m.role === "assistant")).toHaveLength(1);
   });
+
+  test("images ride on the prompt and on steers into their user messages; text-only stays without", async () => {
+    const provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        yield { type: "text", delta: "ok" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100 });
+    const a = { mime: "image/png", data: "A" };
+    const b = { mime: "image/png", data: "B" };
+    agent.steer("and [Image #2]", [b]);
+    agent.followUp("thanks", []);
+    await agent.prompt("look at [Image #1]", [a]);
+    const users = agent.messages.filter((m: Message) => m.role === "user");
+    expect(users.map((m) => m.images)).toEqual([[a], [b], undefined]);
+  });
 });

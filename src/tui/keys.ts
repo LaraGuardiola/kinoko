@@ -9,6 +9,7 @@ export type KeyAction =
   | "clear-editor" // Ctrl-C with text in the editor
   | "pull-queued" // Alt+Up
   | "toggle-tools" // Ctrl-T
+  | "paste-image" // Ctrl-V
   | "submit" // Enter
   | "follow-up" // Alt+Enter while running
   | "editor" // everything the editor handles
@@ -27,6 +28,7 @@ export interface KeyContext {
  *   Esc            abort while running, nothing while idle
  *   Ctrl-C         abort / clear the editor / quit on a second press
  *   Alt+Up         pull the last queued message back
+ *   Ctrl-V         paste the clipboard image as [Image #N]
  */
 export function actionFor(key: Key, ctx: KeyContext): KeyAction {
   switch (key.name) {
@@ -39,6 +41,8 @@ export function actionFor(key: Key, ctx: KeyContext): KeyAction {
       return ctx.editorEmpty ? "quit" : "none";
     case "ctrl-t":
       return "toggle-tools";
+    case "ctrl-v":
+      return "paste-image";
     case "enter":
       if (key.alt === true) return ctx.running ? "follow-up" : "submit";
       return "editor";
