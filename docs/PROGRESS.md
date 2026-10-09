@@ -438,3 +438,8 @@ Deferred, for whenever an Anthropic model is actually needed:
 - `src/tui/files.ts`: `atQuery`, `splitQuery`, `narrow` (pure) and `FilePicker` (async `readdir`, cached per directory, read again on each fresh `@`). The reference is sent as text; the model reads the file with its read tool (no contents inlined).
 - `/help` and the README keys table list `@`.
 - Tests: files.test (word detection, narrowing, the picker with a fake lister: completion, caching, Esc), app.test (list on screen, Enter completes without sending, Tab into a directory, Esc). `bun run check` passes (317 tests). Rebuilt and installed the binary from this branch.
+
+## feat/ux-improvements-2: code panels copy cleanly with the mouse (branch feat/ux-improvements-2)
+- Selecting a code panel copied its line numbers. A terminal cannot make text unselectable (harnesses that avoid it capture the mouse and run their own selection on an alternate screen, which would cost kinoko its native scrollback and the terminal's search). An Alt+C "copy the last block" key was tried and dropped (finding an older block took too many presses). Now the panels have no line numbers. Code flush at the panel's edge was tried too and looked bare; the two-column margin is back, the lesser evil: a terminal copies blank cells before the code as spaces (cursor moves and erased cells included), so several lines copied with the mouse each start with two spaces. A long line still soft-wraps, so copying it gives two lines.
+- AGENTS.md: after a merge, push main.
+- Tests: markdown.test (no numbers, code from the edge, wrapping). `bun run check` passes (317 tests). Rebuilt and installed the binary from this branch.

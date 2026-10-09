@@ -1,6 +1,7 @@
 // A fenced code block drawn like an editor pane: a panel with its own background, the language's
-// full name in the top-right corner, a line-number gutter and syntax colours. Long lines soft-wrap
-// at token boundaries with a hanging indent, so the background never breaks.
+// full name in the top-right corner and syntax colours. Long lines soft-wrap at token boundaries
+// with a hanging indent, so the background never breaks. No line numbers: a terminal cannot make
+// them unselectable, and a mouse copy should come out as the code (plus the two-column margin).
 
 import { highlightLine } from "./highlight.ts";
 import type { HighlightState } from "./highlight.ts";
@@ -9,9 +10,7 @@ import { cells, visibleLength, wrapAnsi } from "./style.ts";
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const PANEL = `${ESC}48;2;36;38;52m`;
-const GUTTER = `${ESC}38;2;92;98;124m`;
 const LABEL = `${ESC}3m${ESC}38;2;150;156;182m`;
-const FG_OFF = `${ESC}39m`;
 
 export interface CodeOptions {
   lang: string;
@@ -25,28 +24,24 @@ export function codeBlock(lines: string[], opts: CodeOptions): string[] {
   const color = opts.color ?? true;
   if (!color) return lines.map((line) => `  ${line}`);
   const width = Math.max(12, opts.width);
-  const digits = String(Math.max(1, lines.length)).length;
-  // " 12  code…  ": one column of padding each side, the gutter, two spaces before the code.
+  // A column of padding each side, and one more before the code: a two-column margin.
   const inner = width - 2;
-  const codeWidth = Math.max(4, inner - digits - 2);
+  const codeWidth = Math.max(4, inner - 1);
   const name = languageName(opts.lang);
   // The language sits in the top-right corner, a couple of columns in from the edge.
   const label = name === "" ? "" : `${" ".repeat(Math.max(0, inner - name.length - 2))}${LABEL}${name}${RESET}`;
   // A padding row above the label keeps it off the pane's top edge.
   const rows: string[] = [row("", inner), row(label, inner)];
   let state: HighlightState = {};
-  lines.forEach((line, index) => {
+  for (const line of lines) {
     const lit = highlightLine(line, opts.lang, state);
     state = lit.state;
     // A continuation row hangs two columns deeper than the line's own indentation, like an editor's
     // soft wrap, so it reads as the same line and not as the next one.
     const indent = /^ */.exec(line)?.[0].length ?? 0;
     const pieces = wrapCode(lit.text, codeWidth, Math.min(indent + 2, Math.floor(codeWidth / 2)));
-    pieces.forEach((piece, n) => {
-      const number = n === 0 ? String(index + 1).padStart(digits) : " ".repeat(digits);
-      rows.push(row(`${GUTTER}${number}${FG_OFF}  ${piece}`, inner));
-    });
-  });
+    for (const piece of pieces) rows.push(row(` ${piece}`, inner));
+  }
   rows.push(row("", inner));
   return rows;
 }
