@@ -1040,6 +1040,36 @@ describe("side panel", () => {
     expect(h.screen()).not.toContain("todo 1/2"); // the column shows it: no tool block
   });
 
+  test("Ctrl+O unfolds the plan, the arrows scroll it by tasks, Esc folds it; narrow, it prints it", async () => {
+    const steps = { items: Array.from({ length: 30 }, (_, i) => ({ text: `step ${i + 1}`, status: i < 3 ? "done" : i === 3 ? "in_progress" : "pending" })) };
+    const history = [
+      { id: "1", role: "user" as const, content: "go" },
+      { id: "2", role: "assistant" as const, content: "", toolCalls: [{ id: "t1", name: "todo", args: steps }] },
+      { id: "3", role: "tool" as const, content: "Plan: 3/30 done", toolCallId: "t1" },
+    ];
+    const h = await harness([], { viewportCols: 180, viewportRows: 30 });
+    h.press(WIDE + HERE);
+    h.app.replay(history, "resumed");
+    expect(await paint(h)).toMatch(/… \d+ more tasks · ctrl\+o/);
+    h.press("\x0f"); // Ctrl+O
+    const open = await paint(h);
+    expect(open).toContain("↑↓ scroll · ctrl+o fold");
+    expect(open).toContain("↑ 2 earlier tasks"); // it opens on the task at hand
+    h.press("\x1b[B\x1b[B");
+    expect(await paint(h)).toContain("↑ 4 earlier tasks");
+    h.press("\x1b[A"); // up scrolls back
+    expect(await paint(h)).toContain("↑ 3 earlier tasks");
+    expect(h.app.editorText).toBe(""); // the arrows went to the plan, not the history
+    h.press("\x1b");
+    expect(await paint(h)).not.toContain("ctrl+o fold");
+
+    const narrow = await harness([], { viewportCols: 90, viewportRows: 30 });
+    narrow.app.replay(history, "resumed");
+    narrow.press("\x0f");
+    expect(narrow.screen()).toContain("Plan 3/30");
+    expect(narrow.screen()).toContain("● step 4");
+  });
+
   test("a resumed session shows its last plan", async () => {
     const h = await harness([], { viewportCols: 180, viewportRows: 30 });
     h.press(WIDE + HERE);

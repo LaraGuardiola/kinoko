@@ -31,7 +31,7 @@ export type KeyName =
   | "ctrl-n"
   | "ctrl-l"
   | "ctrl-t" // expand/collapse tool output
-  | "ctrl-o" // newline while idle (Alt+Enter is taken by follow-up)
+  | "ctrl-o" // unfold the plan over the side column
   | "ctrl-v" // paste an image from the clipboard
   | "size-report" // the terminal answering SIZE_QUERY: its window or the screen, in pixels
   | "cursor-report" // the terminal answering a position request (CSI 6 n): where the cursor is

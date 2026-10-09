@@ -16,6 +16,7 @@ import type { RenderState } from "./render.ts";
 import { ABORTED, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
 import { errorBlock, pulseLevel, toolBlock, toolFailed, toolSummary } from "./tools.ts";
 import { TODO_TOOL } from "./todos.ts";
+import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
@@ -35,6 +36,7 @@ import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
 import { compactingNote } from "./sprout.ts";
+import { ANSI } from "./style.ts";
 import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
@@ -260,6 +262,7 @@ export class App {
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
     if (this.#menuKey(key)) return;
     if (this.#fileKey(key)) return;
+    if (this.#planKey(key)) return;
     const action = actionFor(key, {
       running: this.#running || this.#agent.state === "running",
       editorEmpty: this.#editor.empty,
@@ -718,6 +721,29 @@ export class App {
     return listRows(this.#files.items(), this.#files.index, `Files · ${this.#files.where}`, empty, undefined, "Tab or Enter to complete · Esc to close");
   }
 
+  /**
+   * Ctrl+O unfolds the plan over the side column (or prints it, when the window is too narrow for
+   * the column); unfolded, the arrows, PgUp/PgDn and Home/End scroll it by tasks and Esc folds it.
+   */
+  #planKey(key: Key): boolean {
+    const column = this.#side.column(this.#viewportCols);
+    if (key.name === "ctrl-o") {
+      if (column !== undefined) this.#side.toggle();
+      else if (this.#side.todos.length === 0) this.#marker = "no plan yet";
+      else this.#print("system", planLines(this.#side.todos));
+      this.render();
+      return true;
+    }
+    if (column === undefined || !this.#side.expanded || key.alt) return false;
+    const by =
+      key.name === "up" ? -1 : key.name === "down" ? 1 : key.name === "pageup" ? -5 : key.name === "pagedown" ? 5 : key.name === "home" ? "start" : key.name === "end" ? "end" : undefined;
+    if (by !== undefined) this.#side.scroll(by, column.width);
+    else if (key.name === "escape") this.#side.fold();
+    else return false;
+    this.render();
+    return true;
+  }
+
   /** The keys the "@" file picker takes while it is open: arrows, Tab/Enter to complete, Esc. */
   #fileKey(key: Key): boolean {
     this.#files.sync(this.#editor.text, this.#editor.cursor);
@@ -984,4 +1010,11 @@ export class App {
     if (this.#rebuild) this.#agent = this.#rebuild();
     return `fork: head moved from ${head.role} to ${target.role} (${branch.length} -> ${branch.length - 1} messages)`;
   }
+}
+
+/** The plan as transcript rows, for a window too narrow for the side column. */
+function planLines(todos: Todo[]): string {
+  const marks = { done: `${ANSI.dim}✓`, in_progress: `${ANSI.toolDot}●${ANSI.reset}${ANSI.bold}`, pending: "○" };
+  const done = todos.filter((t) => t.status === "done").length;
+  return [`${ANSI.bold}Plan${ANSI.reset} ${ANSI.dim}${done}/${todos.length}${ANSI.reset}`, ...todos.map((t) => `${marks[t.status]} ${t.text}${ANSI.reset}`)].join("\n");
 }

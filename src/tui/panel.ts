@@ -47,36 +47,64 @@ function fixedRows(facts: PanelFacts): number {
   return facts.todos.length > 0 ? 6 : 5;
 }
 
+/** The plan's view: folded (it shares the column) or unfolded by Ctrl+O, scrolled by tasks. */
+export interface PlanView {
+  expanded: boolean;
+  /** The first task shown when unfolded. */
+  scroll: number;
+}
+
 /**
- * Exactly `height` rows, each `width` columns on the panel background. When both sections do not
- * fit, each gets about half, the plan keeping the item in progress in view and the changes their
- * first files; a "… N more" row says what was left out.
+ * Exactly `height` rows, each `width` columns on the panel background. Folded, when both sections
+ * do not fit each gets about half, the plan keeping the task in progress in view and the changes
+ * their first files, a "… N more" row saying what was left out. Unfolded (Ctrl+O), the plan takes
+ * the column, scrolled by whole tasks, and the changes fold to their title.
  */
-export function panelRows(facts: PanelFacts, width: number, height: number): string[] {
+export function panelRows(facts: PanelFacts, width: number, height: number, view: PlanView = { expanded: false, scroll: 0 }): string[] {
   const inner = width - 2;
-  const plan = planRows(facts.todos, inner);
-  const changes = changeRows(facts.changes, inner);
-  const [planRoom, changeRoom] = splitRoom(plan.length, changes.length, Math.max(2, height - fixedRows(facts)));
-  const rows = [
-    "",
-    planHeader(facts.todos, inner),
-    ...(facts.todos.length > 0 ? [progressBar(facts.todos, inner)] : []),
-    ...fitPlan(plan, facts.todos, planRoom, inner),
-    `${RULE}${"─".repeat(inner)}${ANSI.reset}`,
-    changesHeader(facts.changes, inner, facts.head),
-    ...fitList(changes, changeRoom, (n) => `${ANSI.dim}… ${n} more file${n === 1 ? "" : "s"}${ANSI.reset}`),
-  ];
+  const items = planItems(facts.todos, inner);
+  const bar = facts.todos.length > 0 ? [progressBar(facts.todos, inner)] : [];
+  const rule = `${RULE}${"─".repeat(inner)}${ANSI.reset}`;
+  let rows: string[];
+  if (view.expanded && facts.todos.length > 0) {
+    const room = Math.max(1, height - 6);
+    rows = ["", planHeader(facts.todos, inner, true), ...bar, ...scrollPlan(items, room, view.scroll), rule, changesHeader(facts.changes, inner, facts.head)];
+  } else {
+    const changes = changeRows(facts.changes, inner);
+    const planLength = items.reduce((n, item) => n + item.length, 0);
+    const [planRoom, changeRoom] = splitRoom(planLength, changes.length, Math.max(2, height - fixedRows(facts)));
+    rows = [
+      "",
+      planHeader(facts.todos, inner, false),
+      ...bar,
+      ...fitPlan(items, facts.todos, planRoom),
+      rule,
+      changesHeader(facts.changes, inner, facts.head),
+      ...fitList(changes, changeRoom, (n) => `${ANSI.dim}… ${n} more file${n === 1 ? "" : "s"}${ANSI.reset}`),
+    ];
+  }
   while (rows.length < height) rows.push("");
   return rows.slice(0, height).map((row) => paint(row, inner));
+}
+
+/** The furthest an unfolded plan scrolls: the first task from which the rest fits (below the "earlier" row). */
+export function maxScroll(todos: Todo[], width: number, height: number): number {
+  const items = planItems(todos, width - 2);
+  const room = Math.max(1, height - 6) - 1;
+  let used = 0;
+  let start = items.length;
+  while (start > 0 && used + items[start - 1]!.length <= room) used += items[--start]!.length;
+  return start <= 1 ? 0 : start;
 }
 
 
 // ---- the plan ----
 
-function planHeader(todos: Todo[], inner: number): string {
+function planHeader(todos: Todo[], inner: number, expanded: boolean): string {
   const done = todos.filter((t) => t.status === "done").length;
   const count = todos.length === 0 ? "" : `${ANSI.dim}${done}/${todos.length}${ANSI.reset}`;
-  return spread(`${ANSI.bold}${ORANGE}Plan${ANSI.reset}`, count, inner);
+  const keys = expanded ? ` ${ANSI.dim}↑↓ scroll · ctrl+o fold${ANSI.reset}` : "";
+  return spread(`${ANSI.bold}${ORANGE}Plan${ANSI.reset}${keys}`, count, inner);
 }
 
 /** A thin bar under the plan's title: green for what is done, the rule's colour for the rest. */
@@ -85,9 +113,10 @@ function progressBar(todos: Todo[], inner: number): string {
   return `${ADD}${"━".repeat(done)}${RULE}${"━".repeat(inner - done)}${ANSI.reset}`;
 }
 
-function planRows(todos: Todo[], inner: number): string[] {
-  if (todos.length === 0) return [`${ANSI.dim}no plan yet${ANSI.reset}`];
-  return todos.flatMap((todo) => {
+/** Each task as its rows (a long one wraps), so the plan is cut and scrolled by whole tasks. */
+function planItems(todos: Todo[], inner: number): string[][] {
+  if (todos.length === 0) return [[`${ANSI.dim}no plan yet${ANSI.reset}`]];
+  return todos.map((todo) => {
     const [mark, style] =
       todo.status === "done"
         ? [`${ADD}✓${ANSI.reset}`, ANSI.dim]
@@ -99,6 +128,12 @@ function planRows(todos: Todo[], inner: number): string[] {
   });
 }
 
+/** "3 more tasks", "1 earlier task". */
+function tasks(n: number, which: "more" | "earlier"): string {
+  return `${n} ${which} ${n === 1 ? "task" : "tasks"}`;
+}
+
+
 /** Rows for each section: all they need when both fit; else a section that needs less than half gets it, the other the rest. */
 export function splitRoom(plan: number, changes: number, room: number): [number, number] {
   if (plan + changes <= room) return [plan, changes];
@@ -108,16 +143,42 @@ export function splitRoom(plan: number, changes: number, room: number): [number,
   return [half, room - half];
 }
 
-/** The plan cut to `room` rows around the first unfinished item, so the work at hand stays seen. */
-function fitPlan(rows: string[], todos: Todo[], room: number, inner: number): string[] {
-  if (rows.length <= room) return rows;
+/**
+ * Folded: whole tasks from just before the first unfinished one, as many as fit in `room` rows
+ * with one left to say how many tasks are not shown (and that Ctrl+O shows them).
+ */
+function fitPlan(items: string[][], todos: Todo[], room: number): string[] {
+  const all = items.flat();
+  if (all.length <= room) return all;
   const first = todos.findIndex((t) => t.status !== "done");
-  // Rows before the first unfinished item (a wrapped item takes several).
-  const before = todos.slice(0, Math.max(0, first)).reduce((n, t) => n + wrapWords(t.text, Math.max(1, inner - 2)).length, 0);
-  const start = Math.max(0, Math.min(before - 1, rows.length - (room - 1)));
-  const shown = rows.slice(start, start + room - 1);
-  const hidden = rows.length - shown.length;
-  return [...shown, `${ANSI.dim}… ${hidden} more row${hidden === 1 ? "" : "s"}${ANSI.reset}`];
+  const start = Math.max(0, (first < 0 ? items.length : first) - 1);
+  const shown: string[] = [];
+  let taken = 0;
+  for (const item of items.slice(start)) {
+    if (shown.length + item.length > room - 1) break;
+    shown.push(...item);
+    taken++;
+  }
+  if (taken === 0) shown.push(...(items[start] ?? []).slice(0, Math.max(0, room - 1)));
+  const hidden = items.length - Math.max(1, taken);
+  return [...shown, `${ANSI.dim}… ${tasks(hidden, "more")} · ctrl+o${ANSI.reset}`];
+}
+
+/** Unfolded: whole tasks from `scroll` on, with a row above and below saying how many are out of sight. */
+function scrollPlan(items: string[][], room: number, scroll: number): string[] {
+  const start = Math.max(0, Math.min(scroll, items.length - 1));
+  const rows: string[] = start > 0 ? [`${ANSI.dim}↑ ${tasks(start, "earlier")}${ANSI.reset}`] : [];
+  let end = start;
+  while (end < items.length) {
+    const item = items[end]!;
+    const last = end === items.length - 1;
+    // Room for this task, and for the "more" row unless it is the last one.
+    if (rows.length + item.length + (last ? 0 : 1) > room && end > start) break;
+    rows.push(...item);
+    end++;
+  }
+  if (end < items.length) rows.push(`${ANSI.dim}↓ ${tasks(items.length - end, "more")}${ANSI.reset}`);
+  return rows.slice(0, room);
 }
 
 // ---- the changes ----

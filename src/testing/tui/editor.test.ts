@@ -45,7 +45,7 @@ describe("tui editor", () => {
     editor.clear();
     expect(editor.empty).toBe(true);
     editor.handle(key("shift-enter"));
-    editor.handle(key("ctrl-o")); // the same newline, for when Alt+Enter means follow-up
+    editor.handle(key("shift-enter")); // Ctrl+J arrives as this too (Ctrl+O is the plan's now)
     typed(editor, "line3");
     expect(editor.text).toBe("\n\nline3");
     expect(editor.lines).toHaveLength(3);

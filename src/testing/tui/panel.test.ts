@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PANEL_BG, panelRows, panelWidth, shortPath, splitRoom, wideEnough } from "../../tui/panel.ts";
+import { PANEL_BG, maxScroll, panelRows, panelWidth, shortPath, splitRoom, wideEnough } from "../../tui/panel.ts";
 import { visibleLength } from "../../tui/style.ts";
 import type { Todo } from "../../tui/todos.ts";
 
@@ -69,7 +69,7 @@ describe("side panel", () => {
     const text = panelRows({ todos: long, changes }, 36, 16).map((r) => strip(r).trim());
     expect(text).toHaveLength(16);
     expect(text).toContain("● step 9"); // in progress: in view
-    expect(text.some((r) => /^… \d+ more rows?$/.test(r))).toBe(true);
+    expect(text.some((r) => /^… \d+ more tasks? · ctrl\+o$/.test(r))).toBe(true); // tasks, not rows
     expect(text.some((r) => /^… \d+ more files?$/.test(r))).toBe(true);
   });
 
@@ -79,4 +79,18 @@ describe("side panel", () => {
     expect(shortPath("src/a-very-long-file-name.ts", 12)).toBe("…ile-name.ts");
   });
 
+
+  test("Ctrl+O unfolded: the plan takes the column, scrolled by whole tasks, the changes fold to their title", () => {
+    const long: Todo[] = Array.from({ length: 12 }, (_, i) => ({ text: `step ${i + 1}`, status: i < 5 ? "done" : i === 5 ? "in_progress" : "pending" }));
+    const facts = { todos: long, changes: [{ path: "a.ts", added: 1, removed: 0 }], head: "abc1234" };
+    const at = (scroll: number): string[] => panelRows(facts, 40, 12, { expanded: true, scroll }).map((r) => strip(r).trim());
+    const top = at(0);
+    expect(top[1]).toMatch(/^Plan ↑↓ scroll · ctrl\+o fold +5\/12$/);
+    expect(top.slice(3, 9)).toEqual(["✓ step 1", "✓ step 2", "✓ step 3", "✓ step 4", "✓ step 5", "↓ 7 more tasks"]);
+    expect(top[10]).toMatch(/^Changes abc1234 +1 file \+1$/); // no file rows: the plan has the room
+    const middle = at(4);
+    expect(middle.slice(3, 9)).toEqual(["↑ 4 earlier tasks", "✓ step 5", "● step 6", "○ step 7", "○ step 8", "↓ 4 more tasks"]);
+    expect(maxScroll(long, 40, 12)).toBe(7); // from step 8 on, the rest fits below "↑ 7 earlier tasks"
+    expect(at(7).slice(3, 9)).toEqual(["↑ 7 earlier tasks", "○ step 8", "○ step 9", "○ step 10", "○ step 11", "○ step 12"]);
+  });
 });
