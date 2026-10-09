@@ -416,3 +416,6 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Live, against the Qwen3.6 on :8085: "Soy Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M, operando bajo el nombre de Kinoko."
 - AGENTS.md: every change on its own branch; merge only when the user says so.
 - Tests: prompt (model line, modelName, a switch changes one block), loop (prompt per model), app (status line shows the name). `bun run check` passes (304 tests). Rebuilt and installed the binary from this branch.
+
+## fix/short-continue-flag: `kinoko -c` — DONE (branch fix/short-continue-flag)
+- `-c` was not a resume switch: only `--continue` (and `--c`) were, and `-c` fell through to the bare prompt, so `kinoko -c` started a new session with "-c" as its prompt. `-c` now resumes. The argument parser moved out of main.ts into `src/args.ts` (pure, so it is tested: args.test). README says `-c`. `bun run check` passes (306 tests).
