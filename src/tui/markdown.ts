@@ -104,6 +104,22 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
 }
 
 /** The marker (``` or ~~~...) when `line` opens a fence. */
+/** The fenced code blocks of a text, as written: language and code, fences excluded. */
+export function fencedBlocks(text: string): Array<{ lang: string; code: string }> {
+  const lines = text.split("\n");
+  const out: Array<{ lang: string; code: string }> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const fence = FENCE.exec(lines[i] ?? "");
+    if (!fence) continue;
+    const marker = fence[1] ?? "```";
+    let end = i + 1;
+    while (end < lines.length && !isClosing(lines[end] ?? "", marker)) end++;
+    out.push({ lang: fence[2] ?? "", code: lines.slice(i + 1, end).join("\n") });
+    i = end;
+  }
+  return out;
+}
+
 export function fenceOpener(line: string): string | undefined {
   return FENCE.exec(line)?.[1];
 }

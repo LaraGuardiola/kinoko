@@ -11,6 +11,9 @@ const RESET = `${ESC}0m`;
 const PANEL = `${ESC}48;2;36;38;52m`;
 const GUTTER = `${ESC}38;2;92;98;124m`;
 const LABEL = `${ESC}3m${ESC}38;2;150;156;182m`;
+const HINT = `${ESC}38;2;92;98;124m`;
+/** Next to the language: the key that copies a block without its line numbers. */
+export const COPY_HINT = "alt+c ⧉";
 const FG_OFF = `${ESC}39m`;
 
 export interface CodeOptions {
@@ -30,8 +33,9 @@ export function codeBlock(lines: string[], opts: CodeOptions): string[] {
   const inner = width - 2;
   const codeWidth = Math.max(4, inner - digits - 2);
   const name = languageName(opts.lang);
-  // The language sits in the top-right corner, a couple of columns in from the edge.
-  const label = name === "" ? "" : `${" ".repeat(Math.max(0, inner - name.length - 2))}${LABEL}${name}${RESET}`;
+  // The language sits in the top-right corner, a couple of columns in from the edge, then the copy key.
+  const tail = `${name === "" ? "" : `${LABEL}${name}${RESET}  `}${HINT}${COPY_HINT}${RESET}`;
+  const label = `${" ".repeat(Math.max(0, inner - visibleLength(tail) - 2))}${tail}`;
   // A padding row above the label keeps it off the pane's top edge.
   const rows: string[] = [row("", inner), row(label, inner)];
   let state: HighlightState = {};
