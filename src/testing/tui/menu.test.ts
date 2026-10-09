@@ -81,7 +81,7 @@ describe("slash menu rows", () => {
         created: 0,
         messages: [
           { id: "1", role: "user", content: "hi" },
-          { id: "2", role: "assistant", content: "", toolCalls: [{ id: "c", name: "read", args: {} }], usage: { input: 1000, output: 50 } },
+          { id: "2", role: "assistant", content: "", toolCalls: [{ id: "c", name: "read", args: {} }], usage: { input: 1000, output: 50, cacheRead: 750 } },
           { id: "3", role: "tool", toolCallId: "c", content: "ok" },
           { id: "4", role: "user", content: "[kinoko] nudge" },
         ],
@@ -97,5 +97,6 @@ describe("slash menu rows", () => {
     expect(text).toContain("1 calls, 1 results");
     expect(text).toContain("1,050 / 10,000 (11%)");
     expect(text).toContain("1,000 sent, 50 generated");
+    expect(text).toMatch(/Cached\s+│\s+75% \(750 of 1,000 sent\)/);
   });
 });

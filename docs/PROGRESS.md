@@ -416,3 +416,6 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Live, against the Qwen3.6 on :8085: "Soy Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M, operando bajo el nombre de Kinoko."
 - AGENTS.md: every change on its own branch; merge only when the user says so.
 - Tests: prompt (model line, modelName, a switch changes one block), loop (prompt per model), app (status line shows the name). `bun run check` passes (304 tests). Rebuilt and installed the binary from this branch.
+
+## feat/menu-improvements (branch feat/menu-improvements)
+- `/session`: a `Cached` row, the share of the tokens sent this session that the engine read from its cache (`usage.cacheRead`, summed over the session's messages, resumed ones included): "75% (750 of 1,000 sent)", or "nothing sent yet". llama.cpp reports it (`prompt_tokens_details.cached_tokens`, checked live on :8085), Anthropic too. Test: menu.test.
