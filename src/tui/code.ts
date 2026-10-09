@@ -1,7 +1,7 @@
 // A fenced code block drawn like an editor pane: a panel with its own background, the language's
 // full name in the top-right corner and syntax colours. Long lines soft-wrap at token boundaries
-// with a hanging indent, so the background never breaks. No line numbers and no margin before the
-// code: a terminal cannot make them unselectable, and a mouse copy must come out as the code itself.
+// with a hanging indent, so the background never breaks. No line numbers: a terminal cannot make
+// them unselectable, and a mouse copy should come out as the code (plus the two-column margin).
 
 import { highlightLine } from "./highlight.ts";
 import type { HighlightState } from "./highlight.ts";
@@ -24,9 +24,9 @@ export function codeBlock(lines: string[], opts: CodeOptions): string[] {
   const color = opts.color ?? true;
   if (!color) return lines.map((line) => `  ${line}`);
   const width = Math.max(12, opts.width);
-  // The label and blank rows keep a column of padding each side; code rows start at the very edge.
+  // A column of padding each side, and one more before the code: a two-column margin.
   const inner = width - 2;
-  const codeWidth = Math.max(4, width - 1);
+  const codeWidth = Math.max(4, inner - 1);
   const name = languageName(opts.lang);
   // The language sits in the top-right corner, a couple of columns in from the edge.
   const label = name === "" ? "" : `${" ".repeat(Math.max(0, inner - name.length - 2))}${LABEL}${name}${RESET}`;
@@ -40,7 +40,7 @@ export function codeBlock(lines: string[], opts: CodeOptions): string[] {
     // soft wrap, so it reads as the same line and not as the next one.
     const indent = /^ */.exec(line)?.[0].length ?? 0;
     const pieces = wrapCode(lit.text, codeWidth, Math.min(indent + 2, Math.floor(codeWidth / 2)));
-    for (const piece of pieces) rows.push(codeRow(piece, width));
+    for (const piece of pieces) rows.push(row(` ${piece}`, inner));
   }
   rows.push(row("", inner));
   return rows;
@@ -122,12 +122,6 @@ const NAMES: Record<string, string> = {
 export function languageName(lang: string): string {
   if (lang === "") return "";
   return NAMES[lang.toLowerCase()] ?? `${lang[0]?.toUpperCase() ?? ""}${lang.slice(1)}`;
-}
-
-/** A code row: the background from the panel's left edge, the code, then padding to `width`. */
-function codeRow(content: string, width: number): string {
-  const body = content.replaceAll(RESET, `${RESET}${PANEL}`);
-  return `${PANEL}${body}${" ".repeat(Math.max(0, width - visibleLength(content)))}${RESET}`;
 }
 
 /** One panel row: the background, a padding column each side, the content padded to `inner`. */
