@@ -42,7 +42,7 @@ export class Agent {
   #listeners: Set<(e: AgentEvent) => void> = new Set();
   #provider: Provider;
   #model: string;
-  #system: string;
+  #system: (model: string) => string;
   #tools: Tool[];
   #maxTurns: number;
   #maxCost: number;
@@ -64,7 +64,8 @@ export class Agent {
   constructor(opts: {
     provider: Provider;
     model: string;
-    system: string;
+    /** The system prompt, or one per model (it names the model, and the model can change). */
+    system: string | ((model: string) => string);
     tools: Tool[];
     maxTurns: number;
     maxCost: number;
@@ -74,7 +75,8 @@ export class Agent {
   }) {
     this.#provider = opts.provider;
     this.#model = opts.model;
-    this.#system = opts.system;
+    const system = opts.system;
+    this.#system = typeof system === "string" ? () => system : system;
     this.#tools = opts.tools;
     this.#maxTurns = opts.maxTurns;
     this.#maxCost = opts.maxCost;
@@ -196,7 +198,7 @@ export class Agent {
       const turn = new AbortController();
       const req: ProviderRequest = {
         model: this.#model,
-        system: this.#system,
+        system: this.#system(this.#model),
         messages: this.#ext ? this.#ext.chain("context", this.#messages) : this.#messages,
         tools: this.#tools,
         signal: AbortSignal.any([this.#abortController!.signal, turn.signal]),
@@ -376,7 +378,7 @@ export class Agent {
     const result = await compactHistory(this.#messages, {
       provider: this.#provider,
       model: this.#model,
-      system: this.#system,
+      system: this.#system(this.#model),
       signal: this.#abortController!.signal,
     });
     if (!result) return false;

@@ -2,6 +2,7 @@
 // serves (or its id typed by hand when the endpoint cannot list them).
 
 import type { SavedModel } from "../config.ts";
+import { modelName } from "../prompt.ts";
 import type { Served } from "../providers/openai-compat.ts";
 import type { InputPage, ListPage, MenuItem } from "./menu.ts";
 
@@ -44,7 +45,7 @@ export function modelsPage(view: ModelsView, choose: (choice: ModelChoice) => vo
   const items: MenuItem[] = [];
   for (const model of view.served ?? []) {
     choices.set(`served:${model}`, { kind: "served", model });
-    items.push({ name: model, description: model === view.model ? "in use" : "", current: model === view.model, key: `served:${model}` });
+    items.push({ name: modelName(model), description: model === view.model ? "in use" : "", current: model === view.model, key: `served:${model}` });
   }
   for (const [i, entry] of view.saved.entries()) {
     const here = entry.baseUrl === view.endpoint;
@@ -52,7 +53,7 @@ export function modelsPage(view: ModelsView, choose: (choice: ModelChoice) => vo
     choices.set(`saved:${i}`, { kind: "saved", entry });
     const current = here && entry.model === view.model;
     const removable = view.canAdd && !(view.fixed?.(entry) ?? false);
-    items.push({ name: entry.model, description: hostOf(entry.baseUrl), current, key: `saved:${i}`, removable });
+    items.push({ name: modelName(entry.model), description: hostOf(entry.baseUrl), current, key: `saved:${i}`, removable });
   }
   if (view.canAdd) {
     choices.set("add", { kind: "add" });
@@ -104,12 +105,13 @@ export function servedPage(host: string, served: Served[] | undefined, choose: (
     kind: "list",
     title: `Add model · 3/3 · ${host}`,
     items: (served ?? []).map((s) => ({
-      name: s.id,
+      name: modelName(s.id),
+      key: s.id,
       description: s.contextWindow ? `${s.contextWindow.toLocaleString("en-US")} tokens of context` : "",
     })),
     empty: "asking the endpoint which models it serves…",
     pick: (item) => {
-      const model = served?.find((s) => s.id === item.name);
+      const model = served?.find((s) => s.id === item.key);
       if (model) choose(model);
     },
   };

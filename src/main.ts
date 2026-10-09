@@ -204,13 +204,17 @@ if (previous && !tui) process.stderr.write(`[resumed ${session.meta.id}]\n`);
 // date is the session's own: a session resumed the next day keeps its prompt, and the engine's cache.
 const context = await discoverContext(cwd);
 const skills = await discoverSkills(cwd);
-const system = buildSystemPrompt({
-  cwd,
-  date: new Date(session.meta.created).toISOString().slice(0, 10),
-  tools: [...defaultTools(), ...ext.tools()],
-  context,
-  skills,
-});
+// The prompt names the model, so a switch from the models menu gets its own (the engine's cache is
+// lost on a switch anyway); for one model it stays byte-stable.
+const system = (model: string): string =>
+  buildSystemPrompt({
+    cwd,
+    model,
+    date: new Date(session.meta.created).toISOString().slice(0, 10),
+    tools: [...defaultTools(), ...ext.tools()],
+    context,
+    skills,
+  });
 
 ext.emit("session_start", { cwd: cwd, model: config.model });
 

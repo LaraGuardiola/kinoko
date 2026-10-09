@@ -266,4 +266,20 @@ describe("Agent loop with abort, steer and follow-up", () => {
     const users = agent.messages.filter((m: Message) => m.role === "user");
     expect(users.map((m) => m.images)).toEqual([[a], [b], undefined]);
   });
+
+  test("a system prompt per model: after setModel the next request carries the new model's prompt", async () => {
+    const systems: string[] = [];
+    const provider = {
+      stream: async function* (req: { system: string }): AsyncIterable<StreamEvent> {
+        systems.push(req.system);
+        yield { type: "text", delta: "ok" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "a", system: (model) => `Model: ${model}`, tools: [], maxTurns: 10, maxCost: 100 });
+    await agent.prompt("one");
+    agent.setModel("b");
+    await agent.prompt("two");
+    expect(systems).toEqual(["Model: a", "Model: b"]);
+  });
 });
