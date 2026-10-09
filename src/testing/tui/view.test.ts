@@ -272,6 +272,10 @@ describe("tool blocks", () => {
     expect(toolSummary("bash", { cmd: "ls  -la\n| wc" })).toBe("ls -la | wc");
     expect(toolSummary("search", { pattern: "foo", path: "src" })).toBe("foo in src");
     expect(toolSummary("mytool", { a: 1 })).toBe('{"a":1}');
+    // A todo call: how far the plan is and the step at hand, never its JSON.
+    const items = [{ text: "read", status: "done" }, { text: "write the parser", status: "in_progress" }, { text: "tests", status: "pending" }];
+    expect(toolSummary("todo", { items })).toBe("1/3 · write the parser");
+    expect(toolSummary("todo", { items: [{ text: "a", status: "done" }] })).toBe("1/1 · all done");
   });
 
   test("name in bold yellow, argument in bold white", () => {

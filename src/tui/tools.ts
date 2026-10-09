@@ -3,6 +3,7 @@
 
 import { ANSI, visibleLength, wrapAnsi } from "./style.ts";
 import type { ToolView } from "./view.ts";
+import { TODO_TOOL, todosOf } from "./todos.ts";
 
 /** Rows of tool output shown before the block collapses (ctrl+t expands). */
 export const COMPACT_ROWS = 3;
@@ -44,8 +45,18 @@ export function toolSummary(name: string, args: unknown, fallback = true): strin
   else if (name === "search") main = [str("pattern"), str("path")].filter((part) => part !== "").join(" in ");
   else if (name === "web_search") main = str("query");
   else if (name === "web_fetch") main = str("url");
+  else if (name === TODO_TOOL) main = planSummary(args);
   if (main === "" && !fallback) return "";
   return oneLine(main === "" ? JSON.stringify(a) : main, 100);
+}
+
+/** A todo call in one line: how far the plan is, and the step at hand ("1/4 · write the parser"). */
+function planSummary(args: unknown): string {
+  const todos = todosOf(args);
+  if (todos === undefined) return "";
+  const done = todos.filter((t) => t.status === "done").length;
+  const now = todos.find((t) => t.status === "in_progress") ?? todos.find((t) => t.status !== "done");
+  return now === undefined ? `${done}/${todos.length} · all done` : `${done}/${todos.length} · ${now.text}`;
 }
 
 /** A tool failed when it says so: an ERROR result, a non-zero exit or a timeout (see bash.ts). */

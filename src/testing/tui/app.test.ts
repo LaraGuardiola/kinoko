@@ -2,6 +2,7 @@ import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
 import type { ModelsHost } from "../../tui/app.ts";
+import type { ChangesSource } from "../../tui/side.ts";
 import type { SavedModel } from "../../config.ts";
 import type { Served } from "../../providers/openai-compat.ts";
 import { Agent } from "../../loop.ts";
@@ -77,6 +78,7 @@ async function harness(
     thinkingProfile?: string;
     modelsHost?: ModelsHost;
     clipboard?: (signal: AbortSignal) => Promise<Image | string>;
+    changes?: ChangesSource;
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -109,6 +111,7 @@ async function harness(
     session: session,
     rebuild: () => agent,
     clipboard: opts.clipboard,
+    changes: opts.changes ?? (async () => []), // never the real git
     cwd: ROOT,
   });
   return {
@@ -946,5 +949,68 @@ describe("@ file references", () => {
     h.press("\r"); // closed: Enter sends as usual
     await settle(h.agent);
     expect(h.calls()[0]!.messages.at(-1)!.content).toBe("@refdir/sub/");
+  });
+});
+
+/** The live region once async work (git, size answers) has landed. */
+async function paint(h: Harness): Promise<string> {
+  await new Promise((r) => setTimeout(r, 40));
+  h.app.render();
+  return frame(h).join("\n");
+}
+
+describe("side panel", () => {
+  const WIDE = "\x1b[4;814;1800t\x1b[5;1080;1920t"; // the terminal: a window 94% of the screen
+  const HALF = "\x1b[4;814;900t"; // ...then tiled to half of it
+  const todo: Tool = { name: "todo", description: "", schema: {}, readOnly: true, run: async () => "Plan: 0/2 done" };
+  const plan = { items: [{ text: "read the loop", status: "done" }, { text: "draw the panel", status: "in_progress" }] };
+
+  test("comes with a window two thirds of the screen wide, goes when it is tiled narrower", async () => {
+    // 120 columns: under WIDE_COLS, so nothing until the terminal says how big the screen is.
+    const h = await harness([], { viewportCols: 120, viewportRows: 30, changes: async () => [{ path: "src/a.ts", added: 3, removed: 1 }] });
+    expect(await paint(h)).not.toContain("Changes");
+    h.press(WIDE);
+    const shown = await paint(h);
+    expect(shown).toContain("Plan");
+    expect(shown).toContain("no plan yet");
+    expect(shown).toMatch(/src\/a\.ts +\+3 −1/);
+    h.press(HALF);
+    expect(await paint(h)).not.toContain("Plan");
+    expect(h.app.editorText).toBe(""); // the reports typed nothing
+  });
+
+  test("the model's todo calls are the plan; the changes are read again after each tool", async () => {
+    let reads = 0;
+    const h = await harness(
+      [
+        [{ type: "tool_call", call: { id: "t1", name: "todo", args: plan } }, { type: "done", stop: "tool_use" }],
+        [{ type: "text", delta: "on it" }, { type: "done", stop: "end" }],
+      ],
+      { tools: [todo], viewportCols: 180, viewportRows: 30, changes: async () => (reads++, []) },
+    );
+    h.press(WIDE);
+    await paint(h);
+    const before = reads;
+    h.press("go\r");
+    await settle(h.agent);
+    const shown = await paint(h);
+    expect(shown).toContain("✓ read the loop");
+    expect(shown).toContain("● draw the panel");
+    expect(shown).toMatch(/Plan +1\/2/);
+    expect(reads).toBeGreaterThan(before);
+  });
+
+  test("a resumed session shows its last plan", async () => {
+    const h = await harness([], { viewportCols: 180, viewportRows: 30 });
+    h.press(WIDE);
+    h.app.replay(
+      [
+        { id: "1", role: "user", content: "go" },
+        { id: "2", role: "assistant", content: "", toolCalls: [{ id: "t1", name: "todo", args: plan }] },
+        { id: "3", role: "tool", content: "Plan: 1/2 done", toolCallId: "t1" },
+      ],
+      "resumed",
+    );
+    expect(await paint(h)).toContain("● draw the panel");
   });
 });

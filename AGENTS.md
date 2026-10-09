@@ -52,5 +52,5 @@ src/tools/         read, write, edit, bash, search, budget, tracker, registry
 src/context.ts     AGENTS.md / skills discovery      src/prompt.ts  system prompt builder
 src/session.ts     append-only JSONL (id + parentId)  src/compact.ts threshold compaction
 src/ext.ts         extension loader + event bus       src/config.ts  layered config
-src/tui/           raw-ANSI renderer, editor, markdown-lite, slash menu
+src/tui/           raw-ANSI renderer, editor, markdown-lite, slash menu, side panel (plan + git changes)
 src/testing/       the tests, same layout as src/ (src/testing/tui/app.test.ts tests src/tui/app.ts)

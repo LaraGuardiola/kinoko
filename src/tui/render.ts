@@ -9,6 +9,7 @@
 // it), otherwise its top scrolls out of reach and cannot be repainted.
 
 import { wrapAnsi } from "./view.ts";
+import { visibleLength } from "./style.ts";
 
 const ESC = "\x1b[";
 const CLEAR_BELOW = `${ESC}J`;
@@ -43,8 +44,11 @@ export class Renderer {
   #now: () => number;
   #columns: () => number;
   #drawn: string[] = [];
-  /** Where we left the cursor, in rows below the top of the drawn region. */
+  /** Where we left the cursor, in rows below the top of the drawn region, and its column. */
   #cursorRow = 0;
+  #cursorCol = 0;
+  /** The terminal's width when the region was drawn: a narrower one has re-wrapped its rows. */
+  #paintedCols: number | undefined;
   #lastAt = 0;
   #dirty = false;
   #state: RenderState = { lines: [], row: 0, col: 0 };
@@ -106,9 +110,16 @@ export class Renderer {
     return [...this.#drawn];
   }
 
-  /** Escape that puts the cursor on the first column of the region's top row. */
+  /**
+   * Escape that puts the cursor on the first column of the region's top row. After the window got
+   * narrower, the terminal has re-wrapped (reflowed) the rows drawn wider than it now is, and the
+   * cursor moved with them: the way up is then longer than the rows that were drawn.
+   */
   #moveToTop(): string {
-    return `${this.#cursorRow > 0 ? `${ESC}${this.#cursorRow}A` : ""}\r`;
+    const cols = this.#columns();
+    const shrunk = this.#paintedCols !== undefined && cols < this.#paintedCols;
+    const up = shrunk ? reflowedUp(this.#drawn, this.#cursorRow, this.#cursorCol, cols) : this.#cursorRow;
+    return `${up > 0 ? `${ESC}${up}A` : ""}\r`;
   }
 
   /** Writes the region from the cursor (already at its top, nothing below) and parks the cursor. */
@@ -118,6 +129,8 @@ export class Renderer {
     this.#lastAt = this.#now();
     this.#drawn = [...lines];
     this.#cursorRow = 0;
+    this.#cursorCol = 0;
+    this.#paintedCols = this.#columns();
     if (lines.length === 0) return "";
     let out = lines.map((line) => ` ${line}`).join("\r\n");
     // The cursor is after the last row now; walk back up to the editor row.
@@ -125,8 +138,20 @@ export class Renderer {
     if (up > 0) out += `${ESC}${up}A`;
     out += `${ESC}${col + 2}G`;
     this.#cursorRow = row;
+    this.#cursorCol = col;
     return out;
   }
+}
+
+/**
+ * Rows from the cursor up to the region's top once a terminal `cols` wide has reflowed it: each row
+ * drawn above the cursor's (with the renderer's one-column margin) now takes as many rows as it
+ * needs, and the cursor sits on the wrapped part of its own row that holds its column.
+ */
+export function reflowedUp(drawn: string[], row: number, col: number, cols: number): number {
+  const width = Math.max(1, cols);
+  const above = drawn.slice(0, row).reduce((n, line) => n + Math.max(1, Math.ceil((visibleLength(line) + 1) / width)), 0);
+  return above + Math.floor((col + 1) / width);
 }
 
 function sameState(a: RenderState, b: RenderState): boolean {

@@ -33,11 +33,13 @@ export type KeyName =
   | "ctrl-t" // expand/collapse tool output
   | "ctrl-o" // newline while idle (Alt+Enter is taken by follow-up)
   | "ctrl-v" // paste an image from the clipboard
+  | "size-report" // the terminal answering SIZE_QUERY: its window or the screen, in pixels
   | "unknown";
 
 export interface Key {
   name: KeyName;
   char?: string; // for "char" and "paste"
+  size?: { of: "window" | "screen"; width: number; height: number }; // for "size-report"
   alt?: boolean;
   ctrl?: boolean;
 }
@@ -228,6 +230,7 @@ function csi(s: string): null | { key: Key; length: number } {
   const final = body[finalAt] ?? "";
   const length = 2 + finalAt + 1;
   if (final === "u") return { key: kittyKey(params), length: length };
+  if (final === "t") return { key: sizeReport(params), length: length };
   // Keypad sequences are numbered and end in `~`: \x1b[3~ is delete.
   if (final === "~") {
     const name = CSI[`${params}~`];
@@ -242,6 +245,19 @@ function csi(s: string): null | { key: Key; length: number } {
   if (modifier === "3") key.alt = true;
   if (modifier === "5") key.ctrl = true;
   return { key: key, length: length };
+}
+
+/**
+ * Asks the terminal for its window and the screen, in pixels (XTWINOPS 14;2 and 15: foot, xterm,
+ * kitty...). The answers come back on stdin as `CSI 4;h;w t` and `CSI 5;h;w t`; terminals that do
+ * not know them stay silent.
+ */
+export const SIZE_QUERY = "\x1b[14;2t\x1b[15t";
+
+function sizeReport(params: string): Key {
+  const [kind, height, width] = params.split(";").map(Number);
+  if ((kind !== 4 && kind !== 5) || !height || !width) return { name: "unknown" };
+  return { name: "size-report", size: { of: kind === 4 ? "window" : "screen", width, height } };
 }
 
 /**
@@ -291,6 +307,7 @@ export class Term {
   };
   #onResize = (): void => {
     this.#handlers?.resize(this.cols, this.rows);
+    this.write(SIZE_QUERY); // the window's share of the screen changed too
   };
   #decoder = new TextDecoder();
 
@@ -321,7 +338,7 @@ export class Term {
     process.stdin.on("data", this.#onData);
     process.stdout.on("resize", this.#onResize);
     // Bracketed paste on; kitty keyboard protocol level 1 (terminals without it ignore the push).
-    this.write("\x1b[?2004h\x1b[>1u");
+    this.write(`\x1b[?2004h\x1b[>1u${SIZE_QUERY}`);
   }
 
   stop(): void {

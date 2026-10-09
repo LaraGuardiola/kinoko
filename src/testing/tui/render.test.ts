@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { Renderer } from "../../tui/render.ts";
+import { Renderer, reflowedUp } from "../../tui/render.ts";
 
 /** Collects every write, with a clock the test drives. */
 function harness(start = 0): { renderer: Renderer; out: string[]; tick: (ms: number) => boolean } {
@@ -128,5 +128,25 @@ describe("tui renderer", () => {
     renderer.flush();
     renderer.release();
     expect(out[1]).toBe("\x1b[2B\r\n\x1b[?25h");
+  });
+
+  test("8. after the window got narrower, the way up counts the rows the terminal re-wrapped", () => {
+    // Rows of 40 columns (plus the margin) in a terminal now 20 wide: 3 rows each.
+    const wide = "x".repeat(40);
+    expect(reflowedUp([wide, wide, "short"], 2, 0, 20)).toBe(6);
+    expect(reflowedUp([wide, "short"], 1, 30, 20)).toBe(4); // the cursor is on its row's second part
+    let cols = 80;
+    const out: string[] = [];
+    const renderer = new Renderer({ write: (text) => out.push(text), columns: () => cols, now: () => 1000 });
+    renderer.update({ lines: [wide, wide, "> "], row: 2, col: 2 });
+    renderer.flush();
+    cols = 20; // the user tiled the window to a quarter
+    renderer.update({ lines: ["> "], row: 0, col: 2 });
+    renderer.flush();
+    expect(out[1]).toStartWith(`${SYNC_ON}\x1b[6A\r\x1b[J`); // not just the 2 rows that were drawn
+    cols = 80; // wider again: nothing was re-wrapped, the plain way up
+    renderer.update({ lines: ["a", "> "], row: 1, col: 2 });
+    renderer.flush();
+    expect(out[2]).toStartWith(`${SYNC_ON}\r\x1b[J`);
   });
 });

@@ -32,6 +32,8 @@ import type { Image, Message } from "../types.ts";
 import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
+import { SidePanel } from "./side.ts";
+import type { ChangesSource } from "./side.ts";
 
 
 
@@ -61,8 +63,10 @@ export interface AppOptions {
   rebuild?: () => Agent;
   /** Reads the clipboard image for Ctrl+V (an Image, or why not). Tests pass a fake. */
   clipboard?: (signal: AbortSignal) => Promise<Image | string>;
-  /** Where a pasted relative image path is read from. */
+  /** Where a pasted relative image path is read from, and git is asked about changes. */
   cwd?: string;
+  /** The side panel's changes (git by default). Tests pass a fake. */
+  changes?: ChangesSource;
 }
 
 /** What the models page needs from outside the TUI: other endpoints, and somewhere to save them. */
@@ -106,6 +110,7 @@ export class App {
   #clipboard: (signal: AbortSignal) => Promise<Image | string>;
   #cwd: string;
   #files: FilePicker;
+  #side: SidePanel;
 
   #running = false;
   // The block being streamed (thinking or answer).
@@ -144,6 +149,7 @@ export class App {
     this.#clipboard = opts.clipboard ?? ((signal) => clipboardImage(signal));
     this.#cwd = opts.cwd ?? process.cwd();
     this.#files = new FilePicker(this.#cwd, () => this.render());
+    this.#side = new SidePanel(this.#cwd, () => this.render(), opts.changes);
     this.#agent.on((e) => this.#onAgentEvent(e));
     this.#refreshPlace();
   }
@@ -169,6 +175,7 @@ export class App {
     this.#print("system", note);
     for (const block of replayBlocks(messages, this.#viewportCols)) this.#print(block.kind, block.text);
     this.#images.startAfter(messages.reduce((n, m) => n + (m.images?.length ?? 0), 0));
+    this.#side.history(messages);
     const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
     if (usage) this.#tokens.context = usage.input + usage.output;
     // The session's totals so far: what was sent, read from the cache and generated.
@@ -234,6 +241,13 @@ export class App {
   // ---- input ----
 
   handleKey(key: Key): void {
+    // The terminal answering the size query: the side panel may come or go.
+    if (key.name === "size-report") {
+      if (key.size) this.#side.size(key.size);
+      this.#renderer.update(this.#state());
+      this.#renderer.flush();
+      return;
+    }
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
     if (this.#menuKey(key)) return;
     if (this.#fileKey(key)) return;
@@ -396,6 +410,7 @@ export class App {
       case "tool_start":
         this.#closeBlock();
         this.#pending = undefined;
+        this.#side.toolCall(e.call);
         this.#tool = {
           name: e.call.name,
           args: toolSummary(e.call.name, e.call.args),
@@ -414,6 +429,8 @@ export class App {
         this.#printTool();
         // A tool may have run `git init` or switched branch: show it now, not when the run ends.
         this.#refreshPlace();
+        // ...and may have changed files: the side panel's changes too, while it is on screen.
+        if (this.#side.visible(this.#viewportCols)) this.#side.refresh();
         return;
       case "message_end":
         this.#finishMessage(e.message);
@@ -476,6 +493,7 @@ export class App {
 
   #finishRun(reason: RunResult["reason"], dropped: string[] | undefined, detail?: string): void {
     this.#refreshPlace();
+    if (this.#side.visible(this.#viewportCols)) this.#side.refresh();
     this.#running = false;
     this.#pending = undefined;
     this.#queued = [];
@@ -565,8 +583,16 @@ export class App {
   }
 
   #state(): { lines: string[]; row: number; col: number } {
+    const cols = this.#viewportCols;
+    // Wide enough: the plan and the changes in a column on the right, the rest narrowed beside it.
+    if (cols !== undefined && this.#side.visible(cols)) return this.#side.region(cols, this.#viewportRows, (left) => this.#region(left));
+    return this.#region(cols);
+  }
+
+  /** The live region for `cols` columns: the open block, the tool, the editor, the status... */
+  #region(cols: number | undefined): { lines: string[]; row: number; col: number } {
     // The block cursor may sit one column past the text, plus the renderer's margins.
-    const editorWidth = Math.max(1, (this.#viewportCols ?? 80) - 3);
+    const editorWidth = Math.max(1, (cols ?? 80) - 3);
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
       open: this.#open,
@@ -585,7 +611,7 @@ export class App {
       thinking: this.#thinking,
       menu: this.#menuRows(),
       viewportRows: this.#viewportRows,
-      viewportCols: this.#viewportCols,
+      viewportCols: cols,
     });
   }
 
