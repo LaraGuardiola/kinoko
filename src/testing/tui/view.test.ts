@@ -60,7 +60,7 @@ describe("live region", () => {
   test("finished history is NOT part of the region any more (it lives in the scrollback)", () => {
     const region = liveRegion(input({ viewportRows: 10 }));
     expect(region.lines.join("\n")).not.toContain("answer");
-    expect(Object.keys(region).toSorted()).toEqual(["col", "lines", "row"]);
+    expect(Object.keys(region).toSorted()).toEqual(["col", "lines", "row", "upper"]);
   });
 
   test("the open block renders above the editor, the thinking style is dim italic", () => {
@@ -314,21 +314,14 @@ describe("tool blocks", () => {
 
 const strip = (s: string): string => s.replace(new RegExp(`${String.fromCharCode(27)}\\[[0-9;?]*[A-Za-z]`, "g"), "");
 
-describe("the plan and changes band", () => {
-  test("sits between the streamed text and the input; the input and status stay below it", () => {
-    const r = liveRegion(input({ open: { kind: "assistant", text: "streaming", gap: false }, panel: ["BAND1", "BAND2"], editorLines: ["typed"], editorRow: 0, editorCol: 2 }));
+describe("beside a side column", () => {
+  test("the streamed text takes tailCols; the rules, editor and status keep the full width; upper counts the rows above the rule", () => {
+    const r = liveRegion(input({ open: { kind: "assistant", text: "word ".repeat(20).trim(), gap: false }, tailCols: 30, viewportCols: 80, viewportRows: 30, place: "~/p" }));
     const rows = r.lines.map(strip);
-    const at = (text: string): number => rows.findIndex((row) => row.includes(text));
-    expect(at("streaming")).toBeLessThan(at("BAND1"));
-    expect(at("BAND2")).toBe(at("BAND1") + 1);
-    expect(at("BAND2")).toBeLessThan(at("typed"));
-    expect(rows[r.row]).toContain("typed"); // the cursor stays on the editor row
-  });
-
-  test("a short window drops the band before it drops any of the input", () => {
-    const band = Array.from({ length: 8 }, (_, i) => `BAND${i}`);
-    const r = liveRegion(input({ panel: band, viewportRows: 9, viewportCols: 80 }));
-    expect(r.lines.map(strip).some((row) => row.includes("BAND"))).toBe(false);
-    expect(r.lines.length).toBeLessThanOrEqual(9);
+    const rule = rows.findIndex((row) => row.startsWith("───"));
+    expect(r.upper).toBe(rule); // the streamed rows and the blank row before the rule
+    for (const row of rows.slice(0, rule)) expect(row.length).toBeLessThanOrEqual(28);
+    expect(rows[rule]!.length).toBe(78);
+    expect(rows.at(-1)).toContain("IDLE");
   });
 });

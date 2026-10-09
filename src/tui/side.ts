@@ -5,12 +5,9 @@
 import type { Message, ToolCall } from "../types.ts";
 import { gitChanges } from "./changes.ts";
 import type { FileChange } from "./changes.ts";
-import { panelBand, wideEnough } from "./panel.ts";
+import { panelRows, panelWidth, wideEnough } from "./panel.ts";
 import { TODO_TOOL, latestTodos, todosOf } from "./todos.ts";
 import type { Todo } from "./todos.ts";
-
-/** The share of the window's rows the band may take at most. */
-const PANEL_SHARE = 0.4;
 
 export type ChangesSource = (signal: AbortSignal) => Promise<FileChange[] | undefined>;
 
@@ -91,14 +88,19 @@ export class SidePanel {
       });
   }
 
+  /** The window changed size: its share of the screen is unknown until the terminal answers again. */
+  resized(): void {
+    this.#window = undefined;
+  }
+
   /**
-   * The band for a window `cols` wide and `rows` tall, or nothing when it has no room. It takes at
-   * most PANEL_SHARE of the rows, so the streaming text above it keeps some too.
+   * The column for a window `cols` wide, or undefined when it has no room: its width, its rows for
+   * a height, and a key that changes when what it shows does.
    */
-  band(cols: number | undefined, rows: number | undefined): string[] {
-    if (!this.visible(cols) || cols === undefined) return [];
-    const most = Math.max(6, Math.floor((rows ?? 24) * PANEL_SHARE));
-    // The renderer keeps a column of margin each side.
-    return panelBand({ todos: this.#todos, changes: this.#changes }, cols - 2, most);
+  column(cols: number | undefined): { width: number; rows: (height: number) => string[]; key: string } | undefined {
+    if (cols === undefined || !this.visible(cols)) return undefined;
+    const width = panelWidth(cols);
+    const facts = { todos: this.#todos, changes: this.#changes };
+    return { width, rows: (height) => panelRows(facts, width, height), key: JSON.stringify([width, facts]) };
   }
 }

@@ -952,34 +952,41 @@ describe("@ file references", () => {
   });
 });
 
-/** The live region once async work (git, size answers) has landed. */
+/** The last repaint once async work (git, the terminal's answers) has landed, ANSI stripped. */
 async function paint(h: Harness): Promise<string> {
   await new Promise((r) => setTimeout(r, 40));
   h.app.render();
-  return frame(h).join("\n");
+  return (h.out.findLast((chunk) => chunk.includes("tok")) ?? "").replace(ANSI, "");
 }
 
 describe("side panel", () => {
   const WIDE = "\x1b[4;814;1800t\x1b[5;1080;1920t"; // the terminal: a window 94% of the screen
   const HALF = "\x1b[4;814;900t"; // ...then tiled to half of it
-  const todo: Tool = { name: "todo", description: "", schema: {}, readOnly: true, run: async () => "Plan: 0/2 done" };
+  const HERE = "\x1b[24;3R"; // ...and where its cursor is (the region's editor row)
+  const todo: Tool = { name: "todo", description: "", schema: {}, readOnly: true, run: async () => "Plan: 1/2 done" };
   const plan = { items: [{ text: "read the loop", status: "done" }, { text: "draw the panel", status: "in_progress" }] };
 
-  test("comes with a window two thirds of the screen wide, goes when it is tiled narrower", async () => {
+  test("a column from the screen's top row, once the terminal said where the region is; gone when tiled narrower", async () => {
     // 120 columns: under WIDE_COLS, so nothing until the terminal says how big the screen is.
     const h = await harness([], { viewportCols: 120, viewportRows: 30, changes: async () => [{ path: "src/a.ts", added: 3, removed: 1 }] });
     expect(await paint(h)).not.toContain("Changes");
     h.press(WIDE);
+    expect(await paint(h)).not.toContain("Changes"); // wide, but where to draw it is not known yet
+    h.press(HERE);
     const shown = await paint(h);
     expect(shown).toContain("Plan");
     expect(shown).toContain("no plan yet");
     expect(shown).toMatch(/src\/a\.ts +\+3 −1/);
+    const raw = h.out.findLast((chunk) => chunk.includes("tok")) ?? "";
+    expect(raw).toContain(`\x1b[1;${120 - 36}H`); // its first row: the screen's top, the right columns
     h.press(HALF);
+    const gone = h.out.findLast((chunk) => chunk.includes("tok")) ?? "";
+    expect(gone).toContain(`\x1b[1;${120 - 36}H\x1b[K`); // erased where it was
     expect(await paint(h)).not.toContain("Plan");
-    expect(h.app.editorText).toBe(""); // the reports typed nothing
+    expect(h.app.editorText).toBe(""); // the answers typed nothing
   });
 
-  test("the model's todo calls are the plan; the changes are read again after each tool", async () => {
+  test("the model's todo calls are the plan, with no block in the transcript; changes are read after each tool", async () => {
     let reads = 0;
     const h = await harness(
       [
@@ -988,7 +995,7 @@ describe("side panel", () => {
       ],
       { tools: [todo], viewportCols: 180, viewportRows: 30, changes: async () => (reads++, []) },
     );
-    h.press(WIDE);
+    h.press(WIDE + HERE);
     await paint(h);
     const before = reads;
     h.press("go\r");
@@ -998,11 +1005,12 @@ describe("side panel", () => {
     expect(shown).toContain("● draw the panel");
     expect(shown).toMatch(/Plan +1\/2/);
     expect(reads).toBeGreaterThan(before);
+    expect(h.screen()).not.toContain("todo 1/2"); // the column shows it: no tool block
   });
 
   test("a resumed session shows its last plan", async () => {
     const h = await harness([], { viewportCols: 180, viewportRows: 30 });
-    h.press(WIDE);
+    h.press(WIDE + HERE);
     h.app.replay(
       [
         { id: "1", role: "user", content: "go" },

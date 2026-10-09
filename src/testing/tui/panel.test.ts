@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PANEL_BG, columns, panelBand, shortPath, wideEnough } from "../../tui/panel.ts";
+import { PANEL_BG, panelRows, panelWidth, shortPath, splitRoom, wideEnough } from "../../tui/panel.ts";
 import { visibleLength } from "../../tui/style.ts";
 import type { Todo } from "../../tui/todos.ts";
 
@@ -17,53 +17,60 @@ describe("side panel", () => {
     expect(wideEnough(150, undefined)).toBe(true);
     expect(wideEnough(120, undefined)).toBe(false);
     expect(wideEnough(90, 1)).toBe(false); // a whole small screen is still too narrow
-    expect(columns(100)).toEqual([53, 44]); // the plan a little wider: its lines are longer
+    expect(panelWidth(100)).toBe(36);
+    expect(panelWidth(180)).toBe(49);
+    expect(panelWidth(300)).toBe(60);
   });
 
-  test("one band: every row the full width on its background, plan | changes, padding above and below", () => {
+  test("every row is the panel's width on its background; plan, progress, rule, changes", () => {
     const changes = [
       { path: "src/tui/app.ts", added: 48, removed: 12 },
       { path: "src/tui/panel.ts", added: 214, removed: 0, fresh: true },
       { path: "logo.png", added: 0, removed: 0, binary: true },
     ];
-    const rows = panelBand({ todos: plan, changes }, 80, 20);
+    const facts = { todos: plan, changes };
+    const height = 12; // what it needs: padding, header, bar, 3 items, rule, header, 3 files, padding
+    const rows = panelRows(facts, 40, height);
+    expect(rows).toHaveLength(height);
     for (const row of rows) {
-      expect(visibleLength(row)).toBe(80);
+      expect(visibleLength(row)).toBe(40);
       expect(row.startsWith(PANEL_BG)).toBe(true);
     }
-    const [left] = columns(78);
-    const text = rows.map((r) => strip(r));
-    expect(text).toHaveLength(7); // as tall as the taller column (header, bar, 3 items) plus padding
-    expect(text[0]!.trim()).toBe("");
-    expect(text.at(-1)!.trim()).toBe("");
-    const halves = text.slice(1, -1).map((r) => [r.slice(1, 1 + left).trimEnd(), r.slice(1 + left + 3).trimEnd()]);
-    expect(halves).toEqual([
-      [`Plan${" ".repeat(left - 7)}1/3`, "Changes           3 files +262 −12"],
-      [`${"━".repeat(14)}${"━".repeat(left - 14)}`, "src/tui/app.ts             +48 −12"],
-      ["✓ read the loop", "src/tui/panel.ts          new +214"],
-      ["● draw the panel", "logo.png                       bin"],
-      ["○ tests", ""],
+    const text = rows.map((r) => strip(r).trimEnd());
+    expect(text).toEqual([
+      "",
+      " Plan                               1/3",
+      ` ${"━".repeat(13)}${"━".repeat(25)}`,
+      " ✓ read the loop",
+      " ● draw the panel",
+      " ○ tests",
+      ` ${"─".repeat(38)}`,
+      " Changes               3 files +262 −12",
+      " src/tui/app.ts                 +48 −12",
+      " src/tui/panel.ts              new +214",
+      " logo.png                           bin",
+      "",
     ]);
-    expect(text[1]!.charAt(1 + left + 1)).toBe("│"); // the divider, straight down the band
-    expect(text[5]!.charAt(1 + left + 1)).toBe("│");
   });
 
   test("empty states: no plan yet (and no bar), not a git repository, no changes", () => {
-    const none = panelBand({ todos: [], changes: undefined }, 80, 20).map((r) => strip(r));
-    expect(none).toHaveLength(4);
-    expect(none[1]).toMatch(/^ Plan +│ Changes +$/);
-    expect(none[2]).toMatch(/^ no plan yet +│ not a git repository +$/);
-    expect(panelBand({ todos: [], changes: [] }, 80, 20).map((r) => strip(r))[2]).toContain("no changes");
+    const none = panelRows({ todos: [], changes: undefined }, 36, 7).map((r) => strip(r).trim());
+    expect(none).toEqual(["", "Plan", "no plan yet", "─".repeat(34), "Changes", "not a git repository", ""]);
+    expect(panelRows({ todos: [], changes: [] }, 36, 7).map((r) => strip(r).trim())[5]).toBe("no changes");
   });
 
-  test("capped: a long plan keeps the work at hand in view, long changes say how many more", () => {
-    const long: Todo[] = Array.from({ length: 16 }, (_, i) => ({ text: `step ${i + 1}`, status: i < 8 ? "done" : i === 8 ? "in_progress" : "pending" }));
-    const changes = Array.from({ length: 12 }, (_, i) => ({ path: `f${i}.ts`, added: 1, removed: 0 }));
-    const text = panelBand({ todos: long, changes }, 80, 10).map((r) => strip(r));
-    expect(text).toHaveLength(10);
-    expect(text.some((r) => r.includes("● step 9"))).toBe(true);
-    expect(text.some((r) => /… \d+ more rows?/.test(r))).toBe(true);
-    expect(text.some((r) => /… \d+ more files?/.test(r))).toBe(true);
+  test("short of rows: each section gets about half, the plan keeps the work at hand in view", () => {
+    expect(splitRoom(3, 4, 10)).toEqual([3, 4]);
+    expect(splitRoom(2, 20, 10)).toEqual([2, 8]);
+    expect(splitRoom(20, 2, 10)).toEqual([8, 2]);
+    expect(splitRoom(20, 20, 10)).toEqual([5, 5]);
+    const long: Todo[] = Array.from({ length: 12 }, (_, i) => ({ text: `step ${i + 1}`, status: i < 8 ? "done" : i === 8 ? "in_progress" : "pending" }));
+    const changes = Array.from({ length: 10 }, (_, i) => ({ path: `f${i}.ts`, added: 1, removed: 0 }));
+    const text = panelRows({ todos: long, changes }, 36, 16).map((r) => strip(r).trim());
+    expect(text).toHaveLength(16);
+    expect(text).toContain("● step 9"); // in progress: in view
+    expect(text.some((r) => /^… \d+ more rows?$/.test(r))).toBe(true);
+    expect(text.some((r) => /^… \d+ more files?$/.test(r))).toBe(true);
   });
 
   test("a long path keeps its file name; directories give way from the left", () => {

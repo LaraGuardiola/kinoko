@@ -215,6 +215,7 @@ if (tui) {
   term.write(`${ansi.clearScreen}${ansi.hide}\n`);
   app.intro(startup);
   if (previous) app.replay(agent.messages, `resumed session ${session.meta.id}`);
+  app.locate(); // where the region sits on the screen: the side column is drawn from its top row
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
   clearInterval(loop);

@@ -71,8 +71,8 @@ export interface RegionInput {
   thinking?: string;
   /** The slash menu's rows, between the rule under the editor and the place line. */
   menu?: string[];
-  /** The plan and changes band (panel.ts), full width, between the streamed text and the input. */
-  panel?: string[];
+  /** Columns for the rows above the input's rule (the streamed text), when a side column takes the rest. */
+  tailCols?: number;
   viewportRows?: number;
   viewportCols?: number;
 }
@@ -81,6 +81,8 @@ export interface Region {
   lines: string[];
   row: number;
   col: number;
+  /** Rows above the input's rule (a side column runs down beside them). */
+  upper: number;
 }
 
 /** A finished block as terminal rows. Used both for scrollback and for the open block. */
@@ -171,7 +173,8 @@ export function liveRegion(input: RegionInput): Region {
   let tail: string[] = [];
   const open = input.open;
   if (open !== undefined) {
-    const text = formatBlock(open.kind, open.text, input.viewportCols === undefined ? undefined : input.viewportCols - 2);
+    const cols = input.tailCols ?? input.viewportCols;
+    const text = formatBlock(open.kind, open.text, cols === undefined ? undefined : cols - 2);
     if (text !== "") {
       if (open.gap) tail.push("");
       tail.push(...text.split("\n"));
@@ -199,12 +202,12 @@ export function liveRegion(input: RegionInput): Region {
   let foot = [rule, ...(input.menu ?? []), ...(input.place ? [placeRow(input.place)] : []), input.status];
 
   const viewport = input.viewportRows;
-  const width = input.viewportCols === undefined ? undefined : Math.max(1, input.viewportCols - 2);
+  const tailCols = input.tailCols ?? input.viewportCols;
+  const width = tailCols === undefined ? undefined : Math.max(1, tailCols - 2);
   if (width !== undefined) tail = tail.flatMap((line) => wrapAnsi(line, width));
-  let band = input.panel ?? [];
   if (viewport === undefined || viewport < 2) {
-    const rows = [...tail, ...band, ...head, ...editor, ...foot];
-    return region(rows, tail.length + band.length + head.length + input.editorRow, input.editorCol, input.viewportCols);
+    const rows = [...tail, ...head, ...editor, ...foot];
+    return region(rows, tail.length + head.length + input.editorRow, input.editorCol, input.viewportCols, tail.length + Math.min(1, head.length));
   }
 
   // The region must stay shorter than the terminal, or its top scrolls out of reach and cannot be
@@ -215,16 +218,15 @@ export function liveRegion(input: RegionInput): Region {
     head = [];
     foot = [input.status];
   }
-  // The band goes first when rows run short: the input never gives way to it.
-  if (viewport < head.length + foot.length + band.length + 2) band = [];
-  const editorRoom = Math.max(1, viewport - head.length - foot.length - band.length);
+  const editorRoom = Math.max(1, viewport - head.length - foot.length);
   const editorStartAt = Math.max(0, Math.min(input.editorRow - editorRoom + 1, editor.length - editorRoom));
   const visibleEditor = editor.length <= editorRoom ? editor : editor.slice(editorStartAt, editorStartAt + editorRoom);
-  const contentRoom = Math.max(0, viewport - visibleEditor.length - head.length - foot.length - band.length);
+  const contentRoom = Math.max(0, viewport - visibleEditor.length - head.length - foot.length);
   const visibleTail = contentRoom === 0 ? [] : tail.slice(-contentRoom);
-  const rows = [...visibleTail, ...band, ...head, ...visibleEditor, ...foot];
-  const row = visibleTail.length + band.length + head.length + input.editorRow - editorStartAt;
-  return region(rows, row, input.editorCol, input.viewportCols);
+  const rows = [...visibleTail, ...head, ...visibleEditor, ...foot];
+  const row = visibleTail.length + head.length + input.editorRow - editorStartAt;
+  // The rows above the rule: the streamed text and the blank row before the rule.
+  return region(rows, row, input.editorCol, input.viewportCols, visibleTail.length + Math.min(1, head.length));
 }
 
 /** The path in amanita's cream stem, the branch in its red cap. */
@@ -257,10 +259,10 @@ export function thinkingBlock(text: string): string {
 }
 
 /** Keeps a live row inside the terminal margin: terminals wrap a margin write on the next byte. */
-function region(rows: string[], row: number, col: number, width: number | undefined): { lines: string[]; row: number; col: number } {
-  if (width === undefined) return { lines: rows, row, col };
+function region(rows: string[], row: number, col: number, width: number | undefined, upper: number): Region {
+  if (width === undefined) return { lines: rows, row, col, upper };
   const max = Math.max(1, width - 2);
-  return { lines: rows.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max) };
+  return { lines: rows.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max), upper };
 }
 
 export function statusLine(parts: {

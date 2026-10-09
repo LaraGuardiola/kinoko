@@ -1,32 +1,20 @@
-// The model's plan, as the side panel shows it. The plan is whatever the last call to the `todo`
-// tool said (the todo extension, examples/ext/todo.ts): the whole list every time, so the newest
-// call is the truth and a resumed session finds it again in its history.
+// The model's plan, as the side panel shows it: whatever the last successful call to the core
+// `todo` tool (src/tools/todo.ts) said.
 
 import type { Message, ToolCall } from "../types.ts";
+import { TODO_TOOL, parseTodos } from "../tools/todo.ts";
+import type { Todo } from "../tools/todo.ts";
 
-export const TODO_TOOL = "todo";
+export { TODO_TOOL };
+export type { Todo, TodoStatus } from "../tools/todo.ts";
 
-export type TodoStatus = "pending" | "in_progress" | "done";
-
-export interface Todo {
-  text: string;
-  status: TodoStatus;
-}
-
-const STATUSES: ReadonlySet<string> = new Set(["pending", "in_progress", "done"]);
-
-/** A todo call's list, or undefined when its args are not one (the tool refused it too). */
+/** A todo call's list, or undefined when the tool refuses it: such a list never shows. */
 export function todosOf(args: unknown): Todo[] | undefined {
-  const items = (args as { items?: unknown } | null)?.items;
-  if (!Array.isArray(items) || items.length === 0) return undefined;
-  const out: Todo[] = [];
-  for (const item of items) {
-    const { text, status } = (item ?? {}) as { text?: unknown; status?: unknown };
-    // As strict as the tool: a list it refuses never shows, not even while the call runs.
-    if (typeof text !== "string" || text.trim() === "" || typeof status !== "string" || !STATUSES.has(status)) return undefined;
-    out.push({ text: text.trim(), status: status as TodoStatus });
+  try {
+    return parseTodos(args);
+  } catch {
+    return undefined;
   }
-  return out;
 }
 
 /** The plan as of the newest todo call that succeeded; [] when there was none. */

@@ -34,12 +34,14 @@ export type KeyName =
   | "ctrl-o" // newline while idle (Alt+Enter is taken by follow-up)
   | "ctrl-v" // paste an image from the clipboard
   | "size-report" // the terminal answering SIZE_QUERY: its window or the screen, in pixels
+  | "cursor-report" // the terminal answering a position request (CSI 6 n): where the cursor is
   | "unknown";
 
 export interface Key {
   name: KeyName;
   char?: string; // for "char" and "paste"
   size?: { of: "window" | "screen"; width: number; height: number }; // for "size-report"
+  at?: { row: number; col: number }; // for "cursor-report", 1-based
   alt?: boolean;
   ctrl?: boolean;
 }
@@ -231,6 +233,11 @@ function csi(s: string): null | { key: Key; length: number } {
   const length = 2 + finalAt + 1;
   if (final === "u") return { key: kittyKey(params), length: length };
   if (final === "t") return { key: sizeReport(params), length: length };
+  // A position answer, `CSI row;col R` (kinoko never reads F3, whose modified form looks the same).
+  if (final === "R") {
+    const [row, col] = params.split(";").map(Number);
+    return { key: row && col ? { name: "cursor-report", at: { row, col } } : { name: "unknown" }, length: length };
+  }
   // Keypad sequences are numbered and end in `~`: \x1b[3~ is delete.
   if (final === "~") {
     const name = CSI[`${params}~`];

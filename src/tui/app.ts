@@ -12,8 +12,10 @@ import { KeyParser } from "./term.ts";
 import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
+import type { RenderState } from "./render.ts";
 import { ABORTED, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
-import { errorBlock, pulseLevel, toolBlock, toolSummary } from "./tools.ts";
+import { errorBlock, pulseLevel, toolBlock, toolFailed, toolSummary } from "./tools.ts";
+import { TODO_TOOL } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
@@ -24,7 +26,7 @@ import type { SavedModel } from "../config.ts";
 import type { Served } from "../providers/openai-compat.ts";
 import type { Provider } from "../types.ts";
 import { actionFor } from "./keys.ts";
-import type { BlockKind, OpenBlock, QueuedView, ToolView } from "./view.ts";
+import type { BlockKind, OpenBlock, QueuedView, Region, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Session } from "../session.ts";
@@ -130,6 +132,7 @@ export class App {
     this.#renderer = new Renderer({
       write: opts.write,
       columns: () => this.#viewportCols ?? 80,
+      rows: () => (this.#viewportRows ?? 23) + 1,
     });
     this.#editor = new Editor();
     this.#model = opts.model;
@@ -173,7 +176,7 @@ export class App {
   /** A resumed session: its conversation goes to the scrollback, and the context counter is back. */
   replay(messages: Message[], note: string): void {
     this.#print("system", note);
-    for (const block of replayBlocks(messages, this.#viewportCols)) this.#print(block.kind, block.text);
+    for (const block of replayBlocks(messages, this.#printCols)) this.#print(block.kind, block.text);
     this.#images.startAfter(messages.reduce((n, m) => n + (m.images?.length ?? 0), 0));
     this.#side.history(messages);
     const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
@@ -197,6 +200,8 @@ export class App {
     this.#viewportCols = cols;
     // The region has to stay shorter than the terminal, or its top could not be repainted.
     this.#viewportRows = Math.max(2, rows - 1);
+    // Its share of the screen is news until the terminal answers the size query again.
+    this.#side.resized();
     this.#renderer.update(this.#state());
     this.#renderer.flush();
   }
@@ -242,8 +247,9 @@ export class App {
 
   handleKey(key: Key): void {
     // The terminal answering the size query: the side panel may come or go.
-    if (key.name === "size-report") {
+    if (key.name === "size-report" || key.name === "cursor-report") {
       if (key.size) this.#side.size(key.size);
+      if (key.at) this.#renderer.position(key.at.row);
       this.#renderer.update(this.#state());
       this.#renderer.flush();
       return;
@@ -479,7 +485,9 @@ export class App {
     if (!tool) return;
     this.#closeBlock();
     this.#tool = undefined;
-    this.#print("tool", toolBlock(tool, this.#toolBlocksFull, this.#viewportCols));
+    // With the side column on, the plan is there: its todo calls need no block in the transcript.
+    if (tool.name === TODO_TOOL && !tool.aborted && !toolFailed(tool.output) && this.#sideOn) return;
+    this.#print("tool", toolBlock(tool, this.#toolBlocksFull, this.#printCols));
   }
 
   #refreshPlace(): void {
@@ -534,7 +542,7 @@ export class App {
   #spill(): void {
     const open = this.#open;
     if (open === undefined) return;
-    const split = splitStable(open.text, this.#viewportCols);
+    const split = splitStable(open.text, this.#printCols);
     if (split === undefined) return;
     const chunk = formatBlock(open.kind, split.commit, this.#width);
     const gap = open.gap;
@@ -579,11 +587,35 @@ export class App {
 
   /** Columns a printed row may take: the renderer keeps a margin on each side. */
   get #width(): number {
-    return (this.#viewportCols ?? 80) - 2;
+    return (this.#printCols ?? 80) - 2;
   }
 
-  #state(): { lines: string[]; row: number; col: number } {
+  /** The transcript's columns: the window's, less the side column's when it is on. */
+  get #printCols(): number | undefined {
+    const column = this.#side.column(this.#viewportCols);
+    return column === undefined ? this.#viewportCols : (this.#viewportCols ?? 80) - column.width - 2;
+  }
+
+  get #sideOn(): boolean {
+    return this.#side.column(this.#viewportCols) !== undefined;
+  }
+
+  /** Asks the terminal where the region is: the side column is drawn from the screen's top row. */
+  locate(): void {
+    this.#renderer.requestPosition();
+  }
+
+  #state(): RenderState {
     const cols = this.#viewportCols;
+    const column = this.#side.column(cols);
+    const region = this.#region(cols, column === undefined ? undefined : (cols ?? 80) - column.width - 2);
+    if (column === undefined || cols === undefined) return region;
+    // The column runs from the screen's top row down to the input's rule, on the right.
+    const side = { col: cols - column.width, upper: region.upper, rows: column.rows, key: column.key, text: (this.#printCols ?? 80) - 2 };
+    return { ...region, side };
+  }
+
+  #region(cols: number | undefined, tailCols: number | undefined): Region {
     // The block cursor may sit one column past the text, plus the renderer's margins.
     const editorWidth = Math.max(1, (cols ?? 80) - 3);
     const view = this.#editor.view(wrapTo(editorWidth));
@@ -603,8 +635,7 @@ export class App {
       place: this.#place,
       thinking: this.#thinking,
       menu: this.#menuRows(),
-      // Wide enough: the plan and the changes in a band above the input.
-      panel: this.#side.band(cols, this.#viewportRows),
+      tailCols,
       viewportRows: this.#viewportRows,
       viewportCols: cols,
     });
