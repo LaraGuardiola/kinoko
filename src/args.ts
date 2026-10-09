@@ -20,6 +20,8 @@ const FLAGS: Record<string, string> = {
   "reasoning-effort": "reasoningEffort",
   reasoningEffort: "reasoningEffort",
   "thinking-budget": "thinkingBudget",
+  "thinking-replay": "thinkingReplay",
+  thinkingReplay: "thinkingReplay",
   thinkingBudget: "thinkingBudget",
 };
 

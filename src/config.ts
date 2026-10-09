@@ -19,6 +19,8 @@ export interface Config {
   thinkingBudget?: number;
   // The configured provider's name in the models menu (strata, llama.cpp); its host when unset.
   label?: string;
+  // Old thinking sent back: "turn" (since the user's last message, the default) or "none".
+  thinkingReplay?: "turn" | "none";
 }
 
 export const DEFAULTS: Config = {
@@ -45,7 +47,9 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "reasoningEffort",
   "thinkingBudget",
   "label",
+  "thinkingReplay",
 ]);
+const REPLAYS: ReadonlySet<string> = new Set(["turn", "none"]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);
 const PROVIDERS: ReadonlySet<string> = new Set(["openai-compat", "anthropic"]);
 
@@ -62,6 +66,8 @@ function sanitize(raw: Loose): Partial<Config> {
       if (typeof v === "string" && EFFORTS.has(v)) out[k] = v;
     } else if (k === "provider") {
       if (typeof v === "string" && PROVIDERS.has(v)) out[k] = v;
+    } else if (k === "thinkingReplay") {
+      if (typeof v === "string" && REPLAYS.has(v)) out[k] = v;
     } else if (typeof v === "string") {
       out[k] = v;
     }
@@ -91,6 +97,7 @@ function fromFlag(key: string, value: string): Partial<Config> {
     return EFFORTS.has(value) ? ({ reasoningEffort: value as ReasoningEffort } as Partial<Config>) : {};
   }
   if (key === "provider") return PROVIDERS.has(value) ? ({ provider: value as ProviderName } as Partial<Config>) : {};
+  if (key === "thinkingReplay") return REPLAYS.has(value) ? ({ thinkingReplay: value as "turn" | "none" } as Partial<Config>) : {};
   return { [key]: value } as Partial<Config>;
 }
 

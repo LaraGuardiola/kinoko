@@ -139,9 +139,9 @@ describe("openai-compat: truncation, thinking and effort", () => {
     expect(events.at(-1)).toMatchObject({ type: "done", stop: "length" });
   });
 
-  test("thinking goes back only for a newest reply cut by the output limit; the request effort overrides the config", async () => {
+  test("replay none: thinking goes back only for a newest reply cut by the output limit; the request effort overrides the config", async () => {
     setMode("text");
-    const provider = openaiCompat({ baseUrl, apiKey: "k", reasoningEffort: "low", thinkingBudget: 2048 });
+    const provider = openaiCompat({ baseUrl, apiKey: "k", reasoningEffort: "low", thinkingBudget: 2048, thinkingReplay: "none" });
     const req: ProviderRequest = {
       ...mkReq(new AbortController().signal),
       messages: [
@@ -178,6 +178,38 @@ describe("openai-compat: truncation, thinking and effort", () => {
         { type: "image_url", image_url: { url: "data:image/jpeg;base64,QUJD" } },
       ],
     });
+  });
+
+  test("replay turn (the default): the steps since the user's last message keep their thinking, older ones do not", async () => {
+    setMode("text");
+    const provider = openaiCompat({ baseUrl, apiKey: "k" });
+    const req: ProviderRequest = {
+      ...mkReq(new AbortController().signal),
+      messages: [
+        { id: "1", role: "user", content: "build it" },
+        { id: "2", role: "assistant", content: "", thinking: "an old plan", toolCalls: [{ id: "a", name: "read", args: {} }] },
+        { id: "3", role: "tool", content: "ok", toolCallId: "a" },
+        { id: "4", role: "user", content: "what happened?" },
+        { id: "5", role: "assistant", content: "", thinking: "I was cut off; next: input/", toolCalls: [{ id: "b", name: "bash", args: {} }] },
+        { id: "6", role: "tool", content: "files", toolCallId: "b" },
+        { id: "7", role: "user", content: "[kinoko] Your last reply had no answer" }, // a nudge is not the user
+        { id: "8", role: "assistant", content: "writing input/", thinking: "input/ next, then audio/" },
+      ],
+    };
+    for await (const _ of provider.stream(req)) void _;
+    const messages = lastBody.messages as Array<Record<string, unknown>>;
+    expect(messages[1]!.reasoning_content).toBeUndefined(); // before "what happened?": dropped
+    expect(messages[4]!.reasoning_content).toBe("I was cut off; next: input/");
+    expect(messages[7]!.reasoning_content).toBe("input/ next, then audio/");
+  });
+
+  test("a server that never answers is named, with how long it took and why", async () => {
+    const provider = openaiCompat({ baseUrl: "http://127.0.0.1:9/v1", apiKey: "k" });
+    const events: StreamEvent[] = [];
+    for await (const e of provider.stream(mkReq(new AbortController().signal))) events.push(e);
+    const error = events.find((e) => e.type === "error");
+    expect(error?.type === "error" && error.message).toMatch(/^no answer from 127\.0\.0\.1:9 after \d+s: .+\(a server timeout, or the server stopped\?\)$/);
+    expect(events.at(-1)).toEqual({ type: "done", stop: "error" });
   });
 });
 

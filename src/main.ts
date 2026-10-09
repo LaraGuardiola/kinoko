@@ -138,6 +138,7 @@ const providerOptions = {
   reasoningEffort: config.reasoningEffort,
   maxOutputTokens: config.maxOutputTokens,
   thinkingBudget: config.thinkingBudget,
+  thinkingReplay: config.thinkingReplay,
 };
 // The model in the config, as the models menu offers it next to the ones added from the TUI.
 const configured: SavedModel = {

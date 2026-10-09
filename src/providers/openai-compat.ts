@@ -33,7 +33,15 @@ export interface OpenAiCompatOptions {
   reasoningEffort?: "off" | "low" | "medium" | "high";
   maxOutputTokens?: number;
   thinkingBudget?: number; // sent only when set: OpenAI itself rejects unknown fields
+  /**
+   * Which old thinking goes back. "turn" (the default): the steps since the user's last message, so
+   * the model keeps its plan between tool calls (as Qwen3's own chat template and interleaved
+   * thinking do). "none": only a reply cut by the output limit, for models that copy old thinking.
+   */
+  thinkingReplay?: ThinkingReplay;
 }
+
+export type ThinkingReplay = "turn" | "none";
 
 /** Splits an SSE byte stream into complete `data:` payloads. */
 export class SseParser {
@@ -104,6 +112,8 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
         yield { type: "done", stop: "aborted" };
         return;
       }
+      const started = Date.now();
+      let failure = "";
       const res = await fetch(`${baseUrl.replace(/\/+$/, "")}/chat/completions`, {
         method: "POST",
         headers: {
@@ -112,9 +122,19 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
         },
         body: JSON.stringify(body(req, opts)),
         signal: req.signal,
-      }).catch(() => null);
+      }).catch((e: unknown) => {
+        failure = errorText(e);
+        return null;
+      });
       if (!res || !res.ok || !res.body) {
-        yield { type: "error", message: `HTTP ${res?.status ?? 0}: ${await res?.text().catch(() => "") ?? ""}` };
+        if (req.signal.aborted) {
+          yield { type: "done", stop: "aborted" };
+          return;
+        }
+        const message = res
+          ? `HTTP ${res.status}: ${(await res.text().catch(() => "")) || res.statusText}`
+          : `no answer from ${hostOf(baseUrl)} after ${elapsed(started)}: ${failure} (a server timeout, or the server stopped?)`;
+        yield { type: "error", message };
         yield { type: "done", stop: "error" };
         return;
       }
@@ -168,8 +188,11 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
           if (p.kind === "thinking") yield { type: "thinking", delta: p.delta };
           else yield { type: "text", delta: p.delta };
         }
-      } catch {
+      } catch (e) {
         // Socket died mid-stream: any pending tool call has incomplete args, so drop it.
+        if (!req.signal.aborted) {
+          yield { type: "error", message: `the connection to ${hostOf(baseUrl)} closed mid-reply after ${elapsed(started)}: ${errorText(e)}` };
+        }
         yield { type: "done", stop: req.signal.aborted ? "aborted" : "error" };
         return;
       } finally {
@@ -205,6 +228,38 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
       else yield { ...stopFor(finish), usage };
     },
   };
+}
+
+/**
+ * Which assistant messages send their thinking back. Always a newest reply cut by the output limit,
+ * so it continues where it stopped. With "turn", also every step since the user's last message:
+ * without its own reasoning between tool calls a model re-reads the last user message as if new,
+ * answers it again and re-checks what it already knew. Older thinking stays out: it holds drafts
+ * that differ from what was really written. kinoko's own nudges ("[kinoko] ...") are not the user.
+ */
+export function replaysThinking(messages: Message[], mode: ThinkingReplay): (index: number) => boolean {
+  const newest = messages.findLastIndex((m) => m.role === "assistant");
+  const userAt = messages.findLastIndex((m) => m.role === "user" && !m.content.startsWith("[kinoko]"));
+  return (i) => (i === newest && messages[i]?.stop === "length") || (mode === "turn" && i > userAt && messages[i]?.role === "assistant");
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function elapsed(since: number): string {
+  const s = Math.round((Date.now() - since) / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+}
+
+function errorText(e: unknown): string {
+  const cause = (e as { cause?: { code?: string } } | null)?.cause?.code;
+  const text = e instanceof Error ? e.message : String(e);
+  return cause ? `${text} (${cause})` : text;
 }
 
 export interface Served {
@@ -276,11 +331,7 @@ function merge(pending: Map<number, Pending>, tc: NonNullable<Delta["tool_calls"
 }
 
 function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
-  // Thinking goes back only for a reply cut by the output limit, so it can continue where it
-  // stopped. Any other old thinking does harm: it holds drafts that differ from what was really
-  // written, and a small model copies its last reasoning verbatim (a loop).
-  const newest = req.messages.findLastIndex((m) => m.role === "assistant");
-  const wired = req.messages.map((m, i) => wire(m, i === newest && m.stop === "length"));
+  const wired = req.messages.map((m, i) => wire(m, replaysThinking(req.messages, opts.thinkingReplay ?? "turn")(i)));
   const messages = req.system ? [{ role: "system", content: req.system }, ...wired] : wired;
   return {
     model: req.model,

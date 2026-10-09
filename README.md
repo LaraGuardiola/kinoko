@@ -134,6 +134,11 @@ then one of the models it serves; it is kept in `~/.kinoko/models.json` (mode 06
 keys). Picking a model switches endpoint and model from the next request. Del twice on a saved model
 removes it (the configured one stays). `"label"` names the configured provider in that list.
 
+`"thinkingReplay"`: which of the model's old thinking goes back with each request. `"turn"` (the
+default) sends the thinking of every step since your last message, so the model keeps its plan
+between tool calls instead of re-reading your last message as if it were new; older thinking stays
+out. `"none"` sends only a reply cut by the output limit, for models that copy old thinking verbatim.
+
 ```json
 { "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any",
   "model": "qwen3.8-flash-next-coder-iq1_m-120k", "contextWindow": 122880,
