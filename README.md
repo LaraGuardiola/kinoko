@@ -109,15 +109,16 @@ then Bing, pages turned into readable text) and `hello.ts`.
 Defaults → `~/.kinoko/config.json` → `./.kinoko/config.json` → CLI flags. Kebab-case or camelCase,
 both work (`--max-turns` / `--maxTurns`).
 
-Models added from the TUI (`/models` → `+ add model`: endpoint, API key, then one of the models it
-serves) are kept in `~/.kinoko/models.json` (mode 0600: it holds the keys) and offered next to the
-configured one; picking one switches endpoint and model from the next request. Del twice on a saved
-model removes it (the configured one stays).
+`/models` lists the models grouped by provider (one per endpoint, in name order), each provider
+asked for what it serves. `+ add provider` takes its name (strata, llama.cpp...), endpoint, API key,
+then one of the models it serves; it is kept in `~/.kinoko/models.json` (mode 0600: it holds the
+keys). Picking a model switches endpoint and model from the next request. Del twice on a saved model
+removes it (the configured one stays). `"label"` names the configured provider in that list.
 
 ```json
 { "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any",
   "model": "qwen3.8-flash-next-coder-iq1_m-120k", "contextWindow": 122880,
-  "reasoningEffort": "low", "maxOutputTokens": 8192 }
+  "reasoningEffort": "low", "maxOutputTokens": 8192, "label": "strata" }
 ```
 
 `examples/config.strata.json` is exactly that, for a local Strata/llama.cpp engine. `apiKey` falls

@@ -146,6 +146,7 @@ const configured: SavedModel = {
   apiKey: config.apiKey,
   provider: config.provider,
   contextWindow: config.contextWindow,
+  ...(config.label ? { label: config.label } : {}),
 };
 const saved = await loadSavedModels();
 const connect = (entry: SavedModel): Provider =>

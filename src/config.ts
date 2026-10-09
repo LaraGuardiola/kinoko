@@ -17,6 +17,8 @@ export interface Config {
   // Hard cap on thinking tokens per reply (openai-compat `reasoning_budget_tokens`, as Strata and
   // llama.cpp-style engines read it). Unset: the engine's own default. Effort alone is only a hint.
   thinkingBudget?: number;
+  // The configured provider's name in the models menu (strata, llama.cpp); its host when unset.
+  label?: string;
 }
 
 export const DEFAULTS: Config = {
@@ -42,6 +44,7 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "maxOutputTokens",
   "reasoningEffort",
   "thinkingBudget",
+  "label",
 ]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);
 const PROVIDERS: ReadonlySet<string> = new Set(["openai-compat", "anthropic"]);
@@ -115,6 +118,7 @@ export interface SavedModel {
   apiKey: string;
   provider?: ProviderName; // openai-compat when absent
   contextWindow?: number;
+  label?: string; // the provider's name in the models menu (strata, llama.cpp); its host when absent
 }
 
 /** Models added from the TUI live in ~/.kinoko/models.json; it holds API keys, so it is 0600. */

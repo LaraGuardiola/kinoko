@@ -19,3 +19,22 @@ test("a resume starts with the session's last model, with the key of a known ent
   expect(resumeModel({ model: "beta", baseUrl: "http://local:8081/v1" }, known)).toEqual({ model: "beta", baseUrl: "http://local:8081/v1", apiKey: "k1" });
   expect(resumeModel({ model: "x", baseUrl: "http://gone:9/v1" }, known)).toBeUndefined();
 });
+
+test("label names the configured provider; a non-string is dropped", async () => {
+  const { loadConfig } = await import("../config.ts");
+  const dir = `${process.cwd()}/.tmp-config-label-${process.pid}`;
+  await Bun.write(`${dir}/.kinoko/config.json`, JSON.stringify({ label: "strata" }));
+  const cwd = process.cwd();
+  const home = process.env.HOME;
+  process.env.HOME = dir; // the real ~/.kinoko/config.json must not leak in
+  process.chdir(dir);
+  try {
+    expect((await loadConfig()).label).toBe("strata");
+    await Bun.write(`${dir}/.kinoko/config.json`, JSON.stringify({ label: 7 }));
+    expect((await loadConfig()).label).toBeUndefined();
+  } finally {
+    process.chdir(cwd);
+    process.env.HOME = home;
+    (await import("node:fs")).rmSync(dir, { recursive: true, force: true });
+  }
+});

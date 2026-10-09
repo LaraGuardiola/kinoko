@@ -13,6 +13,8 @@ export interface MenuItem {
   removable?: boolean;
   /** The value in effect now (the current model, the current thinking profile). */
   current?: boolean;
+  /** A group's title (a provider): shown, never selected; the arrows step over it. */
+  header?: boolean;
 }
 
 export interface ListPage {
@@ -93,7 +95,8 @@ export class Menu {
     this.#page = page;
     this.#text = "";
     this.#armed = undefined;
-    this.#index = page.kind === "list" ? Math.max(0, page.items.findIndex((item) => item.current)) : 0;
+    const first = page.kind === "list" ? page.items.findIndex((item) => item.current) : -1;
+    this.#index = first >= 0 ? first : page.kind === "list" ? Math.max(0, page.items.findIndex((item) => !item.header)) : 0;
   }
 
   /**
@@ -118,10 +121,15 @@ export class Menu {
     this.#index = 0;
   }
 
-  /** Up/down through `count` items, wrapping at both ends. */
-  move(delta: number, count: number): void {
+  /** Up/down through `count` items, wrapping at both ends and stepping over those `skip` names. */
+  move(delta: number, count: number, skip: (index: number) => boolean = () => false): void {
     if (count === 0) return;
-    this.#index = (((this.#index + delta) % count) + count) % count;
+    let index = this.#index;
+    for (let tries = 0; tries < count; tries++) {
+      index = (((index + delta) % count) + count) % count;
+      if (!skip(index)) break;
+    }
+    this.#index = index;
   }
 
   /** Keeps the selection inside a root list that just got shorter (the filter narrowed). */
@@ -141,8 +149,12 @@ export function listRows(items: MenuItem[], selected: number, title?: string, em
   const rows = title ? [`${ANSI.bold}${ORANGE}${title}${ANSI.reset}`] : [];
   if (items.length === 0) return [...rows, `  ${ANSI.dim}${empty}${ANSI.reset}`];
   const start = Math.min(Math.max(0, selected - Math.floor(MENU_ROWS / 2)), Math.max(0, items.length - MENU_ROWS));
-  const width = Math.max(...items.map((item) => item.name.length)) + 4;
+  const width = Math.max(...items.filter((item) => !item.header).map((item) => item.name.length)) + 4;
   for (const [i, item] of items.slice(start, start + MENU_ROWS).entries()) {
+    if (item.header) {
+      rows.push(`  ${ANSI.bold}${ANSI.cream}${item.name}${ANSI.reset}${item.description ? `  ${ANSI.dim}${item.description}${ANSI.reset}` : ""}`);
+      continue;
+    }
     const chosen = start + i === selected;
     const name = `${chosen ? ANSI.bold : ""}${ORANGE}${item.name.padEnd(width)}${ANSI.reset}`;
     const mark = item.current ? `${ORANGE}● ${ANSI.reset}` : "";
@@ -151,7 +163,10 @@ export function listRows(items: MenuItem[], selected: number, title?: string, em
       : `${ANSI.dim}${item.description}${ANSI.reset}`;
     rows.push(`${chosen ? `${ORANGE}→${ANSI.reset} ` : "  "}${name}${mark}${about}`);
   }
-  rows.push(`  ${ANSI.dim}(${selected + 1}/${items.length})${hint ? `  ${hint}` : ""}${ANSI.reset}`);
+  // Headers are not counted: "(2/3)" is the second of three things to pick.
+  const position = items.slice(0, selected + 1).filter((item) => !item.header).length;
+  const total = items.filter((item) => !item.header).length;
+  rows.push(`  ${ANSI.dim}(${position}/${total})${hint ? `  ${hint}` : ""}${ANSI.reset}`);
   return rows;
 }
 

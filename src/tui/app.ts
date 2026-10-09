@@ -18,8 +18,8 @@ import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
 import { ROOT, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
-import { endpointOf, endpointPage, hostOf, keyPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
-import type { ModelChoice } from "./models-menu.ts";
+import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
+import type { ModelChoice, ModelsView } from "./models-menu.ts";
 import type { SavedModel } from "../config.ts";
 import type { Served } from "../providers/openai-compat.ts";
 import type { Provider } from "../types.ts";
@@ -656,14 +656,14 @@ export class App {
       }
     } else if ((key.name === "up" || key.name === "down") && !key.alt) {
       this.#menu.arm(undefined); // moving away cancels a pending removal
-      this.#menu.move(key.name === "up" ? -1 : 1, count);
+      this.#menu.move(key.name === "up" ? -1 : 1, count, (i) => page?.kind === "list" && page.items[i]?.header === true);
     } else if (key.name === "escape") {
       // A page goes back to the root; the root closes, back to an empty input.
       if (!this.#menu.back()) this.#editor.clear();
     } else if (key.name === "enter" && !key.alt) {
       if (page?.kind === "list") {
         const item = page.items[this.#menu.index];
-        if (item === undefined) return true;
+        if (item === undefined || item.header) return true;
         page.pick(item);
         // A pick that opened another page (add model) keeps the menu; any other pick is done.
         if (this.#menu.page === page) this.#closeMenu();
@@ -708,31 +708,46 @@ export class App {
   }
 
   #openModels(): void {
-    let served: string[] | undefined;
-    const view = () => ({
+    // Every provider is asked what it serves (the one in use through the agent), in parallel; the
+    // page fills in as they answer.
+    const served = new Map<string, Served[]>();
+    const others = [...new Map(this.#saved.filter((m) => m.baseUrl !== this.#endpoint).map((m) => [m.baseUrl, m])).values()];
+    let pending = 1 + (this.#host ? others.length : 0);
+    const view = (): ModelsView => ({
       model: this.#model,
       endpoint: this.#endpoint,
       served,
+      loading: pending > 0,
       saved: this.#saved,
       canAdd: this.#host !== undefined,
       fixed: this.#host?.fixed,
     });
     const choose = (choice: ModelChoice): void => {
-      if (choice.kind === "add") this.#addModel();
-      else if (choice.kind === "saved") this.#useModel(choice.entry);
-      else if (choice.kind === "remove") this.#removeModel(choice.entry, () => modelsPage(view(), choose));
-      else this.#useModel({ model: choice.model, baseUrl: this.#endpoint, apiKey: "" });
+      if (choice.kind === "add") this.#addProvider();
+      // The redrawn page becomes the one later answers refresh.
+      else if (choice.kind === "remove") this.#removeModel(choice.entry, () => (page = modelsPage(view(), choose)));
+      else this.#useModel(choice.entry);
     };
-    const asking = modelsPage(view(), choose);
-    this.#menu.open(asking);
+    let page = modelsPage(view(), choose);
+    this.#menu.open(page);
+    const answered = (baseUrl: string, list: Served[]): void => {
+      pending--;
+      if (list.length > 0) served.set(baseUrl, list);
+      const next = modelsPage(view(), choose);
+      this.#menu.refresh(page, next);
+      page = next;
+      this.render();
+    };
     void this.#agent
       .models(AbortSignal.timeout(10_000))
       .catch(() => [])
-      .then((names) => {
-        served = names;
-        this.#menu.refresh(asking, modelsPage(view(), choose));
-      })
-      .finally(() => this.render());
+      .then((names) => answered(this.#endpoint, names.map((id) => ({ id }))));
+    for (const entry of this.#host ? others : []) {
+      void this.#host
+        ?.discover(entry.baseUrl, entry.apiKey, AbortSignal.timeout(10_000))
+        .catch(() => [])
+        .then((list) => answered(entry.baseUrl, list));
+    }
   }
 
   /** Forgets a saved model; the models page stays open, redrawn without it. */
@@ -749,21 +764,27 @@ export class App {
       .finally(() => this.render());
   }
 
-  /** Endpoint, then API key, then one of the models it serves (or its id typed by hand). */
-  #addModel(): void {
+  /** Its name, endpoint, API key, then one of the models it serves (or its id typed by hand). */
+  #addProvider(): void {
     this.#menu.open(
-      endpointPage((typed) => {
-        const baseUrl = endpointOf(typed);
-        if (baseUrl === undefined) return; // nothing typed: stay on this step
-        this.#menu.open(keyPage((apiKey) => this.#discover(baseUrl, apiKey.trim())));
+      labelPage((typedLabel) => {
+        const label = typedLabel.trim();
+        if (label === "") return; // nothing typed: stay on this step
+        this.#menu.open(
+          endpointPage((typed) => {
+            const baseUrl = endpointOf(typed);
+            if (baseUrl === undefined) return;
+            this.#menu.open(keyPage((apiKey) => this.#discover(label, baseUrl, apiKey.trim())));
+          }),
+        );
       }),
     );
   }
 
-  #discover(baseUrl: string, apiKey: string): void {
+  #discover(label: string, baseUrl: string, apiKey: string): void {
     const host = hostOf(baseUrl);
     const keep = (served: Served): void => {
-      const entry: SavedModel = { model: served.id, baseUrl, apiKey, contextWindow: served.contextWindow };
+      const entry: SavedModel = { model: served.id, baseUrl, apiKey, contextWindow: served.contextWindow, label };
       this.#closeMenu();
       this.#useModel(entry);
       void this.#host

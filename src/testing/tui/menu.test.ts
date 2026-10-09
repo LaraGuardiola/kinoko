@@ -18,6 +18,26 @@ describe("slash menu state", () => {
     expect(menu.index).toBe(0);
   });
 
+  test("group headers: never selected, stepped over by the arrows, left out of the count", () => {
+    const grouped = [
+      { name: "llama.cpp", description: "box:8085", header: true },
+      { name: "  a", description: "" },
+      { name: "strata", description: "", header: true },
+      { name: "  b", description: "" },
+    ];
+    const menu = new Menu();
+    menu.open({ kind: "list", title: "Models", items: grouped, empty: "", pick: () => undefined });
+    expect(menu.index).toBe(1); // the first pickable item, not the header
+    const skip = (i: number): boolean => grouped[i]?.header === true;
+    menu.move(1, grouped.length, skip);
+    expect(menu.index).toBe(3);
+    menu.move(1, grouped.length, skip); // wraps, over the first header
+    expect(menu.index).toBe(1);
+    const rows = listRows(grouped, 3).map(strip);
+    expect(rows[2]).toBe("  strata");
+    expect(rows.at(-1)).toBe("  (2/2)");
+  });
+
   test("a page opens on its current item; Esc goes back to the root, then has nothing to go back to", () => {
     const menu = new Menu();
     menu.open(thinkingPage("medium", () => undefined));
