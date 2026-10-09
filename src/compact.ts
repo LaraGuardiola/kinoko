@@ -41,8 +41,12 @@ export function isSummary(m: Message): boolean {
   return m.role === "user" && m.content.startsWith(SUMMARY_HEADING);
 }
 
+/** What one image costs a vision model, roughly (Anthropic: about 1,600 tokens for a 1092x1092). */
+export const IMAGE_TOKENS = 1_600;
+
 export function messageTokens(m: Message): number {
-  return estimateTokens(`${m.role}\n${m.content}${m.toolCalls ? JSON.stringify(m.toolCalls) : ""}`);
+  const images = (m.images?.length ?? 0) * IMAGE_TOKENS;
+  return images + estimateTokens(`${m.role}\n${m.content}${m.toolCalls ? JSON.stringify(m.toolCalls) : ""}`);
 }
 
 /** The history as sent: only a cut-off newest reply carries its thinking back. */

@@ -90,6 +90,8 @@ describe("tui key parser", () => {
     expect(names("\x1b[27u")).toEqual(["escape"]);
     expect(names("\x1b[99;5u")).toEqual(["ctrl-c"]);
     expect(names("\x1b[116;5u")).toEqual(["ctrl-t"]);
+    expect(names("\x1b[118;5u")).toEqual(["ctrl-v"]);
+    expect(names("\x16")).toEqual(["ctrl-v"]);
     expect(parse("\x1b[98;3u")).toEqual([{ name: "char", char: "b", alt: true }]);
   });
 

@@ -34,6 +34,7 @@ an `AbortSignal`, nothing blocks the event loop, and the keyboard always wins:
 | `Ctrl-D` | quit (empty editor) | — |
 | `Alt+Up` | — | pull the newest queued message back into the editor |
 | `Ctrl-T` | expand or collapse tool output | same |
+| `Ctrl-V` | paste the clipboard image as `[Image #N]` | same |
 | `Ctrl-P` / `Ctrl-N` | previous / next history entry | same |
 | `Shift+Enter` / `Ctrl-J` / `Ctrl-O` | newline inside the editor | same |
 
@@ -42,6 +43,11 @@ elsewhere both send ESC+Enter, which kinoko reads as a newline (as Claude Code a
 
 Queued messages are never lost: abort a run and they come back in the editor with an
 `Interrupted` marker. `docs/interruption.md` is the contract.
+
+Images: `Ctrl-V` reads the clipboard (`wl-paste` on Wayland, `xclip` on X11), and pasting or
+dropping a PNG, JPEG, GIF or WebP file path attaches that file. Each shows in the input as
+`[Image #N]`; on Enter, the images whose placeholders are still in the text go with the message
+(up to 3.75 MB each). The model must take images: a text-only engine answers with an error.
 
 ## The five tools
 

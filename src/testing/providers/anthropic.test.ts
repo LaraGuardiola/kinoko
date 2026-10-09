@@ -217,4 +217,17 @@ describe("anthropic wire format", () => {
       { role: "user", content: [{ type: "tool_result", tool_use_id: "c", content: "ERROR: no such file", is_error: true }] },
     ]);
   });
+
+  test("a user message with images: base64 image blocks, then its text", () => {
+    const messages: Message[] = [{ id: "1", role: "user", content: "what is [Image #1]?", images: [{ mime: "image/png", data: "QUJD" }] }];
+    expect(wire(messages)).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+          { type: "text", text: "what is [Image #1]?" },
+        ],
+      },
+    ]);
+  });
 });

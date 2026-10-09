@@ -316,5 +316,9 @@ function wire(m: Message, withThinking: boolean): object {
       })),
     };
   }
+  if (m.images?.length) {
+    const images = m.images.map((img) => ({ type: "image_url", image_url: { url: `data:${img.mime};base64,${img.data}` } }));
+    return { role: m.role, content: [{ type: "text", text: m.content }, ...images] };
+  }
   return { role: m.role, content: m.content, ...reasoning };
 }

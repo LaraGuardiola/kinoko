@@ -1,12 +1,12 @@
 import { expect, test, describe, afterAll } from "bun:test";
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
 import type { ModelsHost } from "../../tui/app.ts";
 import type { SavedModel } from "../../config.ts";
 import type { Served } from "../../providers/openai-compat.ts";
 import { Agent } from "../../loop.ts";
 import { Session } from "../../session.ts";
-import type { ProviderRequest, StreamEvent, Tool } from "../../types.ts";
+import type { Image, ProviderRequest, StreamEvent, Tool } from "../../types.ts";
 
 const ROOT = `${process.cwd()}/.tmp-tui-test-${process.pid}`;
 
@@ -76,6 +76,7 @@ async function harness(
     budgets?: boolean;
     thinkingProfile?: string;
     modelsHost?: ModelsHost;
+    clipboard?: (signal: AbortSignal) => Promise<Image | string>;
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -107,6 +108,8 @@ async function harness(
     models: opts.modelsHost,
     session: session,
     rebuild: () => agent,
+    clipboard: opts.clipboard,
+    cwd: ROOT,
   });
   return {
     app: app,
@@ -822,4 +825,54 @@ test("a saved model picked without a known window learns it from its endpoint, a
   await new Promise((r) => setTimeout(r, 10));
   expect(h.app.statusLine).toContain("/65,536 tok");
   expect(saved).toEqual([{ ...typed, contextWindow: 65_536 }]); // the next pick knows it at once
+});
+
+/** Clipboard reads and file checks are async: give them a moment. */
+function tick(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 20));
+}
+
+describe("pasted images", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7]);
+  const shot: Image = { mime: "image/png", data: Buffer.from(PNG).toString("base64") };
+
+  test("Ctrl+V puts [Image #N] in the input; on Enter the images go with the prompt", async () => {
+    const h = await harness([[{ type: "text", delta: "a cat" }, { type: "done", stop: "end" }]], { clipboard: async () => shot });
+    h.press("what is ");
+    h.press("\x16");
+    await tick();
+    h.press("\x1b[118;5u"); // kitty encoding, second image
+    await tick();
+    expect(h.app.editorText).toBe("what is [Image #1] [Image #2] ");
+    h.press("\r");
+    await settle(h.agent);
+    const sent = h.calls()[0]!.messages.at(-1)!;
+    expect(sent.content).toBe("what is [Image #1] [Image #2]");
+    expect(sent.images).toEqual([shot, shot]);
+  });
+
+  test("a deleted placeholder leaves its image out; a failed read says why above the input", async () => {
+    const h = await harness([[{ type: "done", stop: "end" }]], { clipboard: async () => "no image in the clipboard" });
+    h.press("\x16");
+    await tick();
+    expect(h.app.marker).toBe("Image not attached: no image in the clipboard");
+    h.press("hi\r");
+    await settle(h.agent);
+    expect(h.calls()[0]!.messages.at(-1)!.images).toBeUndefined();
+  });
+
+  test("a dropped image file becomes a placeholder; a path to nothing stays text", async () => {
+    mkdirSync(ROOT, { recursive: true });
+    writeFileSync(`${ROOT}/drop.png`, PNG);
+    const h = await harness([[{ type: "done", stop: "end" }]]);
+    h.press(`\x1b[200~'${ROOT}/drop.png'\x1b[201~`);
+    await tick();
+    h.press("\x1b[200~missing.png\x1b[201~");
+    await tick();
+    h.press("\r");
+    await settle(h.agent);
+    const sent = h.calls()[0]!.messages.at(-1)!;
+    expect(sent.content).toBe("[Image #1] missing.png");
+    expect(sent.images).toEqual([shot]);
+  });
 });

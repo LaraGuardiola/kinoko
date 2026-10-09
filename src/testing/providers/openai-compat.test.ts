@@ -165,6 +165,20 @@ describe("openai-compat: truncation, thinking and effort", () => {
     expect(lastBody.reasoning_effort).toBe("off");
     expect(lastBody.reasoning_budget_tokens).toBe(2048);
   });
+
+  test("a user message with images: a text part, then data-URL image_url parts", async () => {
+    setMode("text");
+    const provider = openaiCompat({ baseUrl, apiKey: "k" });
+    const messages = [{ id: "1", role: "user" as const, content: "see [Image #1]", images: [{ mime: "image/jpeg", data: "QUJD" }] }];
+    for await (const _ of provider.stream({ ...mkReq(new AbortController().signal), messages: messages })) void _;
+    expect((lastBody.messages as unknown[]).at(-1)).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "see [Image #1]" },
+        { type: "image_url", image_url: { url: "data:image/jpeg;base64,QUJD" } },
+      ],
+    });
+  });
 });
 
 describe("listModels: each model's context window, wherever the server puts it", () => {

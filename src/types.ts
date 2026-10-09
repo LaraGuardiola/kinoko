@@ -16,6 +16,12 @@ export interface Usage {
 
 export type StopReason = "end" | "tool_use" | "length" | "aborted" | "error";
 
+/** An image the user attached: raw bytes as base64, and their media type (image/png...). */
+export interface Image {
+  mime: string;
+  data: string;
+}
+
 export interface Message {
   id: string;
   parentId?: string;
@@ -26,6 +32,7 @@ export interface Message {
   thinking?: string;
   toolCalls?: ToolCall[];
   toolCallId?: string; // toolCallId only on role "tool"
+  images?: Image[]; // only on role "user"; the text refers to them as [Image #N]
   stop?: StopReason;
   usage?: Usage;
   // Provider-opaque content replayed unchanged to the provider that produced it (Anthropic's signed
