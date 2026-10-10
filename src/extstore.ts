@@ -3,7 +3,7 @@
 // ~/.kinoko/registry/ (a shallow clone, updated on every listing). An extension with dependencies
 // gets `bun install` in its own folder: kinoko itself stays without any.
 
-import { cp, readdir, rm } from "node:fs/promises";
+import { cp, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 
 export const DEFAULT_REPO = "https://github.com/LaraGuardiola/kinoko-extensions.git";
@@ -17,7 +17,9 @@ export interface ExtEntry {
 export interface ExtStore {
   /** Where the extensions come from, as the page names it. */
   readonly repo: string;
-  /** Fetches the repository (a clone the first time, an update after) and lists its extensions. */
+  /** With no network: the last fetched copy's extensions, and the installed ones it lacks. */
+  local(): Promise<ExtEntry[]>;
+  /** Fetches the repository (a clone the first time, an update after), then lists as `local`. */
   list(signal: AbortSignal): Promise<ExtEntry[]>;
   /** Copies one into ~/.kinoko/ext/<name>/ (installing its dependencies); says what happened. */
   install(name: string, signal: AbortSignal): Promise<string>;
@@ -61,6 +63,20 @@ function why(out: string): string {
   return out.split("\n").findLast((line) => line.trim() !== "") ?? "no output";
 }
 
+/** Extensions in `dir`: folders with an index.ts (and, for the installed ones, `name.ts` files). */
+async function names(dir: string, files = false): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  const single = files ? entries.filter((e) => e.isFile() && e.name.endsWith(".ts")).map((e) => e.name.slice(0, -3)) : [];
+  const dirs = entries.filter((e) => e.isDirectory() && NAME.test(e.name) && e.name !== "node_modules" && e.name !== "testing").map((e) => e.name);
+  const found = await Promise.all(dirs.map(async (name) => ((await exists(join(dir, name, "index.ts"))) ? name : undefined)));
+  return [...new Set([...found.filter((name) => name !== undefined), ...single])].toSorted();
+}
+
+async function describe(dir: string, name: string): Promise<string> {
+  const description = (await json(join(dir, name, "package.json"))).description;
+  return typeof description === "string" ? description : "";
+}
+
 export function extStore(opts: { home: string; repo?: string; run?: Run }): ExtStore {
   const repo = opts.repo || DEFAULT_REPO;
   const exec = opts.run ?? spawnRun;
@@ -68,45 +84,52 @@ export function extStore(opts: { home: string; repo?: string; run?: Run }): ExtS
   const registry = join(kinoko, "registry");
   const extDir = join(kinoko, "ext");
 
-  /** Clones the repository, or brings the clone up to date; an error says why. */
+  /** Clones the repository, or brings the clone up to date; an error says why. The last fetched
+   *  copy is never lost to a failure: offline, it is all the page has. */
   async function sync(signal: AbortSignal): Promise<void> {
     if (await exists(join(registry, ".git", "HEAD"))) {
       const url = await exec(["git", "-C", registry, "remote", "get-url", "origin"], kinoko, signal);
-      if (url.code === 0 && url.out === repo) {
+      if (url.code !== 0 || url.out === repo) {
         const fetched = await exec(["git", "-C", registry, "fetch", "--depth", "1", "origin", "HEAD"], kinoko, signal);
         if (fetched.code !== 0) throw new Error(`could not update ${repo}: ${why(fetched.out)}`);
         const reset = await exec(["git", "-C", registry, "reset", "--hard", "--quiet", "FETCH_HEAD"], kinoko, signal);
         if (reset.code !== 0) throw new Error(`could not update ${repo}: ${why(reset.out)}`);
         return;
       }
-      await rm(registry, { recursive: true, force: true }); // another repository now: start again
     }
-    const cloned = await exec(["git", "clone", "--quiet", "--depth", "1", repo, registry], opts.home, signal);
-    if (cloned.code !== 0) throw new Error(`could not fetch ${repo}: ${why(cloned.out)}`);
+    // First time, or another repository now: a fresh clone beside, swapped in once it is complete.
+    const fresh = `${registry}.new`;
+    await rm(fresh, { recursive: true, force: true });
+    const cloned = await exec(["git", "clone", "--quiet", "--depth", "1", repo, fresh], opts.home, signal);
+    if (cloned.code !== 0) {
+      await rm(fresh, { recursive: true, force: true });
+      throw new Error(`could not fetch ${repo}: ${why(cloned.out)}`);
+    }
+    await rm(registry, { recursive: true, force: true });
+    await rename(fresh, registry);
   }
 
   async function installed(name: string): Promise<boolean> {
     return (await exists(join(extDir, name, "index.ts"))) || (await exists(join(extDir, `${name}.ts`)));
   }
 
-  async function names(): Promise<string[]> {
-    const entries = await readdir(registry, { withFileTypes: true }).catch(() => []);
-    const dirs = entries.filter((e) => e.isDirectory() && NAME.test(e.name) && e.name !== "node_modules" && e.name !== "testing").map((e) => e.name);
-    const found = await Promise.all(dirs.map(async (name) => ((await exists(join(registry, name, "index.ts"))) ? name : undefined)));
-    return found.filter((name) => name !== undefined).toSorted();
+  async function local(): Promise<ExtEntry[]> {
+    const offered = await names(registry);
+    const fromRepo = await Promise.all(offered.map(async (name) => ({ name, description: await describe(registry, name), installed: await installed(name) })));
+    // Installed but not offered (a hand-made one, or never fetched yet): still listed, removable.
+    const own = (await names(extDir, true)).filter((name) => !offered.includes(name));
+    const mine = await Promise.all(own.map(async (name) => ({ name, description: (await describe(extDir, name)) || "installed, not in the repository", installed: true })));
+    return [...fromRepo, ...mine].toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   }
 
   return {
     repo,
 
+    local,
+
     async list(signal) {
       await sync(signal);
-      return Promise.all(
-        (await names()).map(async (name) => {
-          const description = (await json(join(registry, name, "package.json"))).description;
-          return { name, description: typeof description === "string" ? description : "", installed: await installed(name) };
-        }),
-      );
+      return local();
     },
 
     async install(name, signal) {

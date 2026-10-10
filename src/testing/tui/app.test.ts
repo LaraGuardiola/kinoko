@@ -1110,6 +1110,7 @@ function store(entries: ExtEntry[]): { store: ExtStore; installed: string[]; rem
     removed,
     store: {
       repo: "https://github.com/LaraGuardiola/kinoko-extensions.git",
+      local: async () => [],
       list: async () => entries.map((e) => ({ ...e })),
       install: async (name) => {
         installed.push(name);
@@ -1165,5 +1166,20 @@ describe("the extensions page", () => {
     await paced();
     broken.app.render();
     expect(broken.screen()).toContain("could not fetch the repo: offline");
+
+    // Offline with something installed: it is still listed, and the hint says why the list is local.
+    const offline = await harness([], {
+      viewportRows: 30,
+      extensions: {
+        ...fake.store,
+        local: async () => [{ name: "herdr", description: "herdr agent", installed: true }],
+        list: async () => Promise.reject(new Error("could not update the repo: offline")),
+      },
+    });
+    offline.press("/extensions\r");
+    await paced();
+    offline.app.render();
+    expect(offline.screen()).toContain("herdr agent");
+    expect(offline.screen()).toContain("could not update the repo: offline · showing what is on this computer");
   });
 });

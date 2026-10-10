@@ -93,6 +93,29 @@ describe("extension store", () => {
     expect(await store.install("testing", signal)).toBe(`no extension called testing in ${REPO}`);
   });
 
+  test("local: no network, the last fetched copy plus installed ones it lacks, still removable", async () => {
+    mkdirSync(join(ext, "mine"), { recursive: true });
+    writeFileSync(join(ext, "mine", "index.ts"), "export default function (): void {}\n");
+    writeFileSync(join(ext, "solo.ts"), "export default function (): void {}\n");
+    const offline = extStore({ home: HOME, repo: REPO, run: async () => ({ code: 128, out: "fatal: unable to access" }) });
+    await expect(offline.list(signal)).rejects.toThrow(/^could not update .*: fatal: unable to access$/);
+    expect(await offline.local()).toEqual([
+      { name: "alpha", description: "The first one", installed: false },
+      { name: "beta", description: "Needs a library", installed: true },
+      { name: "gamma", description: "", installed: false },
+      { name: "mine", description: "installed, not in the repository", installed: true },
+      { name: "solo", description: "installed, not in the repository", installed: true },
+    ]);
+    expect(await offline.remove("solo")).toBe("solo removed: gone when kinoko restarts");
+  });
+
+  test("another repository is cloned beside and swapped in; failing, the old copy stays", async () => {
+    const moved = extStore({ home: HOME, repo: join(ROOT, "gone"), run });
+    await expect(moved.list(signal)).rejects.toThrow(/^could not fetch .*gone/);
+    expect((await moved.local()).map((e) => e.name)).toContain("alpha"); // still the old copy
+    expect(existsSync(join(HOME, ".kinoko", "registry.new"))).toBe(false);
+  });
+
   test("a repository that cannot be fetched says so", async () => {
     const broken = extStore({ home: join(ROOT, "other"), repo: join(ROOT, "no-such-repo"), run });
     mkdirSync(join(ROOT, "other"), { recursive: true });

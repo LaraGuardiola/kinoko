@@ -134,6 +134,7 @@ export class App {
   #compacting: CompactProgress | undefined; // a summary on its way: the note animates
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
   #retrying = false; // the marker says a retry is coming: the next reply's first token clears it
+  #quiet = ""; // a marker that only informs (an extension installed or removed): cream, no background
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
@@ -671,7 +672,7 @@ export class App {
       // While compacting: mushrooms and how far it is (the clock moves them on each frame).
       marker: this.#compacting ? compactingNote(this.#compacting, Date.now()) : this.#marker,
       markerAlert: !this.#compacting && this.#marker.startsWith("Interrupted"),
-      markerCream: this.#compacting !== undefined || this.#marker.startsWith("compacted"),
+      markerCream: this.#compacting !== undefined || this.#marker.startsWith("compacted") || (this.#quiet !== "" && this.#marker === this.#quiet),
       queued: this.#queued,
       editorLines: view.lines,
       editorRow: view.row,
@@ -908,18 +909,18 @@ export class App {
     }
     const state: { repo: string; entries?: ExtEntry[]; error?: string } = { repo: store.repo };
     const install = (name: string): void => {
-      this.#marker = `installing ${name}…`;
+      this.#marker = this.#quiet = `installing ${name}…`;
       void store
         .install(name, AbortSignal.timeout(300_000))
         .catch((e: unknown) => `${name} did not install: ${e instanceof Error ? e.message : String(e)}`)
         .then((note) => {
-          this.#marker = note;
+          this.#marker = this.#quiet = note;
           this.render();
         });
     };
     const remove = (name: string): void => {
       void store.remove(name).then((note) => {
-        this.#marker = note;
+        this.#marker = this.#quiet = note;
         const entry = state.entries?.find((e) => e.name === name);
         if (entry) entry.installed = false;
         redraw();
@@ -933,8 +934,14 @@ export class App {
       this.render();
     };
     this.#menu.open(page);
+    // What is on disk first (instant, and all there is offline), then the repository's news.
     void store
-      .list(AbortSignal.timeout(60_000))
+      .local()
+      .then((entries) => {
+        state.entries ??= entries;
+        redraw();
+        return store.list(AbortSignal.timeout(60_000));
+      })
       .then((entries) => (state.entries = entries))
       .catch((e: unknown) => (state.error = e instanceof Error ? e.message : String(e)))
       .then(redraw);

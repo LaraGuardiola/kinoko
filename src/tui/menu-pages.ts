@@ -66,7 +66,8 @@ export function extensionsPage(
     empty: state.error ?? (state.entries === undefined ? `fetching ${where}…` : `no extensions in ${where}`),
     pick: (item) => install(item.name),
     remove: (item) => remove(item.name),
-    hint: "Enter installs or updates · Del twice removes · they load when kinoko starts",
+    // Offline, the list is the last fetched copy and what is installed: say so, and why.
+    hint: state.error && state.entries?.length ? `${state.error} · showing what is on this computer` : "Enter installs or updates · Del twice removes · they load when kinoko starts",
   };
 }
 
