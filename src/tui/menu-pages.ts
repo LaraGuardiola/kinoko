@@ -11,6 +11,8 @@ export const ROOT: MenuItem[] = [
   { name: "extensions", description: "Install, update or remove extensions from kinoko-extensions" },
   { name: "skills", description: "Install, update or remove skills from kinoko-skills" },
   { name: "session", description: "This session: file, id, messages, tokens" },
+  { name: "new", description: "Start a new session: empty context, same model" },
+  { name: "clear", description: "Clear the screen (the context stays)" },
   { name: "compact", description: "Summarize the history now" },
   { name: "fork", description: "Move the session head back one message" },
   { name: "help", description: "Keys and commands" },

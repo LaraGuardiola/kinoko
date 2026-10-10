@@ -72,6 +72,8 @@ export interface AppOptions {
   session?: Session;
   /** Called by /quit. The demo and the CLI pass the process exit. */
   onQuit?: () => void;
+  /** /new: a new session for a new conversation, and the startup panel to print again. */
+  newSession?: () => Promise<{ session: Session; intro: string }>;
   /** Rebuilds the agent after /fork moved the session head. */
   rebuild?: () => Agent;
   /** Reads the clipboard image for Ctrl+V (an Image, or why not). Tests pass a fake. */
@@ -112,6 +114,7 @@ export class App {
   #host: ModelsHost | undefined;
   #catalogs: { extensions?: Catalog; skills?: Catalog };
   #apply: AppOptions["apply"];
+  #newSessionOf: AppOptions["newSession"];
   #endpoint: string;
   #saved: SavedModel[];
   #viewportRows: number | undefined;
@@ -159,6 +162,7 @@ export class App {
     this.#host = opts.models;
     this.#catalogs = { extensions: opts.extensions, skills: opts.skills };
     this.#apply = opts.apply;
+    this.#newSessionOf = opts.newSession;
     this.#endpoint = opts.models?.endpoint ?? "";
     this.#saved = opts.models?.saved ?? [];
     this.#viewportRows = opts.viewportRows;
@@ -719,6 +723,14 @@ export class App {
         this.render();
         return true;
       }
+      case "clear":
+        this.#clearScreen();
+        this.render();
+        return true;
+      case "new":
+        await this.#newSession();
+        this.render();
+        return true;
       case "quit":
         this.#quit();
         return true;
@@ -1085,6 +1097,35 @@ export class App {
   }
 
   /** Moves the session head back one message; a fork is only ever a pointer move. */
+  /** /clear: the screen and the terminal's scrollback go; the conversation stays as it was. */
+  #clearScreen(): void {
+    this.#marker = "";
+    this.#renderer.update(this.#state());
+    this.#renderer.clear();
+    this.#printedAny = false;
+  }
+
+  /** /new: a new session, the model with no history; counters and plan start again. */
+  async #newSession(): Promise<void> {
+    if (this.#running) {
+      this.#marker = "a run is going: Esc it first, then /new";
+      return;
+    }
+    if (this.#newSessionOf === undefined) {
+      this.#marker = "/new is not available here";
+      return;
+    }
+    const { session, intro } = await this.#newSessionOf();
+    this.#session = session;
+    this.#tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
+    this.#cost = 0;
+    this.#queued = [];
+    this.#side.history([]);
+    this.#clearScreen();
+    this.intro(intro);
+    this.#marker = this.#quiet = "new session: the model starts with no history";
+  }
+
   async #forkHead(): Promise<string> {
     const session = this.#session;
     if (session === undefined) return "fork: no session to fork";

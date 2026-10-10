@@ -185,3 +185,16 @@ describe("tui renderer", () => {
     expect(redraw).toContain("a long line of transcript text");
   });
 });
+
+test("clear: screen and scrollback wiped, the region painted from the top, nothing old redrawn", () => {
+  const out: string[] = [];
+  const renderer = new Renderer({ write: (t) => out.push(t), columns: () => 40, rows: () => 10, now: () => 1000 });
+  renderer.update({ lines: ["> input"], row: 0, col: 2 });
+  renderer.printAbove("an old line");
+  out.length = 0;
+  renderer.clear();
+  const written = out.join("");
+  expect(written).toContain("\x1b[H\x1b[2J\x1b[3J");
+  expect(written).toContain("> input");
+  expect(written).not.toContain("an old line");
+});

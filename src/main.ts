@@ -7,6 +7,7 @@ import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
 import { Session, findSession, latestSession } from "./session.ts";
 import { readdirSync, rmSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Extensions, extensionName, loadExtensions, loadOne } from "./ext.ts";
 import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
@@ -20,6 +21,7 @@ import { discoverContext, discoverSkills, frontmatter } from "./context.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { defaultTools } from "./tools/registry.ts";
 import { restoreTracker } from "./tools/restore.ts";
+import { tracker } from "./tools/tracker.ts";
 import { Rpc, serveStdio } from "./rpc.ts";
 import { parseArgs } from "./args.ts";
 
@@ -77,6 +79,7 @@ const VERSION = "0.1.0";
 // Extensions load first and need nothing but the cwd, so a slash command works without an engine.
 const ext = new Extensions();
 const extensionPaths = await loadExtensions(ext, { cwd: cwd });
+const loadedExtensions = new Set(extensionPaths.map(extensionName)); // /extensions changes it live
 for (const path of extensionPaths) process.stderr.write(`[ext] loaded ${path}\n`);
 
 if (prompt !== undefined && prompt.startsWith("/")) {
@@ -114,14 +117,15 @@ if (sessionId !== undefined && previous === undefined) {
   process.stderr.write(`no session "${sessionId}" in ${cwd}: sessions are kept per directory, run kinoko where you started it\n`);
   process.exit(1);
 }
-const session = previous ? await Session.load(previous) : await Session.create({ cwd, model: config.model });
+// `let`: /new starts another one (the prompt below reads the current one's date).
+let session = previous ? await Session.load(previous) : await Session.create({ cwd, model: config.model });
 if (previous && !tui) process.stderr.write(`[resumed ${session.meta.id}]\n`);
 
 // Everything the prompt needs is read once here: the date is frozen and the context never
 // changes, so the bytes before the first user message stay identical for the whole session. The
 // date is the session's own: a session resumed the next day keeps its prompt, and the engine's cache.
 const context = await discoverContext(cwd);
-const skills = await discoverSkills(cwd);
+let skills = await discoverSkills(cwd); // read again by /new
 // The prompt names the model, so a switch from the models menu gets its own (the engine's cache is
 // lost on a switch anyway); for one model it stays byte-stable.
 const system = (model: string): string =>
@@ -181,7 +185,7 @@ const startedAt = Date.now();
 if (tui) {
   // The interactive mode: raw terminal in, live region out. Everything else is the same Agent.
   const term = new Term();
-  const startup = startupPanel({ context, skills, extensions: extensionPaths, version: VERSION });
+  const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION });
   const app = new App({
     agent: agent,
     write: (text) => term.write(text),
@@ -205,6 +209,19 @@ if (tui) {
     extensions: catalog({ kind: EXTENSIONS, home: process.env.HOME ?? "", repo: config.extensionsRepo }),
     skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
     apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
+    newSession: async () => {
+      // A new conversation: a new session file, the skills read again (installed ones join the
+      // prompt), and no file counts as read until the model reads it in this conversation.
+      const last = session;
+      session = await Session.create({ cwd, model: agent.model });
+      skills = await discoverSkills(cwd);
+      tracker.reset();
+      agent.restart(session);
+      // The last one: deleted when nothing was said in it (as on quit), else how to come back to it.
+      if (last.empty) await rm(last.path, { force: true });
+      const back = last.empty ? "" : `\n\n${ANSI.dim}the last session:${ANSI.reset} ${ANSI.cream}kinoko --session ${last.meta.id}${ANSI.reset}`;
+      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION }) + back };
+    },
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
     place: () => placeLine(cwd),
@@ -264,6 +281,8 @@ async function applyExtension(name: string, change: "install" | "remove"): Promi
   if (change === "install") failed = await loadOne(ext, join(process.env.HOME ?? "", ".kinoko", "ext", name, "index.ts"));
   else ext.unload(name);
   if (failed) return failed;
+  if (change === "install") loadedExtensions.add(name);
+  else loadedExtensions.delete(name);
   agent.setTools([...defaultTools(), ...ext.tools()]);
   const toolsChanged = ext.tools().map((t) => t.name).join(",") !== before;
   const done = change === "install" ? "loaded" : "unloaded";
@@ -293,7 +312,7 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
     "\x1b[38;5;214m[Capabilities]\x1b[0m",
     `  Context: ${names(parts.context.map((file) => file.path.split("/").at(-1) ?? file.path), "none")}`,
     `  Skills: ${names(parts.skills.map((skill) => skill.name), "none")}`,
-    `  Extensions: ${names(parts.extensions.map(extensionName), "none")}`,
+    `  Extensions: ${names(parts.extensions, "none")}`,
     "",
     "Kinoko can inspect and change this project. Ask it to work on a coding task.",
   ].join("\n");

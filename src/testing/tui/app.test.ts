@@ -82,6 +82,8 @@ async function harness(
     extensions?: Catalog;
     skills?: Catalog;
     apply?: (kind: "extensions" | "skills", name: string, change: "install" | "remove") => Promise<string>;
+    /** /new: the harness gives it a fresh session and restarts the agent, as main does. */
+    newSession?: boolean;
     clipboard?: (signal: AbortSignal) => Promise<Image | string>;
     changes?: ChangesSource;
   } = {},
@@ -117,6 +119,13 @@ async function harness(
     extensions: opts.extensions,
     skills: opts.skills,
     apply: opts.apply,
+    newSession: opts.newSession
+      ? async () => {
+          const fresh = await Session.create({ cwd: ROOT, model: "test-model", home: ROOT });
+          agent.restart(fresh);
+          return { session: fresh, intro: "kinoko vTEST\n  Skills: none" };
+        }
+      : undefined,
     session: session,
     rebuild: () => agent,
     clipboard: opts.clipboard,
@@ -1229,5 +1238,39 @@ describe("the extensions and skills pages", () => {
     offline.app.render();
     expect(offline.screen()).toContain("herdr agent");
     expect(offline.screen()).toContain("could not update the repo: offline · showing what is on this computer");
+  });
+});
+
+describe("/clear and /new", () => {
+  test("/clear wipes the screen and the scrollback; the conversation stays", async () => {
+    const h = await harness([[{ type: "text", delta: "first answer" }, { type: "done", stop: "end" }]]);
+    h.press("hello\r");
+    await settle(h.agent);
+    const before = h.agent.messages.length;
+    h.out.length = 0;
+    h.press("/clear\r");
+    expect(h.out.join("")).toContain("\x1b[2J\x1b[3J");
+    expect(h.agent.messages).toHaveLength(before);
+  });
+
+  test("/new: a new session, no history, counters at zero, the panel again; refused during a run", async () => {
+    const h = await harness([[{ type: "text", delta: "first answer" }, { type: "done", stop: "end", usage: { input: 500, output: 20 } }]], { newSession: true });
+    h.press("hello\r");
+    await settle(h.agent);
+    expect(h.app.statusLine).toContain("520/1,000 tok");
+    h.out.length = 0;
+    h.press("/new\r");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(h.agent.messages).toEqual([]);
+    expect(h.app.statusLine).toContain("0/1,000 tok");
+    expect(h.app.marker).toBe("new session: the model starts with no history");
+    expect(h.screen()).toContain("kinoko vTEST");
+
+    const busy = await harness([[{ type: "text", delta: "slow" }, { type: "text", delta: "er" }, { type: "done", stop: "end" }]], { newSession: true, pace: 30 });
+    busy.press("go\r");
+    busy.press("/new\r");
+    await new Promise((r) => setTimeout(r, 5));
+    expect(busy.app.marker).toBe("a run is going: Esc it first, then /new");
+    await settle(busy.agent);
   });
 });
