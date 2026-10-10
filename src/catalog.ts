@@ -24,6 +24,9 @@ export interface Kind {
   describe: (folder: string) => Promise<string>;
   /** Older single-file installs (`name.ts`) count as installed: extensions only. */
   single?: string;
+  /** A folder under home that kinoko also loads from but leaves to others (skills: ~/.agents/skills,
+   *  shared with other agents): listed, never installed into or removed from. */
+  shared?: string;
 }
 
 export const EXTENSIONS: Kind = {
@@ -42,6 +45,7 @@ export const SKILLS: Kind = {
   dir: "skills",
   entry: "SKILL.md",
   repo: "https://github.com/LaraGuardiola/kinoko-skills.git",
+  shared: ".agents/skills",
   describe: async (folder) => frontmatter(await Bun.file(join(folder, "SKILL.md")).text().catch(() => "")).description ?? "",
 };
 
@@ -49,6 +53,8 @@ export interface Entry {
   name: string;
   description: string;
   installed: boolean;
+  /** Found in the kind's shared folder: kinoko loads it, others manage it. */
+  shared?: boolean;
 }
 
 export interface Catalog {
@@ -118,7 +124,8 @@ async function names(kind: Kind, dir: string, single = false): Promise<string[]>
   const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
   const suffix = single ? kind.single : undefined;
   const files = suffix ? entries.filter((e) => e.isFile() && e.name.endsWith(suffix)).map((e) => e.name.slice(0, -suffix.length)) : [];
-  const dirs = entries.filter((e) => e.isDirectory() && NAME.test(e.name) && e.name !== "node_modules" && e.name !== "testing").map((e) => e.name);
+  // A link counts when it leads to a folder with the entry file (Omarchy links its skills in).
+  const dirs = entries.filter((e) => (e.isDirectory() || e.isSymbolicLink()) && NAME.test(e.name) && e.name !== "node_modules" && e.name !== "testing").map((e) => e.name);
   const found = await Promise.all(dirs.map(async (name) => ((await exists(join(dir, name, kind.entry))) ? name : undefined)));
   return [...new Set([...found.filter((name) => name !== undefined), ...files])].toSorted();
 }
@@ -131,6 +138,7 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
   const registry = join(kinoko, "registry", kind.name);
   const target = join(kinoko, kind.dir);
   const legacy = (name: string): string | undefined => (kind.single ? join(target, `${name}${kind.single}`) : undefined);
+  const shared = kind.shared ? join(opts.home, kind.shared) : undefined;
 
   /** Clones the repository, or brings the clone up to date; an error says why. The last fetched
    *  copy is never lost to a failure: offline, it is all the page has. */
@@ -168,7 +176,11 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
     // Installed but not offered (a hand-made one, or never fetched yet): still listed, removable.
     const own = (await names(kind, target, true)).filter((name) => !offered.includes(name));
     const mine = await Promise.all(own.map(async (name) => ({ name, description: (await kind.describe(join(target, name))) || "installed, not in the repository", installed: true })));
-    return [...fromRepo, ...mine].toSorted(byName);
+    // The shared folder's ones load too (the first of a name wins, as in discovery): shown, left alone.
+    const taken = new Set([...offered, ...own]);
+    const others = shared === undefined ? [] : (await names(kind, shared)).filter((name) => !taken.has(name));
+    const theirs = await Promise.all(others.map(async (name) => ({ name, description: await kind.describe(join(shared ?? "", name)), installed: true, shared: true })));
+    return [...fromRepo, ...mine, ...theirs].toSorted(byName);
   }
 
   return {
@@ -182,7 +194,11 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
     },
 
     async install(name, signal) {
-      if (!NAME.test(name) || !(await exists(join(registry, name, kind.entry)))) return { ok: false, note: `no ${kind.one} called ${name} in ${repo}` };
+      if (!NAME.test(name) || !(await exists(join(registry, name, kind.entry)))) {
+        if (shared !== undefined && NAME.test(name) && (await exists(join(shared, name, kind.entry))))
+          return { ok: false, note: `${name} lives in ~/${kind.shared}, shared with other agents: kinoko leaves it alone` };
+        return { ok: false, note: `no ${kind.one} called ${name} in ${repo}` };
+      }
       const was = await installed(name);
       const folder = join(target, name);
       await rm(folder, { recursive: true, force: true });
