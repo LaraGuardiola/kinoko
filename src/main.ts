@@ -8,7 +8,8 @@ import type { AgentEvent } from "./loop.ts";
 import { Session, findSession, latestSession } from "./session.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
-import { Extensions, loadExtensions } from "./ext.ts";
+import { Extensions, extensionName, loadExtensions } from "./ext.ts";
+import { extStore } from "./extstore.ts";
 import { App } from "./tui/app.ts";
 import { THINKING } from "./tui/menu-pages.ts";
 import { Term } from "./tui/term.ts";
@@ -201,6 +202,7 @@ if (tui) {
       fixed: (entry) => entry.baseUrl === configured.baseUrl && entry.model === configured.model,
     },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
+    extensions: extStore({ home: process.env.HOME ?? "", repo: config.extensionsRepo }),
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
     place: () => placeLine(cwd),
@@ -256,7 +258,7 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
     "\x1b[38;5;214m[Capabilities]\x1b[0m",
     `  Context: ${names(parts.context.map((file) => file.path.split("/").at(-1) ?? file.path), "none")}`,
     `  Skills: ${names(parts.skills.map((skill) => skill.name), "none")}`,
-    `  Extensions: ${names(parts.extensions.map((path) => path.split("/").at(-1) ?? path), "none")}`,
+    `  Extensions: ${names(parts.extensions.map(extensionName), "none")}`,
     "",
     "Kinoko can inspect and change this project. Ask it to work on a coding task.",
   ].join("\n");

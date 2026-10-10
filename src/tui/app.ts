@@ -20,7 +20,8 @@ import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
-import { ROOT, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { ROOT, extensionsPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import type { ExtEntry, ExtStore } from "../extstore.ts";
 import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
 import type { ModelChoice, ModelsView } from "./models-menu.ts";
 import type { SavedModel } from "../config.ts";
@@ -57,6 +58,8 @@ export interface AppOptions {
   budgets?: boolean;
   /** Switching endpoints and adding models; without it the models page lists the engine's own only. */
   models?: ModelsHost;
+  /** Where /extensions installs from; without it the page says it is not available. */
+  extensions?: ExtStore;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
@@ -103,6 +106,7 @@ export class App {
   #budgets: boolean;
   #menu = new Menu();
   #host: ModelsHost | undefined;
+  #store: ExtStore | undefined;
   #endpoint: string;
   #saved: SavedModel[];
   #viewportRows: number | undefined;
@@ -147,6 +151,7 @@ export class App {
     this.#profile = opts.thinkingProfile;
     this.#budgets = opts.budgets ?? false;
     this.#host = opts.models;
+    this.#store = opts.extensions;
     this.#endpoint = opts.models?.endpoint ?? "";
     this.#saved = opts.models?.saved ?? [];
     this.#viewportRows = opts.viewportRows;
@@ -833,6 +838,7 @@ export class App {
   #openRoot(item: MenuItem): void {
     if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
     else if (item.name === "models") this.#openModels();
+    else if (item.name === "extensions") this.#openExtensions();
     else if (item.name === "session") this.#menu.open(this.#sessionPage());
     else {
       this.#closeMenu();
@@ -891,6 +897,47 @@ export class App {
         .catch(() => [])
         .then((list) => answered(entry.baseUrl, list));
     }
+  }
+
+  /** The repository's extensions: fetched when the page opens, installed and removed from it. */
+  #openExtensions(): void {
+    const store = this.#store;
+    if (store === undefined) {
+      this.#menu.open({ kind: "info", title: "Extensions", lines: ["  not available in this mode"] });
+      return;
+    }
+    const state: { repo: string; entries?: ExtEntry[]; error?: string } = { repo: store.repo };
+    const install = (name: string): void => {
+      this.#marker = `installing ${name}…`;
+      void store
+        .install(name, AbortSignal.timeout(300_000))
+        .catch((e: unknown) => `${name} did not install: ${e instanceof Error ? e.message : String(e)}`)
+        .then((note) => {
+          this.#marker = note;
+          this.render();
+        });
+    };
+    const remove = (name: string): void => {
+      void store.remove(name).then((note) => {
+        this.#marker = note;
+        const entry = state.entries?.find((e) => e.name === name);
+        if (entry) entry.installed = false;
+        redraw();
+      });
+    };
+    let page = extensionsPage(state, install, remove);
+    const redraw = (): void => {
+      const next = extensionsPage(state, install, remove);
+      this.#menu.refresh(page, next);
+      page = next;
+      this.render();
+    };
+    this.#menu.open(page);
+    void store
+      .list(AbortSignal.timeout(60_000))
+      .then((entries) => (state.entries = entries))
+      .catch((e: unknown) => (state.error = e instanceof Error ? e.message : String(e)))
+      .then(redraw);
   }
 
   /** Forgets a saved model; the models page stays open, redrawn without it. */

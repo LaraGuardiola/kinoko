@@ -85,7 +85,8 @@ one summary written by the same model.
 
 ## Extensions
 
-Drop a `.ts` file in `~/.kinoko/ext/` or `./.kinoko/ext/`:
+A `.ts` file, or a folder with an `index.ts` (and its own dependencies), in `~/.kinoko/ext/` or
+`./.kinoko/ext/`:
 
 ```ts
 import type { Kinoko } from "../../src/ext.ts";
@@ -105,13 +106,13 @@ Events: `session_start`, `context` (rewrite the messages before a request), `bef
 `tool_call` (mutate args, or block), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
 throws is logged and skipped; a blocked call returns its reason to the model instead of running.
 
-`examples/ext/` ships six: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
-`plan-mode.ts` (read-only), `web.ts` (`web_search` and `web_fetch`: no API key, Brave, DuckDuckGo
-then Bing, pages turned into readable text), `check-early.ts` (after 4 source files written or edited
-with no build, typecheck, lint or test run in between, the tool result asks the model to run one),
-`herdr.ts` (inside [herdr](https://herdr.dev), reports the pane as a `kinoko` agent, idle or working:
-herdr's sidebar shows it, and Flux on Android gets an agent screen with **Live**, where herdr resizes
-the pane to the phone's grid so kinoko draws for the phone) and `hello.ts`.
+The extensions live in their own repository,
+[kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, herdr,
+permission-gate, plan-mode, web. `/` then **extensions** lists them (the repository is fetched with
+git into `~/.kinoko/registry/`); Enter installs or updates one into `~/.kinoko/ext/<name>/`, running
+`bun install` there when it has dependencies; Del twice removes it. They load when kinoko starts.
+`"extensionsRepo"` in the config points the page at another repository. `examples/ext/hello.ts` is
+the smallest example.
 
 ## The side panel
 

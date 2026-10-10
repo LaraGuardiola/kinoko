@@ -1,7 +1,7 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Extensions, loadExtensions } from "../ext.ts";
+import { Extensions, extensionName, loadExtensions } from "../ext.ts";
 import { Agent } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Message, Provider, StreamEvent, Tool } from "../types.ts";
@@ -57,6 +57,19 @@ describe("extension loader", () => {
     ]);
     const log = (await Bun.file(`${home}/.kinoko/ext/order.log`).text()).trim().split("\n");
     expect(log).toEqual(["user:a-first.ts", "user:z-second.ts"]);
+  });
+
+  test("1a. a folder with an index.ts is an extension, in name order with the files; its name is the folder's", async () => {
+    const home = `${ROOT}/folder-home`;
+    rmSync(home, { recursive: true, force: true });
+    writeOrderProbe(`${home}/.kinoko/ext`, "b-file.ts", "user");
+    mkdirSync(`${home}/.kinoko/ext/a-folder`, { recursive: true });
+    writeFileSync(`${home}/.kinoko/ext/a-folder/index.ts`, "export default function (k) { k.registerCommand('folder', () => 'from a folder'); }\n");
+    mkdirSync(`${home}/.kinoko/ext/no-index`, { recursive: true }); // a folder without index.ts is skipped
+    const { ext } = extBus();
+    const loaded = await loadExtensions(ext, { cwd: home, home: home });
+    expect(loaded.map(extensionName)).toEqual(["a-folder", "b-file"]);
+    expect(await ext.command("folder")?.("")).toBe("from a folder");
   });
 
   test("1b. run from $HOME, the shared ext dir is loaded once", async () => {
@@ -228,48 +241,7 @@ async function install(files: string[], tag: string): Promise<Extensions> {
   return ext;
 }
 
-/** The reason an extension blocks a call, or undefined when it allows it. */
-function blocker(ext: Extensions): (name: string, args: Record<string, unknown>) => string | undefined {
-  return (name, args) => ext.beforeTool({ name: name, args: args, signal: new AbortController().signal })?.reason;
-}
-
-describe("shipped extensions", () => {
-  test("7. permission-gate: hardline always; gated commands denied unless yolo is set", async () => {
-    const blocked = blocker(await install(["permission-gate.ts"], "gate-off"));
-    expect(blocked("bash", { cmd: "rm -rf /" })).toContain("hardline");
-    expect(blocked("bash", { cmd: "rm -rf ~/" })).toContain("hardline");
-    expect(blocked("bash", { cmd: "rm -rf / --no-preserve-root" })).toContain("hardline");
-    expect(blocked("bash", { cmd: "sudo rm x" })).toContain("denied by permission-gate");
-    expect(blocked("bash", { cmd: "chmod 777 /tmp/x" })).toContain("denied by permission-gate");
-    expect(blocked("bash", { cmd: "ls -la" })).toBeUndefined();
-    expect(blocked("bash", { command: "rm -rf /" })).toContain("hardline");
-    expect(blocked("read", { path: "a.txt" })).toBeUndefined();
-
-    process.env.KINOKO_YOLO = "1";
-    try {
-      const yolo = blocker(await install(["permission-gate.ts"], "gate-on"));
-      expect(yolo("bash", { cmd: "sudo rm x" })).toBeUndefined();
-      expect(yolo("bash", { cmd: "chmod 777 /tmp/x" })).toBeUndefined();
-      // The yolo flag does not reach the hardline. Ever.
-      expect(yolo("bash", { cmd: "rm -rf /" })).toContain("hardline");
-    } finally {
-      delete process.env.KINOKO_YOLO;
-    }
-  });
-
-  test("8. plan-mode blocks write and edit and mutating bash, allows reads", async () => {
-    const reason = blocker(await install(["plan-mode.ts"], "plan"));
-    expect(reason("write", { path: "a.txt", content: "x" })).toContain("plan mode is read-only");
-    expect(reason("edit", { path: "a.txt" })).toContain("plan mode is read-only");
-    expect(reason("bash", { cmd: "git status" })).toBeUndefined();
-    expect(reason("bash", { cmd: "ls -la\nrg needle src" })).toBeUndefined();
-    expect(reason("bash", { cmd: "npm install" })).toContain("plan mode");
-    expect(reason("bash", { cmd: "ls -la && rm x" })).toContain("plan mode");
-    expect(reason("bash", { cmd: "cat a.txt > b.txt" })).toContain("plan mode");
-    expect(reason("bash", { command: "npm install" })).toContain("plan mode");
-    expect(reason("read", { path: "a.txt" })).toBeUndefined();
-  });
-
+describe("the shipped example", () => {
   test("9. hello registers a tool and a command", async () => {
     const ext = await install(["hello.ts"], "hello");
     expect(ext.tools().map((t) => t.name)).toEqual(["hello"]);
