@@ -106,4 +106,15 @@ describe("context discovery", () => {
     expect(frontmatter("---\nname: x\ndescription: y")).toEqual({}); // unterminated
     expect(frontmatter("---\nname: x\nother: z\ndescription: d\n---\n")).toEqual({ name: "x", description: "d" });
   });
+
+  test("5b. frontmatter joins multi-line values: > and | blocks, wrapped plain text", () => {
+    const folded = "---\nname: flux-send\ndescription: >\n  Send files to the phones.\n\n  Triggers: flux, OnePlus.\nother: z\n---\n";
+    expect(frontmatter(folded)).toEqual({ name: "flux-send", description: "Send files to the phones. Triggers: flux, OnePlus." });
+    expect(frontmatter("---\ndescription: |-\n  line one\n  line two\n---\n").description).toBe("line one line two");
+    expect(frontmatter("---\ndescription: starts here\n  and wraps\nname: n\n---\n")).toEqual({
+      description: "starts here and wraps",
+      name: "n",
+    });
+    expect(frontmatter("---\nmeta:\n  name: nested\n---\n")).toEqual({}); // indented keys belong to another map
+  });
 });

@@ -98,19 +98,29 @@ export function renderSkills(skills: SkillEntry[]): string {
   return `<skills>\n${rows.join("\n")}\n</skills>`;
 }
 
-/** The two frontmatter keys we care about; everything else in the YAML is ignored. */
+/**
+ * The two frontmatter keys we care about; everything else in the YAML is ignored.
+ * A value may continue on indented lines (`description: >` / `|` blocks, wrapped plain text):
+ * they are joined with spaces, since the index renders each skill on one line.
+ */
 export function frontmatter(text: string): { name?: string; description?: string } {
   const lines = text.split("\n");
   if (lines[0]?.trim() !== "---") return {};
   const end = lines.findIndex((line, i) => i > 0 && line.trim() === "---");
   if (end < 0) return {};
+  const body = lines.slice(1, end);
   const out: { name?: string; description?: string } = {};
-  for (const line of lines.slice(1, end)) {
+  for (const [i, line] of body.entries()) {
     const at = line.indexOf(":");
-    if (at < 0) continue;
+    if (at < 0 || /^\s/.test(line)) continue;
     const key = line.slice(0, at).trim();
     if (key !== "name" && key !== "description") continue;
-    out[key] = unquote(line.slice(at + 1).trim());
+    const head = line.slice(at + 1).trim();
+    const rest = body.slice(i + 1);
+    const stop = rest.findIndex((l) => l.trim() !== "" && !/^\s/.test(l));
+    const more = (stop < 0 ? rest : rest.slice(0, stop)).map((l) => l.trim()).filter((l) => l !== "");
+    const first = /^[>|][+-]?$/.test(head) ? [] : [unquote(head)]; // block indicator, not text
+    out[key] = [...first, ...more].join(" ");
   }
   return out;
 }
