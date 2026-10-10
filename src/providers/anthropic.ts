@@ -4,7 +4,7 @@
 // event so the next request can send them unchanged, which the API requires for thinking.
 
 import type { Message, Provider, ProviderRequest, StreamEvent, Usage } from "../types.ts";
-import { SseParser } from "./openai-compat.ts";
+import { SseParser, transient } from "./openai-compat.ts";
 import { ArgsWatcher } from "./partial-args.ts";
 import models from "./models.json";
 
@@ -57,7 +57,7 @@ interface Event {
     stop_details?: { category?: string | null } | null;
   };
   usage?: RawUsage;
-  error?: { message?: string };
+  error?: { type?: string; message?: string };
 }
 
 export function anthropic(opts: AnthropicOptions): Provider {
@@ -88,7 +88,7 @@ export function anthropic(opts: AnthropicOptions): Provider {
           yield { type: "done", stop: "aborted" };
           return;
         }
-        yield { type: "error", message: `HTTP ${res?.status ?? 0}: ${(await res?.text().catch(() => "")) ?? ""}` };
+        yield { type: "error", message: `HTTP ${res?.status ?? 0}: ${(await res?.text().catch(() => "")) ?? ""}`, retry: !res || transient(res.status) };
         yield { type: "done", stop: "error" };
         return;
       }
@@ -111,7 +111,8 @@ export function anthropic(opts: AnthropicOptions): Provider {
             const ev = parse(payload);
             if (ev === undefined) continue;
             if (ev.type === "error") {
-              yield { type: "error", message: ev.error?.message ?? "stream error" };
+              const kind = ev.error?.type ?? "";
+              yield { type: "error", message: ev.error?.message ?? "stream error", retry: kind === "overloaded_error" || kind === "api_error" };
               yield { type: "done", stop: "error" };
               return;
             }
@@ -151,8 +152,9 @@ export function anthropic(opts: AnthropicOptions): Provider {
             }
           }
         }
-      } catch {
+      } catch (e) {
         // Socket died or the user aborted mid-stream: any tool call is incomplete, so drop it.
+        if (!req.signal.aborted) yield { type: "error", message: `the connection closed mid-reply: ${e instanceof Error ? e.message : String(e)}`, retry: true };
         yield { type: "done", stop: req.signal.aborted ? "aborted" : "error" };
         return;
       } finally {

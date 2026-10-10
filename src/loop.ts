@@ -32,6 +32,7 @@ export type AgentEvent =
   | { type: "delivered"; text: string } // a queued steer/follow-up just reached the model
   | { type: "compacting"; phase: "reading" | "writing"; done: number; total?: number } // a summary on its way
   | { type: "compacted"; keep: number } // head of the history replaced by a summary, tail kept
+  | { type: "retry"; attempt: number; of: number; inMs: number; error: string } // a transient failure: the same request again
   | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[]; detail?: string };
 
 // `detail` says which limit or error stopped the run, for the UI.
@@ -58,6 +59,8 @@ export class Agent {
   #followUpQueue: Queued[] = [];
   #malformedCount = 0;
   #nudges = 0; // cut-off or looping replies in a row, each answered with a nudge
+  #retries: number;
+  #retryMs: number;
   #calls = new CallGuard();
   #session: Session | undefined;
   #contextWindow = 0;
@@ -77,6 +80,8 @@ export class Agent {
     session?: Session; // when given, the session log owns the history and every message is appended
     contextWindow?: number; // 0 disables compaction
     extensions?: Extensions;
+    retries?: number; // a transient provider failure is retried this many times in a row (default 3)
+    retryMs?: number; // the first wait; each next one doubles (default 2s: 2s, 4s, 8s)
   }) {
     this.#provider = opts.provider;
     this.#model = opts.model;
@@ -88,6 +93,8 @@ export class Agent {
     this.#session = opts.session;
     this.#contextWindow = opts.contextWindow ?? 0;
     this.#ext = opts.extensions;
+    this.#retries = opts.retries ?? 3;
+    this.#retryMs = opts.retryMs ?? 2000;
     if (this.#session) this.#messages = [...this.#session.view()];
   }
 
@@ -210,6 +217,7 @@ export class Agent {
     await this.#push(userMessage(initial));
     this.#emit({ type: "run_start", prompt: initial.text });
 
+    let retries = 0; // transient failures in a row
     while (true) {
       if (this.#abortController!.signal.aborted) {
         return this.#handleAbort();
@@ -286,6 +294,19 @@ export class Agent {
 
       // Reactive trigger: the provider rejected the prompt, so shrink and retry the same turn.
       if (overflow && (await this.#compact())) continue;
+
+      // A dropped connection or an overloaded server: the same request again after a wait, the
+      // partial reply thrown away (its calls are incomplete). Retries cost no turn.
+      const failed = stopReason === "error" ? streamEvents.findLast((e) => e.type === "error") : undefined;
+      if (failed?.type === "error" && failed.retry && retries < this.#retries) {
+        retries++;
+        this.#turns--;
+        const inMs = this.#retryMs * 2 ** (retries - 1);
+        this.#emit({ type: "retry", attempt: retries, of: this.#retries, inMs, error: failed.message.slice(0, 200) });
+        if (!(await wait(inMs, this.#abortController!.signal))) return this.#handleAbort();
+        continue;
+      }
+      retries = 0;
 
       const text = joinOf(streamEvents, "text");
       // A reply cut by a loop guard keeps neither its looping thinking nor its unfinished calls; one
@@ -512,6 +533,22 @@ function joinOf(events: StreamEvent[], kind: "text" | "thinking"): string {
     if (e.type === kind) out += (e as { delta: string }).delta;
   }
   return out;
+}
+
+/** Sleeps `ms`; false when the signal cut it short. */
+function wait(ms: number, signal: AbortSignal): Promise<boolean> {
+  return new Promise((done) => {
+    if (signal.aborted) return done(false);
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", stop);
+      done(true);
+    }, ms);
+    const stop = (): void => {
+      clearTimeout(timer);
+      done(false);
+    };
+    signal.addEventListener("abort", stop, { once: true });
+  });
 }
 
 function errorOf(events: StreamEvent[]): string | undefined {

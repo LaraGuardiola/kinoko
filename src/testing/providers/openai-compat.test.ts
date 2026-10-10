@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { isLocal, listModels, openaiCompat } from "../../providers/openai-compat.ts";
+import { isLocal, listModels, openaiCompat, transient } from "../../providers/openai-compat.ts";
 import type { ProviderRequest, StreamEvent } from "../../types.ts";
 
 let server: ReturnType<typeof Bun.serve>;
@@ -173,6 +173,16 @@ describe("openai-compat: truncation, thinking and effort", () => {
     expect(lastBody.reasoning_budget_tokens).toBe(2048);
   });
 
+  test("with tools, several calls per reply are asked for; without tools, nothing is said about them", async () => {
+    setMode("text");
+    const provider = openaiCompat({ baseUrl, apiKey: "k" });
+    const tools = [{ name: "read", description: "read", schema: { type: "object" } }];
+    for await (const _ of provider.stream({ ...mkReq(new AbortController().signal), tools })) void _;
+    expect(lastBody.parallel_tool_calls).toBe(true);
+    for await (const _ of provider.stream(mkReq(new AbortController().signal))) void _;
+    expect(lastBody.parallel_tool_calls).toBeUndefined();
+  });
+
   test("a user message with images: a text part, then data-URL image_url parts", async () => {
     setMode("text");
     const provider = openaiCompat({ baseUrl, apiKey: "k" });
@@ -217,6 +227,21 @@ describe("openai-compat: truncation, thinking and effort", () => {
     const error = events.find((e) => e.type === "error");
     expect(error?.type === "error" && error.message).toMatch(/^no answer from 127\.0\.0\.1:9 after \d+s: .+\(a server timeout, or the server stopped\?\)$/);
     expect(events.at(-1)).toEqual({ type: "done", stop: "error" });
+    expect(error?.type === "error" && error.retry).toBe(true);
+  });
+
+  test("transient statuses are marked for a retry; a bad request is not", async () => {
+    const statuses = Bun.serve({ port: 0, fetch: (req) => new Response("no", { status: Number(new URL(req.url).pathname.split("/")[1]) }) });
+    const errorAt = async (status: number): Promise<StreamEvent | undefined> => {
+      const provider = openaiCompat({ baseUrl: `http://localhost:${statuses.port}/${status}/v1`, apiKey: "k" });
+      for await (const e of provider.stream(mkReq(new AbortController().signal))) if (e.type === "error") return e;
+      return undefined;
+    };
+    expect(await errorAt(503)).toEqual({ type: "error", message: "HTTP 503: no", retry: true });
+    expect(await errorAt(429)).toMatchObject({ retry: true });
+    expect(await errorAt(400)).toMatchObject({ retry: false });
+    expect(transient(500) && transient(408) && !transient(401) && !transient(404)).toBe(true);
+    statuses.stop(true);
   });
 
   test("the server's prompt progress becomes progress events, before the reply", async () => {

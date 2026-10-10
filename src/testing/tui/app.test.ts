@@ -95,6 +95,7 @@ async function harness(
     maxTurns: 10,
     maxCost: 100,
     session: session,
+    retryMs: 1,
   });
   const app = new App({
     agent: agent,
@@ -456,6 +457,19 @@ describe("TUI app with the agent", () => {
     const out = h.out.join("");
     expect(out).toContain("\x1b[48;2;50;30;36m"); // the failed-tool red
     expect(h.screen()).toContain("HTTP 500: image input is not supported");
+  });
+
+  test("8g2. a dropped connection: the note says it is retrying, then goes when the model answers", async () => {
+    const h = await harness([[{ type: "text", delta: "half" }, { type: "error", message: "the connection closed mid-reply", retry: true }, { type: "done", stop: "error" }]]);
+    const notes: string[] = [];
+    h.agent.on((e) => {
+      if (e.type === "retry") notes.push(h.app.marker);
+    });
+    h.press("go\r");
+    await settle(h.agent);
+    expect(notes).toEqual(["the connection closed mid-reply · retry 1/3 in 0s"]);
+    expect(h.app.marker).toBe("");
+    expect(h.screen()).toContain("done");
   });
 
   test("8h. a resumed session's status line keeps its totals: sent, generated and the cache hit rate", async () => {

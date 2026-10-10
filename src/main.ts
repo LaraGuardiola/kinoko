@@ -44,6 +44,9 @@ function print(agent: Agent): void {
       case "compacted":
         if (e.keep >= 0) process.stderr.write(`[compacted: ${e.keep} messages kept verbatim]\n`);
         break;
+      case "retry":
+        process.stderr.write(`[${e.error} · retry ${e.attempt}/${e.of} in ${Math.round(e.inMs / 1000)}s]\n`);
+        break;
       case "run_end":
         process.stderr.write(`[${e.reason}${e.detail ? `: ${e.detail}` : ""}]\n`);
         break;
@@ -165,6 +168,7 @@ const agent = new Agent({
   contextWindow: startWindow,
   session,
   extensions: ext,
+  retries: config.retries,
 });
 
 // A resumed session already read or wrote files: those still on disk exactly as it last saw them

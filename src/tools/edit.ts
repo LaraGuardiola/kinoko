@@ -189,7 +189,7 @@ function changed(out: string, ranges: Range[]): string {
 
 export const editTool: Tool = {
   name: "edit",
-  description: "Apply exact substring edits [{old,new}] to a file. Each old must match exactly once (not-found and ambiguous errors are reported with hints); overlapping edits are rejected; all edits apply or none. The file must have been read and be unchanged since.",
+  description: "Apply exact substring edits [{old,new}] to a file. Each old must match exactly once (not-found and ambiguous errors are reported with hints); overlapping edits are rejected; all edits apply or none. Several changes to one file: one call with several edits. The file must have been read and be unchanged since.",
   schema: {
     type: "object",
     properties: {

@@ -21,6 +21,8 @@ export interface Config {
   label?: string;
   // Old thinking sent back: "turn" (since the user's last message, the default) or "none".
   thinkingReplay?: "turn" | "none";
+  // A dropped connection or a 429/5xx is retried this many times in a row (2s, 4s, 8s...); 0: never.
+  retries?: number;
 }
 
 export const DEFAULTS: Config = {
@@ -34,7 +36,7 @@ export const DEFAULTS: Config = {
   maxOutputTokens: 8192,
 }
 
-const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens", "thinkingBudget"]);
+const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens", "thinkingBudget", "retries"]);
 const FILE_KEYS: ReadonlySet<string> = new Set([
   "provider",
   "baseUrl",
@@ -48,6 +50,7 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "thinkingBudget",
   "label",
   "thinkingReplay",
+  "retries",
 ]);
 const REPLAYS: ReadonlySet<string> = new Set(["turn", "none"]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);

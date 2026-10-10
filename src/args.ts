@@ -23,6 +23,7 @@ const FLAGS: Record<string, string> = {
   "thinking-replay": "thinkingReplay",
   thinkingReplay: "thinkingReplay",
   thinkingBudget: "thinkingBudget",
+  retries: "retries",
 };
 
 const RESUME_FLAGS = new Set(["continue", "c"]);

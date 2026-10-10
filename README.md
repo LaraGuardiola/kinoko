@@ -105,9 +105,11 @@ Events: `session_start`, `context` (rewrite the messages before a request), `bef
 `tool_call` (mutate args, or block), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
 throws is logged and skipped; a blocked call returns its reason to the model instead of running.
 
-`examples/ext/` ships four: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
+`examples/ext/` ships five: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
 `plan-mode.ts` (read-only), `web.ts` (`web_search` and `web_fetch`: no API key, Brave, DuckDuckGo
-then Bing, pages turned into readable text) and `hello.ts`.
+then Bing, pages turned into readable text), `check-early.ts` (after 4 source files written or edited
+with no build, typecheck, lint or test run in between, the tool result asks the model to run one) and
+`hello.ts`.
 
 ## The side panel
 
@@ -141,6 +143,10 @@ removes it (the configured one stays). `"label"` names the configured provider i
 default) sends the thinking of every step since your last message, so the model keeps its plan
 between tool calls instead of re-reading your last message as if it were new; older thinking stays
 out. `"none"` sends only a reply cut by the output limit, for models that copy old thinking verbatim.
+
+`"retries"` (default 3): a dropped connection, no answer, or a 429/5xx is retried that many times in
+a row, after 2s, 4s, 8s...; the partial reply is dropped and the note above the input says so. Esc
+during the wait stops the run. `0` never retries.
 
 ```json
 { "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any",

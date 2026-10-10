@@ -50,7 +50,8 @@ export type StreamEvent =
   | { type: "replay"; data: unknown } // the finished message as the provider wants it back
   | { type: "progress"; done: number; total: number } // prompt tokens read so far (llama.cpp's return_progress)
   | { type: "done"; stop: StopReason; usage?: Usage }
-  | { type: "error"; message: string };
+  // `retry`: transient (no answer, a 429/5xx, the connection lost mid-reply): the same request may work.
+  | { type: "error"; message: string; retry?: boolean };
 
 export interface ToolSpec {
   name: string;
