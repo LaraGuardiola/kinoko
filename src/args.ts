@@ -24,8 +24,6 @@ const FLAGS: Record<string, string> = {
   thinkingReplay: "thinkingReplay",
   thinkingBudget: "thinkingBudget",
   retries: "retries",
-  "max-cols": "maxCols",
-  maxCols: "maxCols",
 };
 
 const RESUME_FLAGS = new Set(["continue", "c"]);

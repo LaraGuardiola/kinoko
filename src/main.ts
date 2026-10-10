@@ -1,4 +1,4 @@
-import { DEFAULTS, layoutCols, loadConfig, loadSavedModels, removeModel, resumeModel, saveModel, thinkingLabel } from "./config.ts";
+import { DEFAULTS, loadConfig, loadSavedModels, removeModel, resumeModel, saveModel, thinkingLabel } from "./config.ts";
 import type { SavedModel } from "./config.ts";
 import type { Provider } from "./types.ts";
 import { listModels, openaiCompat } from "./providers/openai-compat.ts";
@@ -133,7 +133,7 @@ const system = (model: string): string =>
     skills,
   });
 
-ext.emit("session_start", { cwd: cwd, model: config.model });
+ext.emit("session_start", { cwd: cwd, model: config.model, mode: mode });
 
 const providerOptions = {
   baseUrl: config.baseUrl,
@@ -202,7 +202,7 @@ if (tui) {
     },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
     viewportRows: Math.max(2, term.rows - 1),
-    viewportCols: layoutCols(term.cols, config.maxCols),
+    viewportCols: term.cols,
     place: () => placeLine(cwd),
     session: session,
     onQuit: () => {
@@ -211,7 +211,7 @@ if (tui) {
       process.exit(0);
     },
   });
-  term.on({ key: (key) => app.handleKey(key), resize: (cols, rows) => app.resize(layoutCols(cols, config.maxCols), rows) });
+  term.on({ key: (key) => app.handleKey(key), resize: (cols, rows) => app.resize(cols, rows) });
   const loop = setInterval(() => {
     term.pollKeys(); // a lone Esc waits one frame before it counts
     app.render();

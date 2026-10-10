@@ -23,8 +23,6 @@ export interface Config {
   thinkingReplay?: "turn" | "none";
   // A dropped connection or a 429/5xx is retried this many times in a row (2s, 4s, 8s...); 0: never.
   retries?: number;
-  // The most columns the TUI lays out on; 0 = the whole terminal. Unset: 70 inside herdr, 0 elsewhere.
-  maxCols?: number;
 }
 
 export const DEFAULTS: Config = {
@@ -38,7 +36,7 @@ export const DEFAULTS: Config = {
   maxOutputTokens: 8192,
 }
 
-const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens", "thinkingBudget", "retries", "maxCols"]);
+const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens", "thinkingBudget", "retries"]);
 const FILE_KEYS: ReadonlySet<string> = new Set([
   "provider",
   "baseUrl",
@@ -53,7 +51,6 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "label",
   "thinkingReplay",
   "retries",
-  "maxCols",
 ]);
 const REPLAYS: ReadonlySet<string> = new Set(["turn", "none"]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);
@@ -118,18 +115,6 @@ export async function loadConfig(flags: Record<string, string | undefined> = {})
   }
   return Object.assign({}, ...layers) as Config;
 }
-/**
- * How many of the terminal's columns the TUI uses. herdr's phone views (Flux) show a pane's text
- * re-wrapped at the phone's width, so a full-width rule fills several lines there and the side
- * column's rows land in the middle of the text: inside herdr kinoko lays out on 70 columns, unless
- * `maxCols` says otherwise. Not 80: a tablet's view holds about 85 letters, but its font draws `─`
- * 1.2 times wider than a letter, so only about 71 rule characters fit on one line.
- */
-export function layoutCols(cols: number, maxCols: number | undefined, env: Record<string, string | undefined> = process.env): number {
-  const cap = maxCols ?? (env.TERM_PROGRAM === "herdr" || env.HERDR_ENV === "1" ? 70 : 0);
-  return cap > 0 ? Math.min(cols, cap) : cols;
-}
-
 /** The thinking level as the TUI shows it: "LOW · 2048", "OFF", or "DEFAULT" (the model's own). */
 export function thinkingLabel(effort: ReasoningEffort | undefined, budget: number | undefined): string {
   const level = (effort ?? "default").toUpperCase();

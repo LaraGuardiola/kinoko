@@ -105,11 +105,13 @@ Events: `session_start`, `context` (rewrite the messages before a request), `bef
 `tool_call` (mutate args, or block), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
 throws is logged and skipped; a blocked call returns its reason to the model instead of running.
 
-`examples/ext/` ships five: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
+`examples/ext/` ships six: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
 `plan-mode.ts` (read-only), `web.ts` (`web_search` and `web_fetch`: no API key, Brave, DuckDuckGo
 then Bing, pages turned into readable text), `check-early.ts` (after 4 source files written or edited
-with no build, typecheck, lint or test run in between, the tool result asks the model to run one) and
-`hello.ts`.
+with no build, typecheck, lint or test run in between, the tool result asks the model to run one),
+`herdr.ts` (inside [herdr](https://herdr.dev), reports the pane as a `kinoko` agent, idle or working:
+herdr's sidebar shows it, and Flux on Android gets an agent screen with **Live**, where herdr resizes
+the pane to the phone's grid so kinoko draws for the phone) and `hello.ts`.
 
 ## The side panel
 
@@ -143,12 +145,6 @@ removes it (the configured one stays). `"label"` names the configured provider i
 default) sends the thinking of every step since your last message, so the model keeps its plan
 between tool calls instead of re-reading your last message as if it were new; older thinking stays
 out. `"none"` sends only a reply cut by the output limit, for models that copy old thinking verbatim.
-
-`"maxCols"`: the most columns the TUI lays out on (`0`: the whole terminal). Unset, it is 70 inside
-herdr and the whole terminal elsewhere: herdr's phone views (Flux) show a pane's text re-wrapped at
-the phone's width, so full-width rules filled several lines there and the side column's rows landed
-in the middle of the text (70, not 80: the tablet's font draws `─` 1.2 times wider than a letter). On
-the desktop that pane shows kinoko on its left 70 columns, without the side column; `"maxCols": 0` brings the full width back.
 
 `"retries"` (default 3): a dropped connection, no answer, or a 429/5xx is retried that many times in
 a row, after 2s, 4s, 8s...; the partial reply is dropped and the note above the input says so. Esc

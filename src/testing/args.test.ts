@@ -12,7 +12,7 @@ describe("command line", () => {
   test("--session, config flags in both spellings, a bare prompt", () => {
     expect(parseArgs(["--session", "7c7b"]).session).toBe("7c7b");
     expect(parseArgs(["--base-url", "http://x/v1", "--apiKey", "k"]).flags).toEqual({ baseUrl: "http://x/v1", apiKey: "k" });
-    expect(parseArgs(["--retries", "0", "--max-cols", "80"]).flags).toEqual({ retries: "0", maxCols: "80" });
+    expect(parseArgs(["--retries", "0"]).flags).toEqual({ retries: "0" });
     expect(parseArgs(["fix the bug"])).toMatchObject({ prompt: "fix the bug", resume: false, mode: "tui" });
   });
 });
