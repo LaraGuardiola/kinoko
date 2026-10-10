@@ -443,3 +443,24 @@ describe("notes and tools changed while kinoko runs", () => {
     expect(agent.messages.find((m) => m.role === "tool")?.content).toBe("ran late");
   });
 });
+
+describe("restart (/new)", () => {
+  test("a new conversation: history, queues and notes gone; refused while running", async () => {
+    const provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        await new Promise((r) => setTimeout(r, 20));
+        yield { type: "text", delta: "ok" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100 });
+    await agent.prompt("one");
+    agent.note("old news");
+    agent.restart();
+    expect(agent.messages).toEqual([]);
+    const run = agent.prompt("two");
+    expect(() => agent.restart()).toThrow("Agent is running");
+    await run;
+    expect(agent.messages.map((m) => m.content)).toEqual(["two", "ok"]); // no old note
+  });
+});

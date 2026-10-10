@@ -111,6 +111,17 @@ export class Agent {
     return this.#model;
   }
 
+  /** A new conversation (/new): the history is the given session's (empty when it is new), the
+   *  queues and pending notes go. Only while idle. */
+  restart(session?: Session): void {
+    if (this.#state === "running") throw new Error("Agent is running");
+    this.#session = session;
+    this.#messages = session ? [...session.view()] : [];
+    this.#steerQueue = [];
+    this.#followUpQueue = [];
+    this.#notes = [];
+  }
+
   /** The tools from the next request on (an extension loaded or unloaded while kinoko runs). */
   setTools(tools: Tool[]): void {
     this.#tools = tools;

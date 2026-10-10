@@ -163,6 +163,17 @@ export class Renderer {
     this.#write(`${out}${this.#paint()}${SYNC_END}`);
   }
 
+  /** Wipes the screen and the terminal's scrollback (/clear): the region starts again on the top row. */
+  clear(): void {
+    this.#history = [];
+    this.#sideDrawn = undefined;
+    this.#lastSideErased = false;
+    this.#top = 1;
+    this.#drawn = [];
+    this.#cursorRow = 0;
+    this.#write(`${SYNC_START}${RESET}${ESC}H${ESC}2J${ESC}3J${this.#paint()}${SYNC_END}`);
+  }
+
   /** Leaves the cursor on a fresh row under the region, e.g. before the process exits. */
   release(): void {
     const erase = this.#eraseSide();
