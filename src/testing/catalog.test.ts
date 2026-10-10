@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { EXTENSIONS, SKILLS, catalog, spawnRun } from "../catalog.ts";
 import type { Run } from "../catalog.ts";
@@ -143,5 +143,23 @@ describe("the skills catalog", () => {
     expect(await skills.install("half", signal)).toEqual({ ok: false, note: `no skill called half in ${SKILL_REPO}` });
     writeFileSync(join(home, ".kinoko", "skills", "loose.ts"), "x"); // single files mean nothing to skills
     expect((await skills.local()).map((e) => e.name)).toEqual(["write-ext"]);
+  });
+
+  test("the shared ~/.agents/skills ones are listed too, marked shared, and left alone", async () => {
+    mkdirSync(join(home, ".agents", "skills", "omarchy"), { recursive: true });
+    writeFileSync(join(home, ".agents", "skills", "omarchy", "SKILL.md"), "---\nname: omarchy\ndescription: Omarchy config\n---\n");
+    mkdirSync(join(home, "elsewhere", "linked"), { recursive: true }); // a linked skill, as Omarchy installs them
+    writeFileSync(join(home, "elsewhere", "linked", "SKILL.md"), "---\nname: linked\ndescription: through a link\n---\n");
+    symlinkSync(join(home, "elsewhere", "linked"), join(home, ".agents", "skills", "linked"));
+    mkdirSync(join(home, ".agents", "skills", "write-ext"), { recursive: true }); // same name as an installed one: listed once
+    writeFileSync(join(home, ".agents", "skills", "write-ext", "SKILL.md"), "---\nname: write-ext\ndescription: x\n---\n");
+    expect(await skills.local()).toEqual([
+      { name: "linked", description: "through a link", installed: true, shared: true },
+      { name: "omarchy", description: "Omarchy config", installed: true, shared: true },
+      { name: "write-ext", description: "Write an extension for kinoko.", installed: true },
+    ]);
+    expect(await skills.install("omarchy", signal)).toEqual({ ok: false, note: "omarchy lives in ~/.agents/skills, shared with other agents: kinoko leaves it alone" });
+    expect(await skills.remove("omarchy")).toEqual({ ok: false, note: "omarchy is not installed" });
+    expect(existsSync(join(home, ".agents", "skills", "omarchy", "SKILL.md"))).toBe(true);
   });
 });

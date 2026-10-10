@@ -1150,6 +1150,19 @@ describe("the extensions and skills pages", () => {
     expect(h.app.marker).toBe("web installed: loaded");
   });
 
+  test("a shared skill shows as shared and Del leaves it alone", async () => {
+    const fake = store([{ name: "omarchy", description: "Omarchy config", installed: true, shared: true }]);
+    const h = await harness([], { skills: fake.store, viewportRows: 30 });
+    h.press("/skills\r");
+    await paced();
+    h.app.render();
+    expect(h.screen()).toContain("shared · Omarchy config");
+    h.press("\x1b[3~");
+    h.press("\x1b[3~");
+    await paced();
+    expect(fake.removed).toEqual([]);
+  });
+
   test("/skills opens its own page from its own catalog", async () => {
     const fake = store([{ name: "write-ext", description: "Write an extension for kinoko", installed: false }]);
     const h = await harness([], { skills: { ...fake.store, repo: "https://github.com/LaraGuardiola/kinoko-skills.git" }, viewportRows: 30 });

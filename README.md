@@ -125,7 +125,8 @@ matches. They are read from `./.agents/skills/`, `~/.agents/skills/` (shared wit
 
 None ship with kinoko. [kinoko-skills](https://github.com/LaraGuardiola/kinoko-skills) has them:
 `/` then **skills** works like **extensions** (fetched into `~/.kinoko/registry/skills/`, installed
-into `~/.kinoko/skills/<name>/`, Del twice removes; the shared `~/.agents/skills/` is never touched).
+into `~/.kinoko/skills/<name>/`, Del twice removes). The page also lists the skills of the shared
+`~/.agents/skills/`, marked `shared`: kinoko loads them but never installs into or removes from there.
 A skill installed or removed is told to the model as a `[kinoko]` note before your next message: the
 skills index in the system prompt stays as it was (so the engine keeps its cache), and the next
 start lists it there.

@@ -524,3 +524,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Bug found by the test: commands registered in a `session_start` handler belonged to no one, so an unload left them behind.
 - NOT done: extension slash commands from the TUI (print mode only, as before); integrations.
 - Tests: ext (live load with session_start replay, reload from an updated file, someone else's handler kept, unload, a bad file keeps the old copy), loop (note before the next message, once; setTools), app (apply called, its note shown). `bun run check` passes (360 tests).
+
+## fix/skills-page: the skills page lists every skill kinoko loads (branch fix/skills-page)
+- The user saw five skills in the startup panel and one on `/skills`: the page only looked at `~/.kinoko/skills/`, and the other four live in the shared `~/.agents/skills/`. `Kind.shared` (skills: `.agents/skills`): its entries are listed too, `shared: true`, shown as "shared · …", not removable, and Enter on one says "<name> lives in ~/.agents/skills, shared with other agents: kinoko leaves it alone". A name in both lists once (the kinoko one), as in discovery.
+- Bug on the way: Omarchy's skills there (diagnose-crash, omarchy) are symlinks, and the folder listing took only real directories; links to a folder with the entry file count now (extensions too).
+- Not listed: a project's own `./.agents/skills/` (the catalog does not know the cwd).
+- Tests: catalog (shared entries, a linked skill, install refused, nothing removed), app (shared label, Del does nothing). `bun run check` passes (362 tests). Live: the page's list matches the startup panel's five.

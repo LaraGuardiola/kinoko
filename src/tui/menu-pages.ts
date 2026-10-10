@@ -64,7 +64,13 @@ export function catalogPage(
   return {
     kind: "list",
     title,
-    items: (state.entries ?? []).map((e) => ({ name: e.name, key: e.name, description: e.description, current: e.installed, removable: e.installed })),
+    items: (state.entries ?? []).map((e) => ({
+      name: e.name,
+      key: e.name,
+      description: e.shared ? `shared · ${e.description}` : e.description,
+      current: e.installed,
+      removable: e.installed && !e.shared,
+    })),
     empty: state.error ?? (state.entries === undefined ? `fetching ${where}…` : `nothing in ${where}`),
     pick: (item) => install(item.name),
     remove: (item) => remove(item.name),
