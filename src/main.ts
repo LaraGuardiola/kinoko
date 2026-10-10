@@ -7,8 +7,8 @@ import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
 import { Session, findSession, latestSession } from "./session.ts";
 import { readdirSync, rmSync } from "node:fs";
-import { dirname } from "node:path";
-import { Extensions, extensionName, loadExtensions } from "./ext.ts";
+import { dirname, join } from "node:path";
+import { Extensions, extensionName, loadExtensions, loadOne } from "./ext.ts";
 import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
 import { App } from "./tui/app.ts";
 import { THINKING } from "./tui/menu-pages.ts";
@@ -16,7 +16,7 @@ import { Term } from "./tui/term.ts";
 import { placeLine } from "./tui/place.ts";
 import { ansi } from "./tui/render.ts";
 import { ANSI } from "./tui/style.ts";
-import { discoverContext, discoverSkills } from "./context.ts";
+import { discoverContext, discoverSkills, frontmatter } from "./context.ts";
 import { buildSystemPrompt } from "./prompt.ts";
 import { defaultTools } from "./tools/registry.ts";
 import { restoreTracker } from "./tools/restore.ts";
@@ -204,6 +204,7 @@ if (tui) {
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
     extensions: catalog({ kind: EXTENSIONS, home: process.env.HOME ?? "", repo: config.extensionsRepo }),
     skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
+    apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
     place: () => placeLine(cwd),
@@ -250,6 +251,39 @@ if (tui) {
   process.stdout.write("\n");
   process.stderr.write(`[${result.reason}] session ${session.meta.id}\n`);
   process.exit(result.reason === "done" ? 0 : 1);
+}
+
+/**
+ * An extension installed or removed from /extensions, in effect now: loaded afresh (or taken back),
+ * and the agent's tools follow. Tools are part of every request's opening bytes, so a change to them
+ * makes a local engine read the whole prompt again: said, so the next slow answer is no surprise.
+ */
+async function applyExtension(name: string, change: "install" | "remove"): Promise<string> {
+  const before = ext.tools().map((t) => t.name).join(",");
+  let failed: string | undefined;
+  if (change === "install") failed = await loadOne(ext, join(process.env.HOME ?? "", ".kinoko", "ext", name, "index.ts"));
+  else ext.unload(name);
+  if (failed) return failed;
+  agent.setTools([...defaultTools(), ...ext.tools()]);
+  const toolsChanged = ext.tools().map((t) => t.name).join(",") !== before;
+  const done = change === "install" ? "loaded" : "unloaded";
+  return toolsChanged ? `${done}; its tools change the prompt, so the next request reads it all again` : done;
+}
+
+/**
+ * A skill installed or removed from /skills, told to the model as a note before your next message.
+ * The skills index in the system prompt stays as it was (byte-stable, so the engine's cache too);
+ * the next start lists the skill there.
+ */
+async function applySkill(name: string, change: "install" | "remove"): Promise<string> {
+  const path = join(process.env.HOME ?? "", ".kinoko", "skills", name, "SKILL.md");
+  if (change === "remove") {
+    agent.note(`The skill ${name} was removed: do not use it.`);
+  } else {
+    const meta = frontmatter(await Bun.file(path).text().catch(() => ""));
+    agent.note(`A skill is now available (installed or updated), read its file when a task matches:\n<skill path="${path}" name="${meta.name ?? name}">${meta.description ?? ""}</skill>`);
+  }
+  return "the model hears of it with your next message";
 }
 
 function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string }): string {

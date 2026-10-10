@@ -110,7 +110,9 @@ The extensions live in their own repository,
 [kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, herdr,
 permission-gate, plan-mode, web. `/` then **extensions** lists them (the repository is fetched with
 git into `~/.kinoko/registry/extensions/`); Enter installs or updates one into `~/.kinoko/ext/<name>/`, running
-`bun install` there when it has dependencies; Del twice removes it. They load when kinoko starts.
+`bun install` there when it has dependencies; Del twice removes it. Both take effect at once: the
+extension is loaded (or taken back) while kinoko runs. One that adds or removes tools changes every
+request's opening bytes, so a local engine reads the whole prompt again once; the note says so.
 `"extensionsRepo"` in the config points the page at another repository. `examples/ext/hello.ts` is
 the smallest example. Offline, the page lists the last fetched copy and what is installed.
 
@@ -124,6 +126,9 @@ matches. They are read from `./.agents/skills/`, `~/.agents/skills/` (shared wit
 None ship with kinoko. [kinoko-skills](https://github.com/LaraGuardiola/kinoko-skills) has them:
 `/` then **skills** works like **extensions** (fetched into `~/.kinoko/registry/skills/`, installed
 into `~/.kinoko/skills/<name>/`, Del twice removes; the shared `~/.agents/skills/` is never touched).
+A skill installed or removed is told to the model as a `[kinoko]` note before your next message: the
+skills index in the system prompt stays as it was (so the engine keeps its cache), and the next
+start lists it there.
 `"skillsRepo"` points it at another repository.
 
 ## The side panel

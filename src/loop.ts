@@ -60,6 +60,7 @@ export class Agent {
   #malformedCount = 0;
   #nudges = 0; // cut-off or looping replies in a row, each answered with a nudge
   #retries: number;
+  #notes: string[] = []; // told to the model before the next user message (a skill installed)
   #retryMs: number;
   #calls = new CallGuard();
   #session: Session | undefined;
@@ -108,6 +109,20 @@ export class Agent {
 
   get model(): string {
     return this.#model;
+  }
+
+  /** The tools from the next request on (an extension loaded or unloaded while kinoko runs). */
+  setTools(tools: Tool[]): void {
+    this.#tools = tools;
+  }
+
+  /**
+   * Something the model should know, said as a `[kinoko]` note right before the next user message:
+   * the end of the history is the one place a change costs a local engine nothing (the system
+   * prompt stays byte-stable, and so does its cache).
+   */
+  note(text: string): void {
+    this.#notes.push(text);
   }
 
   /** The next request uses `model` (a run in progress keeps going with it from its next request). */
@@ -214,6 +229,10 @@ export class Agent {
   }
 
   async #run(initial: Queued): Promise<RunResult> {
+    if (this.#notes.length > 0) {
+      const notes = this.#notes.splice(0).map((n) => `[kinoko] ${n}`);
+      await this.#push({ id: crypto.randomUUID(), role: "user", content: notes.join("\n") });
+    }
     await this.#push(userMessage(initial));
     this.#emit({ type: "run_start", prompt: initial.text });
 

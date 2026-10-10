@@ -61,7 +61,7 @@ describe("the extensions catalog", () => {
   test("installs a folder without its tests; an older single-file copy is replaced (an update)", async () => {
     mkdirSync(ext, { recursive: true });
     writeFileSync(join(ext, "alpha.ts"), "// the old copy\n");
-    expect(await store.install("alpha", signal)).toBe("alpha updated: restart kinoko to load it");
+    expect(await store.install("alpha", signal)).toEqual({ ok: true, note: "alpha updated" });
     expect(existsSync(join(ext, "alpha", "index.ts"))).toBe(true);
     expect(existsSync(join(ext, "alpha", "index.test.ts"))).toBe(false);
     expect(existsSync(join(ext, "alpha.ts"))).toBe(false);
@@ -71,10 +71,10 @@ describe("the extensions catalog", () => {
 
   test("dependencies are installed in the extension's own folder; a failure says why", async () => {
     installs = [];
-    expect(await store.install("beta", signal)).toBe("beta installed: restart kinoko to load it");
+    expect(await store.install("beta", signal)).toEqual({ ok: true, note: "beta installed" });
     expect(installs).toEqual([join(ext, "beta")]);
     bunFails = true;
-    expect(await store.install("beta", signal)).toBe("beta copied, but its dependencies did not install: error: puppeteer not found");
+    expect(await store.install("beta", signal)).toEqual({ ok: false, note: "beta copied, but its dependencies did not install: error: puppeteer not found" });
     bunFails = false;
   });
 
@@ -85,12 +85,12 @@ describe("the extensions catalog", () => {
   });
 
   test("removes an installed one; unknown names and paths are refused", async () => {
-    expect(await store.remove("alpha")).toBe("alpha removed: gone when kinoko restarts");
+    expect(await store.remove("alpha")).toEqual({ ok: true, note: "alpha removed" });
     expect(existsSync(join(ext, "alpha"))).toBe(false);
-    expect(await store.remove("alpha")).toBe("alpha is not installed");
-    expect(await store.install("nope", signal)).toBe(`no extension called nope in ${REPO}`);
-    expect(await store.install("../alpha", signal)).toBe(`no extension called ../alpha in ${REPO}`);
-    expect(await store.install("testing", signal)).toBe(`no extension called testing in ${REPO}`);
+    expect(await store.remove("alpha")).toEqual({ ok: false, note: "alpha is not installed" });
+    expect(await store.install("nope", signal)).toEqual({ ok: false, note: `no extension called nope in ${REPO}` });
+    expect(await store.install("../alpha", signal)).toEqual({ ok: false, note: `no extension called ../alpha in ${REPO}` });
+    expect(await store.install("testing", signal)).toEqual({ ok: false, note: `no extension called testing in ${REPO}` });
   });
 
   test("local: no network, the last fetched copy plus installed ones it lacks, still removable", async () => {
@@ -106,7 +106,7 @@ describe("the extensions catalog", () => {
       { name: "mine", description: "installed, not in the repository", installed: true },
       { name: "solo", description: "installed, not in the repository", installed: true },
     ]);
-    expect(await offline.remove("solo")).toBe("solo removed: gone when kinoko restarts");
+    expect(await offline.remove("solo")).toEqual({ ok: true, note: "solo removed" });
   });
 
   test("another repository is cloned beside and swapped in; failing, the old copy stays", async () => {
@@ -138,9 +138,9 @@ describe("the skills catalog", () => {
     await spawnRun(["git", "-C", SKILL_REPO, "add", "-A"], ROOT, signal);
     await spawnRun(["git", "-C", SKILL_REPO, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "s"], ROOT, signal);
     expect(await skills.list(signal)).toEqual([{ name: "write-ext", description: "Write an extension for kinoko.", installed: false }]);
-    expect(await skills.install("write-ext", signal)).toBe("write-ext installed: restart kinoko to load it");
+    expect(await skills.install("write-ext", signal)).toEqual({ ok: true, note: "write-ext installed" });
     expect(existsSync(join(home, ".kinoko", "skills", "write-ext", "SKILL.md"))).toBe(true);
-    expect(await skills.install("half", signal)).toBe(`no skill called half in ${SKILL_REPO}`);
+    expect(await skills.install("half", signal)).toEqual({ ok: false, note: `no skill called half in ${SKILL_REPO}` });
     writeFileSync(join(home, ".kinoko", "skills", "loose.ts"), "x"); // single files mean nothing to skills
     expect((await skills.local()).map((e) => e.name)).toEqual(["write-ext"]);
   });

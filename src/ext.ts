@@ -76,6 +76,10 @@ export class Extensions implements Kinoko {
   #tools: Tool[] = [];
   #commands = new Map<string, CommandHandler>();
   #log: (line: string) => void;
+  // Who registered what, so one extension can be taken back (unload) while kinoko runs.
+  #owner = "";
+  #ownerOf = new Map<unknown, string>();
+  #session: SessionStartInfo | undefined; // replayed to an extension that starts later
 
   constructor(log?: (line: string) => void) {
     this.#log = log ?? ((line) => process.stderr.write(`[ext] ${line}\n`));
@@ -85,14 +89,68 @@ export class Extensions implements Kinoko {
     const list = this.#handlers.get(event) ?? [];
     list.push(handler as AnyHandler);
     this.#handlers.set(event, list);
+    this.#ownerOf.set(handler, this.#owner);
   }
 
   registerTool(tool: Tool): void {
     this.#tools.push(tool);
+    this.#ownerOf.set(tool, this.#owner);
   }
 
   registerCommand(name: string, handler: CommandHandler): void {
     this.#commands.set(name, handler);
+    this.#ownerOf.set(handler, this.#owner);
+  }
+
+  /** Runs an extension's factory as `name`: what it registers is its own. A session already
+   *  started is replayed to it, so it starts like the others did. */
+  async start(name: string, factory: ExtensionFactory): Promise<void> {
+    this.#owner = name;
+    try {
+      await factory(this);
+    } finally {
+      this.#owner = "";
+    }
+    const info = this.#session;
+    if (info === undefined) return;
+    for (const handler of this.#handlers.get("session_start") ?? []) {
+      if (this.#ownerOf.get(handler) === name) this.#call("session_start", handler, info);
+    }
+  }
+
+  /** One handler call; what it registers belongs to its extension, and a throw is logged. */
+  #call(event: ExtEvent, handler: AnyHandler, payload: unknown): unknown {
+    this.#owner = this.#ownerOf.get(handler) ?? "";
+    try {
+      return (handler as (arg: unknown) => unknown)(payload);
+    } catch (e) {
+      this.log(`${event} handler threw, skipping: ${errText(e)}`);
+      return undefined;
+    } finally {
+      this.#owner = "";
+    }
+  }
+
+  /** Takes back everything `name` registered (handlers, tools, commands); false when it had nothing.
+   *  What it already did outside kinoko (a timer, a socket) is its own business. */
+  unload(name: string): boolean {
+    const mine = (item: unknown): boolean => this.#ownerOf.get(item) === name;
+    let found = false;
+    for (const [event, list] of this.#handlers) {
+      const kept = list.filter((h) => !mine(h));
+      found ||= kept.length !== list.length;
+      this.#handlers.set(event, kept);
+    }
+    const tools = this.#tools.filter((t) => !mine(t));
+    found ||= tools.length !== this.#tools.length;
+    this.#tools = tools;
+    for (const [cmd, handler] of this.#commands) {
+      if (!mine(handler)) continue;
+      this.#commands.delete(cmd);
+      found = true;
+    }
+    for (const [item, owner] of this.#ownerOf) if (owner === name) this.#ownerOf.delete(item);
+    return found;
   }
 
   log(message: string): void {
@@ -113,13 +171,8 @@ export class Extensions implements Kinoko {
   }
 
   emit<E extends ExtEvent>(event: E, payload: Parameters<ExtHandlers[E]>[0]): void {
-    for (const handler of this.#handlers.get(event) ?? []) {
-      try {
-        (handler as (arg: unknown) => unknown)(payload);
-      } catch (e) {
-        this.log(`${event} handler threw, skipping: ${errText(e)}`);
-      }
-    }
+    if (event === "session_start") this.#session = payload as SessionStartInfo;
+    for (const handler of this.#handlers.get(event) ?? []) this.#call(event, handler, payload);
   }
 
   /** Chained event: each handler sees what the previous one returned. */
@@ -177,7 +230,7 @@ export async function loadExtensions(k: Extensions, opts: LoadOptions): Promise<
     if (factory === null || path === undefined) continue;
     try {
       // oxlint-disable-next-line no-await-in-loop -- factories run in load order on purpose
-      await factory(k);
+      await k.start(extensionName(path), factory);
       loaded.push(path);
     } catch (e) {
       k.log(`failed to start ${path}: ${errText(e)}`);
@@ -204,9 +257,30 @@ export function extensionName(path: string): string {
   return (file === "index.ts" ? (parts.at(-2) ?? file) : file).replace(/\.ts$/, "");
 }
 
-async function importDefault(path: string, k: Extensions): Promise<null | ExtensionFactory> {
+let reloads = 0;
+
+/**
+ * (Re)loads one extension while kinoko runs: imported afresh (an updated file is read again), then
+ * the old copy's registrations are taken back and the new one starts. An extension that fails to
+ * import leaves the old copy running. Returns why it did not load, or undefined.
+ */
+export async function loadOne(k: Extensions, path: string): Promise<string | undefined> {
+  const factory = await importDefault(path, k, `${path}?v=${Date.now()}-${++reloads}`); // a new module, not the cached one
+  if (factory === null) return `${extensionName(path)} did not load (see the log)`;
+  const name = extensionName(path);
+  k.unload(name);
   try {
-    const mod = (await import(path)) as { default?: unknown };
+    await k.start(name, factory);
+    return undefined;
+  } catch (e) {
+    k.unload(name);
+    return `${name} did not start: ${errText(e)}`;
+  }
+}
+
+async function importDefault(path: string, k: Extensions, specifier = path): Promise<null | ExtensionFactory> {
+  try {
+    const mod = (await import(specifier)) as { default?: unknown };
     if (typeof mod.default !== "function") {
       k.log(`${path} has no default export, skipping`);
       return null;
