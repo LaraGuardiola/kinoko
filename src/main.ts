@@ -133,7 +133,7 @@ const system = (model: string): string =>
     skills,
   });
 
-ext.emit("session_start", { cwd: cwd, model: config.model });
+ext.emit("session_start", { cwd: cwd, model: config.model, mode: mode });
 
 const providerOptions = {
   baseUrl: config.baseUrl,

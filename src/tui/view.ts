@@ -7,7 +7,7 @@
 // the editor and the status line.
 
 import { fenceOpener, isClosing, renderMarkdown } from "./markdown.ts";
-import { ANSI, clipAnsi, wrapAnsi } from "./style.ts";
+import { ANSI, clipAnsi, wrapAnsi, wrapWords } from "./style.ts";
 import { pulseDot, toolHead } from "./tools.ts";
 import { modelName } from "../prompt.ts";
 
@@ -113,7 +113,9 @@ function formatUncached(kind: BlockKind, text: string, width?: number): string {
     case "assistant":
       return renderMarkdown(body, { width: width });
     default:
-      return body;
+      // Broken between words, each line's indent kept on its next rows: the terminal alone would
+      // cut mid-word ("a codi" / "ng task").
+      return width === undefined ? body : body.split("\n").flatMap((line) => wrapWords(line, width, /^ */.exec(line)?.[0] ?? "")).join("\n");
   }
 }
 

@@ -12,6 +12,7 @@ import type { RunResult } from "./loop.ts";
 export interface SessionStartInfo {
   cwd: string;
   model: string;
+  mode: "tui" | "print" | "rpc";
 }
 
 export interface ToolCallEvent {

@@ -340,3 +340,9 @@ describe("beside a side column", () => {
     expect(rows.at(-1)).toContain("IDLE");
   });
 });
+
+test("system blocks break between words and keep each line's indent; without a width they stay as written", () => {
+  const intro = "Kinoko can inspect and change this project.\n  Skills: diagnose-crash, flux-send, omarchy";
+  expect(formatBlock("system", intro, 20)).toBe("Kinoko can inspect\nand change this\nproject.\n  Skills:\n  diagnose-crash,\n  flux-send, omarchy");
+  expect(formatBlock("system", intro)).toBe(intro);
+});

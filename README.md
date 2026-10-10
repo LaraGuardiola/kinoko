@@ -105,11 +105,13 @@ Events: `session_start`, `context` (rewrite the messages before a request), `bef
 `tool_call` (mutate args, or block), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
 throws is logged and skipped; a blocked call returns its reason to the model instead of running.
 
-`examples/ext/` ships five: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
+`examples/ext/` ships six: `permission-gate.ts` (a hardline that `KINOKO_YOLO=1` can never open),
 `plan-mode.ts` (read-only), `web.ts` (`web_search` and `web_fetch`: no API key, Brave, DuckDuckGo
 then Bing, pages turned into readable text), `check-early.ts` (after 4 source files written or edited
-with no build, typecheck, lint or test run in between, the tool result asks the model to run one) and
-`hello.ts`.
+with no build, typecheck, lint or test run in between, the tool result asks the model to run one),
+`herdr.ts` (inside [herdr](https://herdr.dev), reports the pane as a `kinoko` agent, idle or working:
+herdr's sidebar shows it, and Flux on Android gets an agent screen with **Live**, where herdr resizes
+the pane to the phone's grid so kinoko draws for the phone) and `hello.ts`.
 
 ## The side panel
 

@@ -198,7 +198,7 @@ export class App {
 
   /** Prints the startup panel above the region; what follows it is spaced like any other block. */
   intro(text: string): void {
-    this.#print("system", text, false);
+    this.#print("system", formatBlock("system", text, this.#width), false);
   }
 
   /** Updates the available terminal height after a resize. */
