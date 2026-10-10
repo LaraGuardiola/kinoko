@@ -40,11 +40,11 @@ async function instructionOf(dir: string): Promise<ContextFile | undefined> {
   return found.find((f) => f !== undefined);
 }
 
-/** Skills from the project first, then the user's home; bodies are loaded with the read tool. */
+/** Skills from the project first, then the user's; bodies are loaded with the read tool. */
 export async function discoverSkills(cwd: string, home?: string): Promise<SkillEntry[]> {
-  const roots = [join(cwd, SKILLS_REL), join(home ?? process.env.HOME ?? "", SKILLS_REL)].filter(
-    (root) => !root.startsWith("/.agents"), // no home configured
-  );
+  const base = home ?? process.env.HOME ?? "";
+  // The project's, the user's shared ones, then those installed from /skills (~/.kinoko/skills).
+  const roots = [join(cwd, SKILLS_REL), ...(base ? [join(base, SKILLS_REL), join(base, ".kinoko", "skills")] : [])];
   const paths = uniqueDirs(roots).flatMap(skillPathsOf);
   const found = (await Promise.all(paths.map(skillOf))).filter((s) => s !== undefined);
   const seen = new Set<string>();

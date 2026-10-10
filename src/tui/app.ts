@@ -20,8 +20,8 @@ import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
-import { ROOT, extensionsPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
-import type { ExtEntry, ExtStore } from "../extstore.ts";
+import { ROOT, catalogPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import type { Catalog, Entry } from "../catalog.ts";
 import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
 import type { ModelChoice, ModelsView } from "./models-menu.ts";
 import type { SavedModel } from "../config.ts";
@@ -58,8 +58,9 @@ export interface AppOptions {
   budgets?: boolean;
   /** Switching endpoints and adding models; without it the models page lists the engine's own only. */
   models?: ModelsHost;
-  /** Where /extensions installs from; without it the page says it is not available. */
-  extensions?: ExtStore;
+  /** Where /extensions and /skills install from; without them their pages say so. */
+  extensions?: Catalog;
+  skills?: Catalog;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
@@ -106,7 +107,7 @@ export class App {
   #budgets: boolean;
   #menu = new Menu();
   #host: ModelsHost | undefined;
-  #store: ExtStore | undefined;
+  #catalogs: { extensions?: Catalog; skills?: Catalog };
   #endpoint: string;
   #saved: SavedModel[];
   #viewportRows: number | undefined;
@@ -134,7 +135,7 @@ export class App {
   #compacting: CompactProgress | undefined; // a summary on its way: the note animates
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
   #retrying = false; // the marker says a retry is coming: the next reply's first token clears it
-  #quiet = ""; // a marker that only informs (an extension installed or removed): cream, no background
+  #quiet = ""; // a marker that only informs (an extension or skill installed or removed): cream, no background
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
@@ -152,7 +153,7 @@ export class App {
     this.#profile = opts.thinkingProfile;
     this.#budgets = opts.budgets ?? false;
     this.#host = opts.models;
-    this.#store = opts.extensions;
+    this.#catalogs = { extensions: opts.extensions, skills: opts.skills };
     this.#endpoint = opts.models?.endpoint ?? "";
     this.#saved = opts.models?.saved ?? [];
     this.#viewportRows = opts.viewportRows;
@@ -839,7 +840,7 @@ export class App {
   #openRoot(item: MenuItem): void {
     if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
     else if (item.name === "models") this.#openModels();
-    else if (item.name === "extensions") this.#openExtensions();
+    else if (item.name === "extensions" || item.name === "skills") this.#openCatalog(item.name);
     else if (item.name === "session") this.#menu.open(this.#sessionPage());
     else {
       this.#closeMenu();
@@ -900,14 +901,15 @@ export class App {
     }
   }
 
-  /** The repository's extensions: fetched when the page opens, installed and removed from it. */
-  #openExtensions(): void {
-    const store = this.#store;
+  /** A catalog's page: what is on disk at once, the repository's news after; install and remove. */
+  #openCatalog(which: "extensions" | "skills"): void {
+    const store = this.#catalogs[which];
+    const title = which === "skills" ? "Skills" : "Extensions";
     if (store === undefined) {
-      this.#menu.open({ kind: "info", title: "Extensions", lines: ["  not available in this mode"] });
+      this.#menu.open({ kind: "info", title, lines: ["  not available in this mode"] });
       return;
     }
-    const state: { repo: string; entries?: ExtEntry[]; error?: string } = { repo: store.repo };
+    const state: { repo: string; entries?: Entry[]; error?: string } = { repo: store.repo };
     const install = (name: string): void => {
       this.#marker = this.#quiet = `installing ${name}…`;
       void store
@@ -926,9 +928,9 @@ export class App {
         redraw();
       });
     };
-    let page = extensionsPage(state, install, remove);
+    let page = catalogPage(title, state, install, remove);
     const redraw = (): void => {
-      const next = extensionsPage(state, install, remove);
+      const next = catalogPage(title, state, install, remove);
       this.#menu.refresh(page, next);
       page = next;
       this.render();

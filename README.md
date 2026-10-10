@@ -109,10 +109,22 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 The extensions live in their own repository,
 [kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, herdr,
 permission-gate, plan-mode, web. `/` then **extensions** lists them (the repository is fetched with
-git into `~/.kinoko/registry/`); Enter installs or updates one into `~/.kinoko/ext/<name>/`, running
+git into `~/.kinoko/registry/extensions/`); Enter installs or updates one into `~/.kinoko/ext/<name>/`, running
 `bun install` there when it has dependencies; Del twice removes it. They load when kinoko starts.
 `"extensionsRepo"` in the config points the page at another repository. `examples/ext/hello.ts` is
-the smallest example.
+the smallest example. Offline, the page lists the last fetched copy and what is installed.
+
+## Skills
+
+A skill is a folder with a `SKILL.md` (frontmatter `name` and `description`). kinoko lists every
+skill to the model at start, name and description only; the model reads the body when the task
+matches. They are read from `./.agents/skills/`, `~/.agents/skills/` (shared with other agents) and
+`~/.kinoko/skills/`; the first of a name wins.
+
+None ship with kinoko. [kinoko-skills](https://github.com/LaraGuardiola/kinoko-skills) has them:
+`/` then **skills** works like **extensions** (fetched into `~/.kinoko/registry/skills/`, installed
+into `~/.kinoko/skills/<name>/`, Del twice removes; the shared `~/.agents/skills/` is never touched).
+`"skillsRepo"` points it at another repository.
 
 ## The side panel
 
