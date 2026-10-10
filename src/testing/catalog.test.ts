@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { extStore, spawnRun } from "../extstore.ts";
-import type { Run } from "../extstore.ts";
+import { EXTENSIONS, SKILLS, catalog, spawnRun } from "../catalog.ts";
+import type { Run } from "../catalog.ts";
 
 // A real git repository on disk stands in for kinoko-extensions; `bun install` is recorded instead
 // of run, so no network is needed.
@@ -46,8 +46,8 @@ beforeAll(async () => {
 });
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
 
-describe("extension store", () => {
-  const store = extStore({ home: HOME, repo: REPO, run });
+describe("the extensions catalog", () => {
+  const store = catalog({ kind: EXTENSIONS, home: HOME, repo: REPO, run });
   const ext = join(HOME, ".kinoko", "ext");
 
   test("lists the repository's folders with an index.ts, with their descriptions", async () => {
@@ -55,7 +55,7 @@ describe("extension store", () => {
       { name: "alpha", description: "The first one", installed: false },
       { name: "beta", description: "Needs a library", installed: false },
     ]);
-    expect(existsSync(join(HOME, ".kinoko", "registry", ".git"))).toBe(true);
+    expect(existsSync(join(HOME, ".kinoko", "registry", "extensions", ".git"))).toBe(true);
   });
 
   test("installs a folder without its tests; an older single-file copy is replaced (an update)", async () => {
@@ -97,7 +97,7 @@ describe("extension store", () => {
     mkdirSync(join(ext, "mine"), { recursive: true });
     writeFileSync(join(ext, "mine", "index.ts"), "export default function (): void {}\n");
     writeFileSync(join(ext, "solo.ts"), "export default function (): void {}\n");
-    const offline = extStore({ home: HOME, repo: REPO, run: async () => ({ code: 128, out: "fatal: unable to access" }) });
+    const offline = catalog({ kind: EXTENSIONS, home: HOME, repo: REPO, run: async () => ({ code: 128, out: "fatal: unable to access" }) });
     await expect(offline.list(signal)).rejects.toThrow(/^could not update .*: fatal: unable to access$/);
     expect(await offline.local()).toEqual([
       { name: "alpha", description: "The first one", installed: false },
@@ -110,15 +110,38 @@ describe("extension store", () => {
   });
 
   test("another repository is cloned beside and swapped in; failing, the old copy stays", async () => {
-    const moved = extStore({ home: HOME, repo: join(ROOT, "gone"), run });
+    const moved = catalog({ kind: EXTENSIONS, home: HOME, repo: join(ROOT, "gone"), run });
     await expect(moved.list(signal)).rejects.toThrow(/^could not fetch .*gone/);
     expect((await moved.local()).map((e) => e.name)).toContain("alpha"); // still the old copy
-    expect(existsSync(join(HOME, ".kinoko", "registry.new"))).toBe(false);
+    expect(existsSync(join(HOME, ".kinoko", "registry", "extensions.new"))).toBe(false);
   });
 
   test("a repository that cannot be fetched says so", async () => {
-    const broken = extStore({ home: join(ROOT, "other"), repo: join(ROOT, "no-such-repo"), run });
+    const broken = catalog({ kind: EXTENSIONS, home: join(ROOT, "other"), repo: join(ROOT, "no-such-repo"), run });
     mkdirSync(join(ROOT, "other"), { recursive: true });
     await expect(broken.list(signal)).rejects.toThrow(/^could not fetch .*no-such-repo/);
+  });
+});
+
+describe("the skills catalog", () => {
+  const SKILL_REPO = join(ROOT, "skills-repo");
+  const home = join(ROOT, "skills-home");
+  const skills = catalog({ kind: SKILLS, home, repo: SKILL_REPO, run });
+
+  test("folders with a SKILL.md, described by its frontmatter, installed into ~/.kinoko/skills", async () => {
+    mkdirSync(join(SKILL_REPO, "write-ext"), { recursive: true });
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(SKILL_REPO, "write-ext", "SKILL.md"), "---\nname: write-ext\ndescription: >\n  Write an extension\n  for kinoko.\n---\n\n# Body\n");
+    mkdirSync(join(SKILL_REPO, "half"), { recursive: true }); // no SKILL.md: not a skill
+    writeFileSync(join(SKILL_REPO, "half", "notes.md"), "x");
+    await spawnRun(["git", "init", "--quiet", SKILL_REPO], ROOT, signal);
+    await spawnRun(["git", "-C", SKILL_REPO, "add", "-A"], ROOT, signal);
+    await spawnRun(["git", "-C", SKILL_REPO, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "s"], ROOT, signal);
+    expect(await skills.list(signal)).toEqual([{ name: "write-ext", description: "Write an extension for kinoko.", installed: false }]);
+    expect(await skills.install("write-ext", signal)).toBe("write-ext installed: restart kinoko to load it");
+    expect(existsSync(join(home, ".kinoko", "skills", "write-ext", "SKILL.md"))).toBe(true);
+    expect(await skills.install("half", signal)).toBe(`no skill called half in ${SKILL_REPO}`);
+    writeFileSync(join(home, ".kinoko", "skills", "loose.ts"), "x"); // single files mean nothing to skills
+    expect((await skills.local()).map((e) => e.name)).toEqual(["write-ext"]);
   });
 });

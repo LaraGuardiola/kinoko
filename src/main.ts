@@ -9,7 +9,7 @@ import { Session, findSession, latestSession } from "./session.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { Extensions, extensionName, loadExtensions } from "./ext.ts";
-import { extStore } from "./extstore.ts";
+import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
 import { App } from "./tui/app.ts";
 import { THINKING } from "./tui/menu-pages.ts";
 import { Term } from "./tui/term.ts";
@@ -202,7 +202,8 @@ if (tui) {
       fixed: (entry) => entry.baseUrl === configured.baseUrl && entry.model === configured.model,
     },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
-    extensions: extStore({ home: process.env.HOME ?? "", repo: config.extensionsRepo }),
+    extensions: catalog({ kind: EXTENSIONS, home: process.env.HOME ?? "", repo: config.extensionsRepo }),
+    skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
     place: () => placeLine(cwd),

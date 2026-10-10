@@ -2,7 +2,8 @@ import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
 import type { ModelsHost } from "../../tui/app.ts";
-import type { ExtEntry, ExtStore } from "../../extstore.ts";
+import type { Catalog, Entry } from "../../catalog.ts";
+import { EXTENSIONS } from "../../catalog.ts";
 import type { ChangesSource } from "../../tui/side.ts";
 import type { SavedModel } from "../../config.ts";
 import type { Served } from "../../providers/openai-compat.ts";
@@ -78,7 +79,8 @@ async function harness(
     budgets?: boolean;
     thinkingProfile?: string;
     modelsHost?: ModelsHost;
-    extensions?: ExtStore;
+    extensions?: Catalog;
+    skills?: Catalog;
     clipboard?: (signal: AbortSignal) => Promise<Image | string>;
     changes?: ChangesSource;
   } = {},
@@ -112,6 +114,7 @@ async function harness(
     thinking: "LOW · 2048",
     models: opts.modelsHost,
     extensions: opts.extensions,
+    skills: opts.skills,
     session: session,
     rebuild: () => agent,
     clipboard: opts.clipboard,
@@ -1102,13 +1105,14 @@ describe("side panel", () => {
   });
 });
 
-function store(entries: ExtEntry[]): { store: ExtStore; installed: string[]; removed: string[] } {
+function store(entries: Entry[]): { store: Catalog; installed: string[]; removed: string[] } {
   const installed: string[] = [];
   const removed: string[] = [];
   return {
     installed,
     removed,
     store: {
+      kind: EXTENSIONS,
       repo: "https://github.com/LaraGuardiola/kinoko-extensions.git",
       local: async () => [],
       list: async () => entries.map((e) => ({ ...e })),
@@ -1127,7 +1131,20 @@ function store(entries: ExtEntry[]): { store: ExtStore; installed: string[]; rem
 // Frames are paced (the CLI repaints every 33 ms): wait past the pacing, then draw.
 const paced = (): Promise<void> => new Promise((r) => setTimeout(r, 40));
 
-describe("the extensions page", () => {
+describe("the extensions and skills pages", () => {
+  test("/skills opens its own page from its own catalog", async () => {
+    const fake = store([{ name: "write-ext", description: "Write an extension for kinoko", installed: false }]);
+    const h = await harness([], { skills: { ...fake.store, repo: "https://github.com/LaraGuardiola/kinoko-skills.git" }, viewportRows: 30 });
+    h.press("/skills\r");
+    expect(h.app.menuPage).toBe("Skills");
+    await paced();
+    h.app.render();
+    expect(h.screen()).toContain("Write an extension for kinoko");
+    h.press("\r");
+    await paced();
+    expect(fake.installed).toEqual(["write-ext"]);
+  });
+
 
   test("lists the repository's extensions; Enter installs one, the note says to restart", async () => {
     const fake = store([

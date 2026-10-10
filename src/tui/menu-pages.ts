@@ -1,6 +1,6 @@
 // What the slash menu offers: the root's commands, the thinking profiles, and the session table.
 
-import type { ExtEntry } from "../extstore.ts";
+import type { Entry } from "../catalog.ts";
 import type { ProviderRequest, Message } from "../types.ts";
 import type { ListPage, MenuItem } from "./menu.ts";
 import { renderTable } from "./table.ts";
@@ -9,6 +9,7 @@ export const ROOT: MenuItem[] = [
   { name: "thinking", description: "How much the model thinks: off, low, medium, high, extreme" },
   { name: "models", description: "Pick the model for the next requests" },
   { name: "extensions", description: "Install, update or remove extensions from kinoko-extensions" },
+  { name: "skills", description: "Install, update or remove skills from kinoko-skills" },
   { name: "session", description: "This session: file, id, messages, tokens" },
   { name: "compact", description: "Summarize the history now" },
   { name: "fork", description: "Move the session head back one message" },
@@ -52,18 +53,19 @@ export function thinkingPage(current: string | undefined, choose: (profile: Thin
   };
 }
 
-/** The extensions page: the repository's extensions, the installed ones marked and removable. */
-export function extensionsPage(
-  state: { repo: string; entries?: ExtEntry[]; error?: string },
+/** A catalog's page (extensions, skills): the repository's entries, the installed ones marked and removable. */
+export function catalogPage(
+  title: string,
+  state: { repo: string; entries?: Entry[]; error?: string },
   install: (name: string) => void,
   remove: (name: string) => void,
 ): ListPage {
   const where = state.repo.replace(/^https?:\/\/|^git@|\.git$/g, "").replace(":", "/");
   return {
     kind: "list",
-    title: "Extensions",
+    title,
     items: (state.entries ?? []).map((e) => ({ name: e.name, key: e.name, description: e.description, current: e.installed, removable: e.installed })),
-    empty: state.error ?? (state.entries === undefined ? `fetching ${where}…` : `no extensions in ${where}`),
+    empty: state.error ?? (state.entries === undefined ? `fetching ${where}…` : `nothing in ${where}`),
     pick: (item) => install(item.name),
     remove: (item) => remove(item.name),
     // Offline, the list is the last fetched copy and what is installed: say so, and why.

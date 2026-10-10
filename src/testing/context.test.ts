@@ -91,10 +91,14 @@ describe("context discovery", () => {
     rmSync(ROOT, { recursive: true, force: true });
     write(`${HOME}/.agents/skills/omarchy/SKILL.md`, "---\nname: omarchy\n---\n");
     expect((await discoverSkills(HOME, HOME)).map((s) => s.name)).toEqual(["omarchy"]);
+    // Installed from /skills: read after the shared ones; a shared skill of the same name wins.
+    write(`${HOME}/.kinoko/skills/write-ext/SKILL.md`, "---\nname: write-ext\ndescription: from the catalog\n---\n");
+    write(`${HOME}/.kinoko/skills/omarchy/SKILL.md`, "---\nname: omarchy\ndescription: shadowed\n---\n");
+    expect((await discoverSkills(HOME, HOME)).map((s) => `${s.name}:${s.description}`)).toEqual(["omarchy:", "write-ext:from the catalog"]);
 
     write(`${ROOT}/proj/.agents/skills/mine/SKILL.md`, "---\nname: omarchy\ndescription: project\n---\n");
     const skills = await discoverSkills(`${ROOT}/proj`, HOME);
-    expect(skills.map((s) => s.description)).toEqual(["project"]);
+    expect(skills.map((s) => s.description)).toEqual(["project", "from the catalog"]);
   });
 
   test("5. frontmatter reads name and description, quoting included", () => {
