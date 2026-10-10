@@ -400,3 +400,46 @@ describe("retries after a transient failure", () => {
     expect(calls()).toBe(1);
   });
 });
+
+describe("notes and tools changed while kinoko runs", () => {
+  test("a note reaches the model as a [kinoko] message right before the next user message, once", async () => {
+    const seen: Message[][] = [];
+    const provider = {
+      stream: async function* (req: { messages: Message[] }): AsyncIterable<StreamEvent> {
+        seen.push([...req.messages]);
+        yield { type: "text", delta: "ok" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100 });
+    agent.note("A skill is now available.");
+    await agent.prompt("hi");
+    await agent.prompt("again");
+    expect(seen[0]!.map((m) => m.content)).toEqual(["[kinoko] A skill is now available.", "hi"]);
+    expect(seen[1]!.filter((m) => m.content.startsWith("[kinoko]"))).toHaveLength(1);
+  });
+
+  test("setTools: the next request carries the new tools, and their calls run", async () => {
+    const tools: string[][] = [];
+    let turn = 0;
+    const provider = {
+      stream: async function* (req: { tools: Array<{ name: string }> }): AsyncIterable<StreamEvent> {
+        tools.push(req.tools.map((t) => t.name));
+        turn++;
+        if (turn === 2) {
+          yield { type: "tool_call", call: { id: "c1", name: "late", args: {} } };
+          yield { type: "done", stop: "tool_use" };
+          return;
+        }
+        yield { type: "text", delta: "ok" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100 });
+    await agent.prompt("one");
+    agent.setTools([{ name: "late", description: "", schema: {}, run: async () => "ran late" }]);
+    await agent.prompt("two");
+    expect(tools).toEqual([[], ["late"], ["late"]]);
+    expect(agent.messages.find((m) => m.role === "tool")?.content).toBe("ran late");
+  });
+});

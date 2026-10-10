@@ -60,9 +60,15 @@ export interface Catalog {
   /** Fetches the repository (a clone the first time, an update after), then lists as `local`. */
   list(signal: AbortSignal): Promise<Entry[]>;
   /** Copies one into ~/.kinoko/<dir>/<name>/ (installing its dependencies); says what happened. */
-  install(name: string, signal: AbortSignal): Promise<string>;
+  install(name: string, signal: AbortSignal): Promise<Outcome>;
   /** Deletes an installed one; says what happened. */
-  remove(name: string): Promise<string>;
+  remove(name: string): Promise<Outcome>;
+}
+
+/** What an install or a removal did: `ok` when it is on disk as asked, and a line saying so. */
+export interface Outcome {
+  ok: boolean;
+  note: string;
 }
 
 /** Runs a command; its exit code and output (stdout then stderr). */
@@ -176,7 +182,7 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
     },
 
     async install(name, signal) {
-      if (!NAME.test(name) || !(await exists(join(registry, name, kind.entry)))) return `no ${kind.one} called ${name} in ${repo}`;
+      if (!NAME.test(name) || !(await exists(join(registry, name, kind.entry)))) return { ok: false, note: `no ${kind.one} called ${name} in ${repo}` };
       const was = await installed(name);
       const folder = join(target, name);
       await rm(folder, { recursive: true, force: true });
@@ -189,17 +195,17 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
       const deps = (await json(join(folder, "package.json"))).dependencies;
       if (typeof deps === "object" && deps !== null && Object.keys(deps).length > 0) {
         const result = await exec(["bun", "install", "--production"], folder, signal);
-        if (result.code !== 0) return `${name} copied, but its dependencies did not install: ${why(result.out)}`;
+        if (result.code !== 0) return { ok: false, note: `${name} copied, but its dependencies did not install: ${why(result.out)}` };
       }
-      return `${name} ${was ? "updated" : "installed"}: restart kinoko to load it`;
+      return { ok: true, note: `${name} ${was ? "updated" : "installed"}` };
     },
 
     async remove(name) {
-      if (!NAME.test(name) || !(await installed(name))) return `${name} is not installed`;
+      if (!NAME.test(name) || !(await installed(name))) return { ok: false, note: `${name} is not installed` };
       await rm(join(target, name), { recursive: true, force: true });
       const old = legacy(name);
       if (old !== undefined) await rm(old, { force: true });
-      return `${name} removed: gone when kinoko restarts`;
+      return { ok: true, note: `${name} removed` };
     },
   };
 }

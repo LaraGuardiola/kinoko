@@ -69,7 +69,7 @@ export function catalogPage(
     pick: (item) => install(item.name),
     remove: (item) => remove(item.name),
     // Offline, the list is the last fetched copy and what is installed: say so, and why.
-    hint: state.error && state.entries?.length ? `${state.error} · showing what is on this computer` : "Enter installs or updates · Del twice removes · they load when kinoko starts",
+    hint: state.error && state.entries?.length ? `${state.error} · showing what is on this computer` : "Enter installs or updates · Del twice removes · in effect at once",
   };
 }
 

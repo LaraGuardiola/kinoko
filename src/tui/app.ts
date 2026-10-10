@@ -21,7 +21,7 @@ import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
 import { ROOT, catalogPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
-import type { Catalog, Entry } from "../catalog.ts";
+import type { Catalog, Entry, Outcome } from "../catalog.ts";
 import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
 import type { ModelChoice, ModelsView } from "./models-menu.ts";
 import type { SavedModel } from "../config.ts";
@@ -61,6 +61,9 @@ export interface AppOptions {
   /** Where /extensions and /skills install from; without them their pages say so. */
   extensions?: Catalog;
   skills?: Catalog;
+  /** Puts an install or a removal into effect now (loads the extension, tells the model of the
+   *  skill); says how. Without it, they take effect when kinoko starts again. */
+  apply?: (kind: "extensions" | "skills", name: string, change: "install" | "remove") => Promise<string>;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
@@ -108,6 +111,7 @@ export class App {
   #menu = new Menu();
   #host: ModelsHost | undefined;
   #catalogs: { extensions?: Catalog; skills?: Catalog };
+  #apply: AppOptions["apply"];
   #endpoint: string;
   #saved: SavedModel[];
   #viewportRows: number | undefined;
@@ -154,6 +158,7 @@ export class App {
     this.#budgets = opts.budgets ?? false;
     this.#host = opts.models;
     this.#catalogs = { extensions: opts.extensions, skills: opts.skills };
+    this.#apply = opts.apply;
     this.#endpoint = opts.models?.endpoint ?? "";
     this.#saved = opts.models?.saved ?? [];
     this.#viewportRows = opts.viewportRows;
@@ -910,23 +915,35 @@ export class App {
       return;
     }
     const state: { repo: string; entries?: Entry[]; error?: string } = { repo: store.repo };
+    // On disk first, then into effect: loaded now, or (without `apply`) at the next start.
+    const settle = async (name: string, change: "install" | "remove", done: Outcome): Promise<Outcome> => {
+      if (!done.ok) return done;
+      const how = this.#apply ? await this.#apply(which, name, change).catch((e: unknown) => `not applied: ${errorText(e)}`) : "restart kinoko to apply it";
+      return { ok: true, note: `${done.note}: ${how}` };
+    };
     const install = (name: string): void => {
       this.#marker = this.#quiet = `installing ${name}…`;
       void store
         .install(name, AbortSignal.timeout(300_000))
-        .catch((e: unknown) => `${name} did not install: ${e instanceof Error ? e.message : String(e)}`)
-        .then((note) => {
+        .then((done) => settle(name, "install", done))
+        .catch((e: unknown) => ({ ok: false, note: `${name} did not install: ${errorText(e)}` }))
+        .then(({ ok, note }) => {
           this.#marker = this.#quiet = note;
-          this.render();
+          const entry = state.entries?.find((e) => e.name === name);
+          if (entry && ok) entry.installed = true;
+          redraw();
         });
     };
     const remove = (name: string): void => {
-      void store.remove(name).then((note) => {
-        this.#marker = this.#quiet = note;
-        const entry = state.entries?.find((e) => e.name === name);
-        if (entry) entry.installed = false;
-        redraw();
-      });
+      void store
+        .remove(name)
+        .then((done) => settle(name, "remove", done))
+        .then(({ ok, note }) => {
+          this.#marker = this.#quiet = note;
+          const entry = state.entries?.find((e) => e.name === name);
+          if (entry && ok) entry.installed = false;
+          redraw();
+        });
     };
     let page = catalogPage(title, state, install, remove);
     const redraw = (): void => {
@@ -945,7 +962,7 @@ export class App {
         return store.list(AbortSignal.timeout(60_000));
       })
       .then((entries) => (state.entries = entries))
-      .catch((e: unknown) => (state.error = e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => (state.error = errorText(e)))
       .then(redraw);
   }
 
@@ -1087,4 +1104,8 @@ function planLines(todos: Todo[]): string {
   const marks = { done: `${ANSI.dim}✓`, in_progress: `${ANSI.toolDot}●${ANSI.reset}${ANSI.bold}`, pending: "○" };
   const done = todos.filter((t) => t.status === "done").length;
   return [`${ANSI.bold}Plan${ANSI.reset} ${ANSI.dim}${done}/${todos.length}${ANSI.reset}`, ...todos.map((t) => `${marks[t.status]} ${t.text}${ANSI.reset}`)].join("\n");
+}
+
+function errorText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }

@@ -1,7 +1,7 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { Extensions, extensionName, loadExtensions } from "../ext.ts";
+import { Extensions, extensionName, loadExtensions, loadOne } from "../ext.ts";
 import { Agent } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Message, Provider, StreamEvent, Tool } from "../types.ts";
@@ -70,6 +70,41 @@ describe("extension loader", () => {
     const loaded = await loadExtensions(ext, { cwd: home, home: home });
     expect(loaded.map(extensionName)).toEqual(["a-folder", "b-file"]);
     expect(await ext.command("folder")?.("")).toBe("from a folder");
+  });
+
+  test("1c. live: an extension loaded late starts like the others, reloads from its updated file, unloads cleanly", async () => {
+    const dir = `${ROOT}/live/a-live`;
+    rmSync(`${ROOT}/live`, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    const version = (v: string): void =>
+      writeFileSync(
+        `${dir}/index.ts`,
+        `export default function (k) {
+  k.on("session_start", (info) => k.registerCommand("mode", () => info.mode + " ${v}"));
+  k.registerTool({ name: "tool_${v}", description: "", schema: {}, run: async () => "" });
+  k.on("tool_result", (r) => { r.output += " [${v}]"; });
+}\n`,
+      );
+    const { ext } = extBus();
+    ext.on("tool_result", (r) => {
+      r.output += " [core]";
+    }); // someone else's handler: never taken back
+    ext.emit("session_start", { cwd: "/p", model: "m", mode: "tui" }); // the session started before it
+    version("v1");
+    expect(await loadOne(ext, `${dir}/index.ts`)).toBeUndefined();
+    expect(await ext.command("mode")?.("")).toBe("tui v1"); // session_start replayed to it alone
+    version("v2");
+    expect(await loadOne(ext, `${dir}/index.ts`)).toBeUndefined();
+    expect(ext.tools().map((t) => t.name)).toEqual(["tool_v2"]); // the old copy is gone
+    const result = { name: "read", output: "x", signal: new AbortController().signal };
+    ext.emit("tool_result", result);
+    expect(result.output).toBe("x [core] [v2]");
+    expect(ext.unload("a-live")).toBe(true);
+    expect(ext.tools()).toEqual([]);
+    expect(ext.command("mode")).toBeUndefined();
+    expect(ext.unload("a-live")).toBe(false);
+    writeFileSync(`${dir}/index.ts`, "export default 1;\n");
+    expect(await loadOne(ext, `${dir}/index.ts`)).toBe("a-live did not load (see the log)");
   });
 
   test("1b. run from $HOME, the shared ext dir is loaded once", async () => {

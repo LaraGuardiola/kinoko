@@ -81,6 +81,7 @@ async function harness(
     modelsHost?: ModelsHost;
     extensions?: Catalog;
     skills?: Catalog;
+    apply?: (kind: "extensions" | "skills", name: string, change: "install" | "remove") => Promise<string>;
     clipboard?: (signal: AbortSignal) => Promise<Image | string>;
     changes?: ChangesSource;
   } = {},
@@ -115,6 +116,7 @@ async function harness(
     models: opts.modelsHost,
     extensions: opts.extensions,
     skills: opts.skills,
+    apply: opts.apply,
     session: session,
     rebuild: () => agent,
     clipboard: opts.clipboard,
@@ -1118,11 +1120,11 @@ function store(entries: Entry[]): { store: Catalog; installed: string[]; removed
       list: async () => entries.map((e) => ({ ...e })),
       install: async (name) => {
         installed.push(name);
-        return `${name} installed: restart kinoko to load it`;
+        return { ok: true, note: `${name} installed` };
       },
       remove: async (name) => {
         removed.push(name);
-        return `${name} removed: gone when kinoko restarts`;
+        return { ok: true, note: `${name} removed` };
       },
     },
   };
@@ -1132,6 +1134,22 @@ function store(entries: Entry[]): { store: Catalog; installed: string[]; removed
 const paced = (): Promise<void> => new Promise((r) => setTimeout(r, 40));
 
 describe("the extensions and skills pages", () => {
+  test("with apply, an install takes effect at once and the note says how", async () => {
+    const fake = store([{ name: "web", description: "web tools", installed: false }]);
+    const applied: string[] = [];
+    const apply = async (kind: string, name: string, change: string): Promise<string> => {
+      applied.push(`${kind} ${change} ${name}`);
+      return "loaded";
+    };
+    const h = await harness([], { extensions: fake.store, apply, viewportRows: 30 });
+    h.press("/extensions\r");
+    await paced();
+    h.press("\r");
+    await paced();
+    expect(applied).toEqual(["extensions install web"]);
+    expect(h.app.marker).toBe("web installed: loaded");
+  });
+
   test("/skills opens its own page from its own catalog", async () => {
     const fake = store([{ name: "write-ext", description: "Write an extension for kinoko", installed: false }]);
     const h = await harness([], { skills: { ...fake.store, repo: "https://github.com/LaraGuardiola/kinoko-skills.git" }, viewportRows: 30 });
@@ -1161,7 +1179,7 @@ describe("the extensions and skills pages", () => {
     h.press("\r");
     await paced();
     expect(fake.installed).toEqual(["web"]);
-    expect(h.app.marker).toBe("web installed: restart kinoko to load it");
+    expect(h.app.marker).toBe("web installed: restart kinoko to apply it"); // no apply: at the next start
   });
 
   test("Del twice removes an installed one; a fetch that fails shows why", async () => {
@@ -1173,7 +1191,7 @@ describe("the extensions and skills pages", () => {
     h.press("\x1b[3~");
     await paced();
     expect(fake.removed).toEqual(["herdr"]);
-    expect(h.app.marker).toBe("herdr removed: gone when kinoko restarts");
+    expect(h.app.marker).toBe("herdr removed: restart kinoko to apply it");
 
     const broken = await harness([], {
       viewportRows: 30,
