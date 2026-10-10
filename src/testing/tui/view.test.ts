@@ -139,7 +139,22 @@ describe("live region", () => {
     expect(plain[0]).toBe("● bash {} …");
     expect(plain[1]).toBe("");
     expect(plain[2]).toBe("Interrupted");
-    expect(plain[3]).toBe("[follow-up] next");
+    // A row of air, the keys that act on the queue (dim), then the message in cream.
+    expect(plain[3]).toBe("");
+    expect(plain[4]).toBe("alt+c cancel · alt+↑ edit the last");
+    expect(plain[5]).toBe("[follow-up] next");
+    expect(region.lines[5]).toStartWith("\x1b[38;2;238;222;186m");
+  });
+
+  test("a waiting steer offers alt+x to send it now", () => {
+    const region = liveRegion(input({ queued: [{ kind: "steer", text: "use rg" }] }));
+    const plain = region.lines.map(stripAnsi);
+    expect(plain.slice(0, 3)).toEqual(["", "alt+x send now · alt+c cancel · alt+↑ edit the last", "[steer] use rg"]);
+  });
+
+  test("the compaction note is cream, with no background", () => {
+    const region = liveRegion(input({ marker: "compacting…", markerCream: true }));
+    expect(region.lines[1]).toBe("\x1b[38;2;238;222;186mcompacting…\x1b[0m");
   });
 
   test("an interruption sits after a blank row, in the same red as the input rules", () => {

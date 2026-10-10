@@ -282,4 +282,56 @@ describe("Agent loop with abort, steer and follow-up", () => {
     await agent.prompt("two");
     expect(systems).toEqual(["Model: a", "Model: b"]);
   });
+
+  test("sendNow cuts the streaming reply and delivers the steer at once; its thinking and text are kept, its calls are not", async () => {
+    const seen: string[][] = [];
+    let turn = 0;
+    const provider = {
+      stream: async function* (req: { messages: Message[]; signal: AbortSignal }): AsyncIterable<StreamEvent> {
+        seen.push(req.messages.map((m) => `${m.role}:${m.content}`));
+        if (turn++ === 0) {
+          yield { type: "thinking", delta: "long musing" };
+          yield { type: "text", delta: "partial" };
+          // a long think: until cut
+          // oxlint-disable-next-line no-await-in-loop -- a reply that thinks until it is cut
+          while (!req.signal.aborted) await new Promise((r) => setTimeout(r, 5));
+          yield { type: "done", stop: "aborted" };
+          return;
+        }
+        yield { type: "text", delta: "ok, using rg" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100 });
+    expect(agent.sendNow()).toBe(false); // idle: nothing to cut
+    const run = agent.prompt("search the repo");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(agent.sendNow()).toBe(false); // no steer waiting
+    agent.steer("use rg");
+    expect(agent.sendNow()).toBe(true);
+    const result = await run;
+    expect(result.reason).toBe("done");
+    const cut = agent.messages.find((m) => m.role === "assistant" && m.stop === "aborted")!;
+    expect(cut.content).toBe("partial");
+    expect(cut.thinking).toBe("long musing");
+    expect(seen[1]!.slice(-2)).toEqual(["assistant:partial", "user:use rg"]); // the steer right after the cut reply
+  });
+
+  test("unqueue takes messages back so they are never delivered: the newest, or all, in order", async () => {
+    const provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        yield { type: "text", delta: "ok" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100 });
+    agent.steer("one");
+    agent.followUp("two");
+    agent.steer("three");
+    expect(agent.unqueue("last")).toEqual(["three"]);
+    expect(agent.unqueue("all")).toEqual(["one", "two"]);
+    expect(agent.unqueue("all")).toEqual([]);
+    await agent.prompt("go");
+    expect(agent.messages.filter((m: Message) => m.role === "user").map((m) => m.content)).toEqual(["go"]);
+  });
 });

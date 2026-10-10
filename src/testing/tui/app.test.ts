@@ -111,7 +111,7 @@ async function harness(
     session: session,
     rebuild: () => agent,
     clipboard: opts.clipboard,
-    changes: opts.changes ?? (async () => []), // never the real git
+    changes: opts.changes ?? (async () => ({ files: [] })), // never the real git
     cwd: ROOT,
   });
   return {
@@ -287,8 +287,39 @@ describe("TUI app with the agent", () => {
     h.press("\x1b[1;3A"); // Alt+Up pulls the newest queued message back
     expect(h.app.editorText).toBe("beta\ntyping something");
     expect(h.app.queued.map((q) => q.text)).toEqual(["alpha"]);
-    h.press("\x1b");
     await settle(h.agent);
+    // Taken back for real: the agent never delivers it (it used to arrive anyway).
+    const said = h.agent.messages.filter((m) => m.role === "user" && !m.content.startsWith("[kinoko]")).map((m) => m.content);
+    expect(said).toEqual(["first", "alpha"]);
+  });
+
+  test("6b. Alt+X sends the waiting steer now, cutting the reply; Alt+C takes the queue back to the editor", async () => {
+    const h = await harness(
+      [
+        [{ type: "thinking", delta: "thinking " }, { type: "thinking", delta: "and thinking " }, { type: "thinking", delta: "and more " }, { type: "text", delta: "x" }, { type: "done", stop: "end" }],
+        [{ type: "text", delta: "steered" }, { type: "done", stop: "end" }],
+      ],
+      { pace: 60 },
+    );
+    h.press("first\r");
+    await new Promise((r) => setTimeout(r, 30));
+    h.press("use rg\r"); // a steer while it thinks
+    h.press("\x1bx"); // Alt+X: now
+    await settle(h.agent);
+    const users = h.agent.messages.filter((m) => m.role === "user").map((m) => m.content);
+    expect(users).toEqual(["first", "use rg"]);
+    expect(h.agent.messages.find((m) => m.stop === "aborted")?.thinking).toStartWith("thinking");
+
+    const g = await harness([[{ type: "text", delta: "x" }], [{ type: "done", stop: "end" }]], { pace: 30 });
+    g.press("first\r");
+    await new Promise((r) => setTimeout(r, 5));
+    g.press("one\r");
+    g.press("two\r");
+    g.press("\x1bc"); // Alt+C: both back, in order
+    expect(g.app.editorText).toBe("one\ntwo");
+    expect(g.app.queued).toEqual([]);
+    await settle(g.agent);
+    expect(g.agent.messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["first"]);
   });
 
   test("7. Ctrl-C: abort, then clear, then quit", async () => {
@@ -582,7 +613,7 @@ describe("TUI app with the agent", () => {
     long.press("go\r");
     await settle(long.agent);
     expect(await long.app.command("/compact")).toBe(true);
-    expect(long.app.marker).toContain("compacted");
+    expect(long.app.marker).toMatch(/^compacted · \d+ messages? kept as they were$/);
     // The history is now the summary plus the verbatim tail, not the whole thing.
     const summary = long.agent.messages.find((m) => m.content.includes("Objective: the long one"));
     expect(summary?.content).toStartWith("<compacted_summary>");
@@ -968,7 +999,7 @@ describe("side panel", () => {
 
   test("a column from the screen's top row, once the terminal said where the region is; gone when tiled narrower", async () => {
     // 120 columns: under WIDE_COLS, so nothing until the terminal says how big the screen is.
-    const h = await harness([], { viewportCols: 120, viewportRows: 30, changes: async () => [{ path: "src/a.ts", added: 3, removed: 1 }] });
+    const h = await harness([], { viewportCols: 120, viewportRows: 30, changes: async () => ({ files: [{ path: "src/a.ts", added: 3, removed: 1 }], head: "a1b2c3d" }) });
     expect(await paint(h)).not.toContain("Changes");
     h.press(WIDE);
     expect(await paint(h)).not.toContain("Changes"); // wide, but where to draw it is not known yet
@@ -977,6 +1008,7 @@ describe("side panel", () => {
     expect(shown).toContain("Plan");
     expect(shown).toContain("no plan yet");
     expect(shown).toMatch(/src\/a\.ts +\+3 −1/);
+    expect(shown).toMatch(/Changes a1b2c3d/); // the last commit beside the title
     const raw = h.out.findLast((chunk) => chunk.includes("tok")) ?? "";
     expect(raw).toContain(`\x1b[1;${120 - 36}H`); // its first row: the screen's top, the right columns
     h.press(HALF);
@@ -993,7 +1025,7 @@ describe("side panel", () => {
         [{ type: "tool_call", call: { id: "t1", name: "todo", args: plan } }, { type: "done", stop: "tool_use" }],
         [{ type: "text", delta: "on it" }, { type: "done", stop: "end" }],
       ],
-      { tools: [todo], viewportCols: 180, viewportRows: 30, changes: async () => (reads++, []) },
+      { tools: [todo], viewportCols: 180, viewportRows: 30, changes: async () => (reads++, { files: [] }) },
     );
     h.press(WIDE + HERE);
     await paint(h);
@@ -1006,6 +1038,36 @@ describe("side panel", () => {
     expect(shown).toMatch(/Plan +1\/2/);
     expect(reads).toBeGreaterThan(before);
     expect(h.screen()).not.toContain("todo 1/2"); // the column shows it: no tool block
+  });
+
+  test("Ctrl+O unfolds the plan, the arrows scroll it by tasks, Esc folds it; narrow, it prints it", async () => {
+    const steps = { items: Array.from({ length: 30 }, (_, i) => ({ text: `step ${i + 1}`, status: i < 3 ? "done" : i === 3 ? "in_progress" : "pending" })) };
+    const history = [
+      { id: "1", role: "user" as const, content: "go" },
+      { id: "2", role: "assistant" as const, content: "", toolCalls: [{ id: "t1", name: "todo", args: steps }] },
+      { id: "3", role: "tool" as const, content: "Plan: 3/30 done", toolCallId: "t1" },
+    ];
+    const h = await harness([], { viewportCols: 180, viewportRows: 30 });
+    h.press(WIDE + HERE);
+    h.app.replay(history, "resumed");
+    expect(await paint(h)).toMatch(/… \d+ more tasks · ctrl\+o/);
+    h.press("\x0f"); // Ctrl+O
+    const open = await paint(h);
+    expect(open).toContain("↑↓ scroll · ctrl+o fold");
+    expect(open).toContain("↑ 2 earlier tasks"); // it opens on the task at hand
+    h.press("\x1b[B\x1b[B");
+    expect(await paint(h)).toContain("↑ 4 earlier tasks");
+    h.press("\x1b[A"); // up scrolls back
+    expect(await paint(h)).toContain("↑ 3 earlier tasks");
+    expect(h.app.editorText).toBe(""); // the arrows went to the plan, not the history
+    h.press("\x1b");
+    expect(await paint(h)).not.toContain("ctrl+o fold");
+
+    const narrow = await harness([], { viewportCols: 90, viewportRows: 30 });
+    narrow.app.replay(history, "resumed");
+    narrow.press("\x0f");
+    expect(narrow.screen()).toContain("Plan 3/30");
+    expect(narrow.screen()).toContain("● step 4");
   });
 
   test("a resumed session shows its last plan", async () => {

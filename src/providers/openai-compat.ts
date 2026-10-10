@@ -10,6 +10,7 @@ interface Delta {
 }
 
 interface Chunk {
+  prompt_progress?: { total?: number; cache?: number; processed?: number };
   choices?: Array<{
     delta?: Delta;
     finish_reason?: string | null;
@@ -156,6 +157,8 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
           for (const payload of parser.push(decoder.decode(step.value, { stream: true }))) {
             const chunk = parseChunk(payload);
             if (!chunk) continue;
+            const progress = chunk.prompt_progress;
+            if (progress?.total) yield { type: "progress", done: progress.processed ?? 0, total: progress.total };
             if (chunk.usage) usage = toUsage(chunk.usage);
             const choice = chunk.choices?.[0];
             if (!choice) continue;
@@ -241,6 +244,12 @@ export function replaysThinking(messages: Message[], mode: ThinkingReplay): (ind
   const newest = messages.findLastIndex((m) => m.role === "assistant");
   const userAt = messages.findLastIndex((m) => m.role === "user" && !m.content.startsWith("[kinoko]"));
   return (i) => (i === newest && messages[i]?.stop === "length") || (mode === "turn" && i > userAt && messages[i]?.role === "assistant");
+}
+
+/** A server on this machine or the local network (llama.cpp, Strata, LM Studio...), not a cloud API. */
+export function isLocal(url: string): boolean {
+  const host = hostOf(url).replace(/:\d+$/, "").replace(/^\[|\]$/g, "");
+  return host === "localhost" || host === "::1" || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host);
 }
 
 function hostOf(url: string): string {
@@ -337,6 +346,8 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
     model: req.model,
     stream: true,
     stream_options: { include_usage: true },
+    // llama.cpp reports how far it has read the prompt; OpenAI's own API rejects fields it does not know.
+    ...(isLocal(opts.baseUrl) ? { return_progress: true } : {}),
     messages,
     ...((req.effort ?? opts.reasoningEffort) ? { reasoning_effort: req.effort ?? opts.reasoningEffort } : {}),
     ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),

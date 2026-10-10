@@ -29,6 +29,15 @@ export interface CompactOptions {
   system: string;
   signal: AbortSignal;
   tailTokens?: number;
+  /** How far it is: the prompt being read (tokens, as the server reports), then the summary written. */
+  onProgress?: (progress: CompactProgress) => void;
+}
+
+export interface CompactProgress {
+  phase: "reading" | "writing";
+  /** Tokens read of `total`, or summary tokens written so far (estimated). */
+  done: number;
+  total?: number;
 }
 
 export interface CompactResult {
@@ -95,6 +104,8 @@ export async function compactHistory(
   const toSummarize = previous ? messages.slice(1, split) : messages.slice(0, split);
   if (toSummarize.length === 0) return undefined;
 
+  // Until the server says (it may not), the size of what is being summarized.
+  opts.onProgress?.({ phase: "reading", done: 0, total: historyTokens(toSummarize) });
   const text = await summarize(toSummarize, previous, opts);
   if (text === undefined || opts.signal.aborted) return undefined;
 
@@ -140,7 +151,11 @@ async function summarize(
   let out = "";
   for await (const ev of opts.provider.stream(req)) {
     if (opts.signal.aborted) return undefined;
-    if (ev.type === "text") out += ev.delta;
+    if (ev.type === "progress") opts.onProgress?.({ phase: "reading", done: ev.done, total: ev.total });
+    if (ev.type === "text") {
+      out += ev.delta;
+      opts.onProgress?.({ phase: "writing", done: estimateTokens(out) });
+    }
     else if (ev.type === "error") return undefined;
     else if (ev.type === "done" && ev.stop === "aborted") return undefined;
   }

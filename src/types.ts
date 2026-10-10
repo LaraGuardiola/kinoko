@@ -48,6 +48,7 @@ export type StreamEvent =
   | { type: "tool_pending"; name: string; args?: Record<string, string> }
   | { type: "tool_call"; call: ToolCall } // emitted ONLY when its JSON args are complete
   | { type: "replay"; data: unknown } // the finished message as the provider wants it back
+  | { type: "progress"; done: number; total: number } // prompt tokens read so far (llama.cpp's return_progress)
   | { type: "done"; stop: StopReason; usage?: Usage }
   | { type: "error"; message: string };
 

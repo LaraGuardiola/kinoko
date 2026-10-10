@@ -42,7 +42,7 @@ function print(agent: Agent): void {
         process.stderr.write(`[first token after ${e.at - startedAt}ms]\n`);
         break;
       case "compacted":
-        process.stderr.write(`[compacted: ${e.keep} messages kept verbatim]\n`);
+        if (e.keep >= 0) process.stderr.write(`[compacted: ${e.keep} messages kept verbatim]\n`);
         break;
       case "run_end":
         process.stderr.write(`[${e.reason}${e.detail ? `: ${e.detail}` : ""}]\n`);

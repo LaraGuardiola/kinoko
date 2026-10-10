@@ -10,6 +10,8 @@ export type KeyAction =
   | "pull-queued" // Alt+Up
   | "toggle-tools" // Ctrl-T
   | "paste-image" // Ctrl-V
+  | "send-now" // Alt+X while a steer waits
+  | "cancel-queued" // Alt+C while messages wait
   | "submit" // Enter
   | "follow-up" // Alt+Enter while running
   | "editor" // everything the editor handles
@@ -29,6 +31,8 @@ export interface KeyContext {
  *   Ctrl-C         abort / clear the editor / quit on a second press
  *   Alt+Up         pull the last queued message back
  *   Ctrl-V         paste the clipboard image as [Image #N]
+ *   Alt+X          send the queued steer now (cuts the reply being streamed)
+ *   Alt+C          cancel the queued messages (they go back into the editor)
  */
 export function actionFor(key: Key, ctx: KeyContext): KeyAction {
   switch (key.name) {
@@ -48,6 +52,10 @@ export function actionFor(key: Key, ctx: KeyContext): KeyAction {
       return "editor";
     case "up":
       return key.alt === true ? "pull-queued" : "editor";
+    case "char":
+      if (key.alt === true && ctx.running && key.char === "x") return "send-now";
+      if (key.alt === true && ctx.running && key.char === "c") return "cancel-queued";
+      return "editor";
     default:
       return "editor";
   }

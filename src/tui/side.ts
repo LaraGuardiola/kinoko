@@ -4,16 +4,20 @@
 
 import type { Message, ToolCall } from "../types.ts";
 import { gitChanges } from "./changes.ts";
-import type { FileChange } from "./changes.ts";
-import { panelRows, panelWidth, wideEnough } from "./panel.ts";
+import type { FileChange, TreeState } from "./changes.ts";
+import { maxScroll, panelRows, panelWidth, wideEnough } from "./panel.ts";
 import { TODO_TOOL, latestTodos, todosOf } from "./todos.ts";
 import type { Todo } from "./todos.ts";
 
-export type ChangesSource = (signal: AbortSignal) => Promise<FileChange[] | undefined>;
+export type ChangesSource = (signal: AbortSignal) => Promise<TreeState | undefined>;
 
 export class SidePanel {
   #todos: Todo[] = [];
   #changes: FileChange[] | undefined = [];
+  #head: string | undefined;
+  #expanded = false; // Ctrl+O: the plan takes the column
+  #scroll = 0; // the first task shown, unfolded
+  #height = 0; // the column's height as last drawn: how far a scroll may go
   #window: number | undefined; // pixels, from the terminal's reports
   #screen: number | undefined;
   #source: ChangesSource;
@@ -74,8 +78,9 @@ export class SidePanel {
     }
     this.#fetching = true;
     void this.#source(AbortSignal.timeout(10_000))
-      .then((changes) => {
-        this.#changes = changes;
+      .then((tree) => {
+        this.#changes = tree?.files;
+        this.#head = tree?.head;
       })
       .catch(() => undefined)
       .finally(() => {
@@ -86,6 +91,28 @@ export class SidePanel {
           this.refresh();
         }
       });
+  }
+
+  get expanded(): boolean {
+    return this.#expanded;
+  }
+
+  /** Ctrl+O: the plan unfolds over the column (from the task at hand), or folds back. */
+  toggle(): void {
+    this.#expanded = !this.#expanded;
+    const first = this.#todos.findIndex((t) => t.status !== "done");
+    this.#scroll = Math.max(0, (first < 0 ? this.#todos.length : first) - 1);
+  }
+
+  fold(): void {
+    this.#expanded = false;
+  }
+
+  /** Scrolls the unfolded plan by whole tasks; "end" and "start" jump. */
+  scroll(by: number | "start" | "end", width: number): void {
+    const most = maxScroll(this.#todos, width, this.#height);
+    const next = by === "start" ? 0 : by === "end" ? most : this.#scroll + by;
+    this.#scroll = Math.max(0, Math.min(next, most));
   }
 
   /** The window changed size: its share of the screen is unknown until the terminal answers again. */
@@ -100,7 +127,13 @@ export class SidePanel {
   column(cols: number | undefined): { width: number; rows: (height: number) => string[]; key: string } | undefined {
     if (cols === undefined || !this.visible(cols)) return undefined;
     const width = panelWidth(cols);
-    const facts = { todos: this.#todos, changes: this.#changes };
-    return { width, rows: (height) => panelRows(facts, width, height), key: JSON.stringify([width, facts]) };
+    const facts = { todos: this.#todos, changes: this.#changes, head: this.#head };
+    const view = { expanded: this.#expanded, scroll: this.#scroll };
+    const rows = (height: number): string[] => {
+      this.#height = height;
+      if (view.expanded) view.scroll = Math.min(view.scroll, maxScroll(this.#todos, width, height));
+      return panelRows(facts, width, height, view);
+    };
+    return { width, rows, key: JSON.stringify([width, facts, view]) };
   }
 }

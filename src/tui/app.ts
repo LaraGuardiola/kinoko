@@ -16,6 +16,7 @@ import type { RenderState } from "./render.ts";
 import { ABORTED, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
 import { errorBlock, pulseLevel, toolBlock, toolFailed, toolSummary } from "./tools.ts";
 import { TODO_TOOL } from "./todos.ts";
+import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
 import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
@@ -34,6 +35,9 @@ import type { Image, Message } from "../types.ts";
 import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
+import { compactingNote } from "./sprout.ts";
+import { ANSI } from "./style.ts";
+import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
 
@@ -123,6 +127,7 @@ export class App {
   #pending: { name: string; args: string } | undefined; // a call the model is still writing
   #queued: QueuedView[] = [];
   #toolBlocksFull = false; // ctrl+t
+  #compacting: CompactProgress | undefined; // a summary on its way: the note animates
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
@@ -257,6 +262,7 @@ export class App {
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
     if (this.#menuKey(key)) return;
     if (this.#fileKey(key)) return;
+    if (this.#planKey(key)) return;
     const action = actionFor(key, {
       running: this.#running || this.#agent.state === "running",
       editorEmpty: this.#editor.empty,
@@ -278,6 +284,13 @@ export class App {
         return;
       case "pull-queued":
         this.#pullQueued();
+        return;
+      case "send-now":
+        // The reply being streamed is cut and the steer goes in now; nothing to cut: it waits.
+        if (!this.#agent.sendNow()) this.render();
+        return;
+      case "cancel-queued":
+        this.#takeBack(this.#agent.unqueue("all"));
         return;
       case "submit":
         void this.#submit();
@@ -388,10 +401,15 @@ export class App {
 
   /** Alt+Up: pull the newest queued message back into the editor. */
   #pullQueued(): void {
-    const last = this.#queued.pop();
-    if (last === undefined) return;
+    this.#takeBack(this.#agent.unqueue("last"));
+  }
+
+  /** Queued messages taken back from the agent go into the editor, before what is typed there. */
+  #takeBack(texts: string[]): void {
+    if (texts.length === 0) return;
     const current = this.#editor.text.trim();
-    this.#editor.setText(current === "" ? last.text : `${last.text}\n${current}`);
+    const back = texts.join("\n");
+    this.#editor.setText(current === "" ? back : `${back}\n${current}`);
     this.render();
   }
 
@@ -447,8 +465,14 @@ export class App {
       case "delivered":
         this.#echoUser(e.text);
         return;
+      case "compacting":
+        this.#compacting = { phase: e.phase, done: e.done, total: e.total ?? this.#compacting?.total };
+        this.render();
+        return;
       case "compacted":
-        this.#marker = "compacted: full prompt re-read expected";
+        this.#compacting = undefined;
+        if (e.keep >= 0) this.#marker = `compacted · ${e.keep} message${e.keep === 1 ? "" : "s"} kept as they were`;
+        this.render();
         return;
       case "run_end":
         this.#finishRun(e.reason, e.dropped, e.detail);
@@ -625,8 +649,10 @@ export class App {
       // Until the result is in, the bullet fades in and out (the render timer repaints each step).
       pulse: this.#tool || this.#pending !== undefined ? pulseLevel(Date.now()) : undefined,
       toolGap: this.#printedAny,
-      marker: this.#marker,
-      markerAlert: this.#marker.startsWith("Interrupted"),
+      // While compacting: mushrooms and how far it is (the clock moves them on each frame).
+      marker: this.#compacting ? compactingNote(this.#compacting, Date.now()) : this.#marker,
+      markerAlert: !this.#compacting && this.#marker.startsWith("Interrupted"),
+      markerCream: this.#compacting !== undefined || this.#marker.startsWith("compacted"),
       queued: this.#queued,
       editorLines: view.lines,
       editorRow: view.row,
@@ -657,7 +683,7 @@ export class App {
         return true;
       case "compact": {
         const done = await this.#agent.compactNow();
-        this.#marker = done ? "compacted: full prompt re-read expected" : "nothing to compact yet";
+        if (!done) this.#marker = "nothing to compact yet";
         this.render();
         return true;
       }
@@ -693,6 +719,29 @@ export class App {
     if (!this.#files.open) return [];
     const empty = this.#files.entries === undefined ? "reading…" : "no matches";
     return listRows(this.#files.items(), this.#files.index, `Files · ${this.#files.where}`, empty, undefined, "Tab or Enter to complete · Esc to close");
+  }
+
+  /**
+   * Ctrl+O unfolds the plan over the side column (or prints it, when the window is too narrow for
+   * the column); unfolded, the arrows, PgUp/PgDn and Home/End scroll it by tasks and Esc folds it.
+   */
+  #planKey(key: Key): boolean {
+    const column = this.#side.column(this.#viewportCols);
+    if (key.name === "ctrl-o") {
+      if (column !== undefined) this.#side.toggle();
+      else if (this.#side.todos.length === 0) this.#marker = "no plan yet";
+      else this.#print("system", planLines(this.#side.todos));
+      this.render();
+      return true;
+    }
+    if (column === undefined || !this.#side.expanded || key.alt) return false;
+    const by =
+      key.name === "up" ? -1 : key.name === "down" ? 1 : key.name === "pageup" ? -5 : key.name === "pagedown" ? 5 : key.name === "home" ? "start" : key.name === "end" ? "end" : undefined;
+    if (by !== undefined) this.#side.scroll(by, column.width);
+    else if (key.name === "escape") this.#side.fold();
+    else return false;
+    this.render();
+    return true;
   }
 
   /** The keys the "@" file picker takes while it is open: arrows, Tab/Enter to complete, Esc. */
@@ -961,4 +1010,11 @@ export class App {
     if (this.#rebuild) this.#agent = this.#rebuild();
     return `fork: head moved from ${head.role} to ${target.role} (${branch.length} -> ${branch.length - 1} messages)`;
   }
+}
+
+/** The plan as transcript rows, for a window too narrow for the side column. */
+function planLines(todos: Todo[]): string {
+  const marks = { done: `${ANSI.dim}✓`, in_progress: `${ANSI.toolDot}●${ANSI.reset}${ANSI.bold}`, pending: "○" };
+  const done = todos.filter((t) => t.status === "done").length;
+  return [`${ANSI.bold}Plan${ANSI.reset} ${ANSI.dim}${done}/${todos.length}${ANSI.reset}`, ...todos.map((t) => `${marks[t.status]} ${t.text}${ANSI.reset}`)].join("\n");
 }

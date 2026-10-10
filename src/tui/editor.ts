@@ -116,7 +116,6 @@ export class Editor {
         if (key.alt || key.ctrl) return this.#newline();
         return this.empty ? "none" : "submit";
       case "shift-enter":
-      case "ctrl-o": // the newline key while idle, since Alt+Enter is a follow-up when running
         return this.#newline();
       case "backspace":
         return this.#backspace();

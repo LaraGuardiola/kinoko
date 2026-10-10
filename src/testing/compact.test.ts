@@ -10,6 +10,7 @@ import {
 } from "../compact.ts";
 import { Agent } from "../loop.ts";
 import type { Message, Provider, StreamEvent } from "../types.ts";
+import type { CompactProgress } from "../compact.ts";
 
 /** Records what the summarizer was asked, and answers with `text`. */
 function summarizer(text: string, asked: string[] = []): Provider {
@@ -84,6 +85,26 @@ describe("compaction", () => {
     const tail = messages.slice(messages.findIndex((m) => m.id === result!.keepFrom));
     expect(result!.view.slice(1)).toEqual(tail);
     expect(result!.view.map((m) => m.content)).toContain("the most recent question");
+  });
+
+  test("2c. progress: what is being read (estimated, then as the server reports it), then the summary written", async () => {
+    const seen: CompactProgress[] = [];
+    const provider: Provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        yield { type: "progress", done: 500, total: 1000 };
+        yield { type: "progress", done: 1000, total: 1000 };
+        yield { type: "text", delta: "Objective: x".repeat(10) };
+        yield { type: "done", stop: "end" };
+      },
+    };
+    await compactHistory(history(), { provider, model: "m", system: "sys", signal: new AbortController().signal, tailTokens: 5000, onProgress: (p) => seen.push(p) });
+    expect(seen[0]!.phase).toBe("reading");
+    expect(seen[0]!.total).toBeGreaterThan(0); // the estimate, before the server says anything
+    expect(seen.slice(1, 3)).toEqual([
+      { phase: "reading", done: 500, total: 1000 },
+      { phase: "reading", done: 1000, total: 1000 },
+    ]);
+    expect(seen.at(-1)).toEqual({ phase: "writing", done: 30 });
   });
 
   test("2b. the kept tail loses its replayed thinking: it was bound to the summarized history", async () => {
