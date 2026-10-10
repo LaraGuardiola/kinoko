@@ -2,6 +2,7 @@ import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
 import type { ModelsHost } from "../../tui/app.ts";
+import type { ExtEntry, ExtStore } from "../../extstore.ts";
 import type { ChangesSource } from "../../tui/side.ts";
 import type { SavedModel } from "../../config.ts";
 import type { Served } from "../../providers/openai-compat.ts";
@@ -77,6 +78,7 @@ async function harness(
     budgets?: boolean;
     thinkingProfile?: string;
     modelsHost?: ModelsHost;
+    extensions?: ExtStore;
     clipboard?: (signal: AbortSignal) => Promise<Image | string>;
     changes?: ChangesSource;
   } = {},
@@ -109,6 +111,7 @@ async function harness(
     thinkingProfile: opts.thinkingProfile,
     thinking: "LOW · 2048",
     models: opts.modelsHost,
+    extensions: opts.extensions,
     session: session,
     rebuild: () => agent,
     clipboard: opts.clipboard,
@@ -1096,5 +1099,87 @@ describe("side panel", () => {
       "resumed",
     );
     expect(await paint(h)).toContain("● draw the panel");
+  });
+});
+
+function store(entries: ExtEntry[]): { store: ExtStore; installed: string[]; removed: string[] } {
+  const installed: string[] = [];
+  const removed: string[] = [];
+  return {
+    installed,
+    removed,
+    store: {
+      repo: "https://github.com/LaraGuardiola/kinoko-extensions.git",
+      local: async () => [],
+      list: async () => entries.map((e) => ({ ...e })),
+      install: async (name) => {
+        installed.push(name);
+        return `${name} installed: restart kinoko to load it`;
+      },
+      remove: async (name) => {
+        removed.push(name);
+        return `${name} removed: gone when kinoko restarts`;
+      },
+    },
+  };
+}
+
+// Frames are paced (the CLI repaints every 33 ms): wait past the pacing, then draw.
+const paced = (): Promise<void> => new Promise((r) => setTimeout(r, 40));
+
+describe("the extensions page", () => {
+
+  test("lists the repository's extensions; Enter installs one, the note says to restart", async () => {
+    const fake = store([
+      { name: "herdr", description: "herdr agent", installed: true },
+      { name: "web", description: "web tools", installed: false },
+    ]);
+    const h = await harness([], { extensions: fake.store, viewportRows: 30 });
+    h.press("/extensions\r");
+    expect(h.app.menuPage).toBe("Extensions");
+    await paced();
+    h.app.render();
+    expect(h.screen()).toContain("web tools");
+    h.press("\x1b[B"); // down to web
+    h.press("\r");
+    await paced();
+    expect(fake.installed).toEqual(["web"]);
+    expect(h.app.marker).toBe("web installed: restart kinoko to load it");
+  });
+
+  test("Del twice removes an installed one; a fetch that fails shows why", async () => {
+    const fake = store([{ name: "herdr", description: "herdr agent", installed: true }]);
+    const h = await harness([], { extensions: fake.store, viewportRows: 30 });
+    h.press("/extensions\r");
+    await paced();
+    h.press("\x1b[3~");
+    h.press("\x1b[3~");
+    await paced();
+    expect(fake.removed).toEqual(["herdr"]);
+    expect(h.app.marker).toBe("herdr removed: gone when kinoko restarts");
+
+    const broken = await harness([], {
+      viewportRows: 30,
+      extensions: { ...fake.store, list: async () => Promise.reject(new Error("could not fetch the repo: offline")) },
+    });
+    broken.press("/extensions\r");
+    await paced();
+    broken.app.render();
+    expect(broken.screen()).toContain("could not fetch the repo: offline");
+
+    // Offline with something installed: it is still listed, and the hint says why the list is local.
+    const offline = await harness([], {
+      viewportRows: 30,
+      extensions: {
+        ...fake.store,
+        local: async () => [{ name: "herdr", description: "herdr agent", installed: true }],
+        list: async () => Promise.reject(new Error("could not update the repo: offline")),
+      },
+    });
+    offline.press("/extensions\r");
+    await paced();
+    offline.app.render();
+    expect(offline.screen()).toContain("herdr agent");
+    expect(offline.screen()).toContain("could not update the repo: offline · showing what is on this computer");
   });
 });

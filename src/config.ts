@@ -23,6 +23,8 @@ export interface Config {
   thinkingReplay?: "turn" | "none";
   // A dropped connection or a 429/5xx is retried this many times in a row (2s, 4s, 8s...); 0: never.
   retries?: number;
+  // The git repository /extensions installs from (kinoko-extensions when unset).
+  extensionsRepo?: string;
 }
 
 export const DEFAULTS: Config = {
@@ -51,6 +53,7 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "label",
   "thinkingReplay",
   "retries",
+  "extensionsRepo",
 ]);
 const REPLAYS: ReadonlySet<string> = new Set(["turn", "none"]);
 const EFFORTS: ReadonlySet<string> = new Set(["off", "low", "medium", "high"]);

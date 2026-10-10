@@ -38,7 +38,8 @@ Never disable a rule just to make code pass; fix the code. A disable comment nee
 
 ## Conventions
 - Tests live in `src/testing/`, mirroring `src/` (`src/tui/app.ts` → `src/testing/tui/app.test.ts`),
-  as `*.test.ts` using `bun:test`. The one exception is `examples/ext/`: each example ships with its test.
+  as `*.test.ts` using `bun:test`. The one exception is `examples/ext/hello.ts`, tested by `src/testing/ext.test.ts`. Extensions
+  themselves live in the kinoko-extensions repo (`~/Projects/kinoko-extensions`, its own AGENTS.md).
   Use a fake Provider and fake tools for loop tests, and a fake SSE server (`Bun.serve`) for providers.
 - A tool error becomes a tool message "ERROR: ...". It never crashes the loop.
 - User-level files live in `~/.kinoko/` (config, sessions, ext, bin). Project-level in `./.kinoko/`.

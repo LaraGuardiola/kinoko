@@ -1,9 +1,10 @@
-// Extensions: plain .ts files with a default export, loaded from ~/.kinoko/ext and <cwd>/.kinoko/ext.
+// Extensions: a .ts file, or a folder with an index.ts (and its own node_modules, when it has
+// dependencies), with a default export, loaded from ~/.kinoko/ext and <cwd>/.kinoko/ext.
 //
 // They only ever get the Kinoko handle below: no imports of core internals, no monkey patching. A
 // handler that throws is logged and skipped, because a broken extension must never break a run.
 
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { uniqueDirs } from "./context.ts";
 import type { Message, ProviderRequest, Tool } from "./types.ts";
@@ -167,7 +168,7 @@ export async function loadExtensions(k: Extensions, opts: LoadOptions): Promise<
   const dirs = uniqueDirs([join(home, ".kinoko", "ext"), join(opts.cwd, ".kinoko", "ext")]);
   const paths: string[] = [];
   for (const dir of dirs) {
-    for (const name of listTs(dir)) paths.push(join(dir, name));
+    for (const name of listEntries(dir)) paths.push(join(dir, name));
   }
   const mods = await Promise.all(paths.map((path) => importDefault(path, k)));
   const loaded: string[] = [];
@@ -185,14 +186,22 @@ export async function loadExtensions(k: Extensions, opts: LoadOptions): Promise<
   return loaded;
 }
 
-function listTs(dir: string): string[] {
+/** `name.ts` files and `name/index.ts` folders, in name order. */
+function listEntries(dir: string): string[] {
   try {
-    return readdirSync(dir)
-      .toSorted()
-      .filter((name) => name.endsWith(".ts"));
+    return readdirSync(dir, { withFileTypes: true })
+      .toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) // the same order on every machine
+      .flatMap((e) => (e.isFile() && e.name.endsWith(".ts") ? [e.name] : e.isDirectory() && existsSync(join(dir, e.name, "index.ts")) ? [join(e.name, "index.ts")] : []));
   } catch {
     return [];
   }
+}
+
+/** What an extension is called: its file without `.ts`, or its folder. */
+export function extensionName(path: string): string {
+  const parts = path.split("/");
+  const file = parts.at(-1) ?? path;
+  return (file === "index.ts" ? (parts.at(-2) ?? file) : file).replace(/\.ts$/, "");
 }
 
 async function importDefault(path: string, k: Extensions): Promise<null | ExtensionFactory> {
