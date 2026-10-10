@@ -40,11 +40,11 @@ test("label names the configured provider; a non-string is dropped; retries is r
   }
 });
 
-test("layoutCols: 80 columns inside herdr (its phone views re-wrap the text), the whole terminal elsewhere; maxCols wins", async () => {
+test("layoutCols: 70 columns inside herdr (its phone views re-wrap the text), the whole terminal elsewhere; maxCols wins", async () => {
   const { layoutCols } = await import("../config.ts");
   expect(layoutCols(180, undefined, {})).toBe(180);
-  expect(layoutCols(180, undefined, { TERM_PROGRAM: "herdr" })).toBe(80);
-  expect(layoutCols(180, undefined, { HERDR_ENV: "1" })).toBe(80);
+  expect(layoutCols(180, undefined, { TERM_PROGRAM: "herdr" })).toBe(70);
+  expect(layoutCols(180, undefined, { HERDR_ENV: "1" })).toBe(70);
   expect(layoutCols(60, undefined, { TERM_PROGRAM: "herdr" })).toBe(60); // narrower than the cap: all of it
   expect(layoutCols(180, 0, { TERM_PROGRAM: "herdr" })).toBe(180); // 0: the whole terminal, herdr or not
   expect(layoutCols(180, 100, {})).toBe(100);

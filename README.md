@@ -144,11 +144,11 @@ default) sends the thinking of every step since your last message, so the model 
 between tool calls instead of re-reading your last message as if it were new; older thinking stays
 out. `"none"` sends only a reply cut by the output limit, for models that copy old thinking verbatim.
 
-`"maxCols"`: the most columns the TUI lays out on (`0`: the whole terminal). Unset, it is 80 inside
+`"maxCols"`: the most columns the TUI lays out on (`0`: the whole terminal). Unset, it is 70 inside
 herdr and the whole terminal elsewhere: herdr's phone views (Flux) show a pane's text re-wrapped at
 the phone's width, so full-width rules filled several lines there and the side column's rows landed
-in the middle of the text. On the desktop that pane shows kinoko on its left 80 columns, without the
-side column; `"maxCols": 0` brings the full width back.
+in the middle of the text (70, not 80: the tablet's font draws `─` 1.2 times wider than a letter). On
+the desktop that pane shows kinoko on its left 70 columns, without the side column; `"maxCols": 0` brings the full width back.
 
 `"retries"` (default 3): a dropped connection, no answer, or a 429/5xx is retried that many times in
 a row, after 2s, 4s, 8s...; the partial reply is dropped and the note above the input says so. Esc
