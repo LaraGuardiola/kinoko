@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { renderMarkdown } from "../../tui/markdown.ts";
+import { renderMarkdown, setFenceRenderers } from "../../tui/markdown.ts";
 import { highlightLine, SYNTAX } from "../../tui/highlight.ts";
 import { languageName } from "../../tui/code.ts";
 import { visibleLength } from "../../tui/style.ts";
@@ -179,5 +179,42 @@ describe("syntax highlighting", () => {
 
   test("an unknown language is plain text", () => {
     expect(strip(highlightLine("whatever **x**", "nope").text)).toBe("whatever **x**");
+  });
+});
+
+describe("markdown: fences an extension draws", () => {
+  test("a closed fence is drawn by its renderer, in the panel; an open one stays source", () => {
+    const calls: string[] = [];
+    const draw = (source: string, width: number): string[] => {
+      calls.push(source);
+      return [`drawn ${width}`];
+    };
+    setFenceRenderers((lang) => (lang === "mermaid" ? draw : undefined));
+    try {
+      const closed = strip(renderMarkdown("```mermaid\ngraph TD\n```", { width: 40 }));
+      expect(closed).toContain("Mermaid");
+      expect(closed).toContain("drawn 37");
+      expect(strip(renderMarkdown("```mermaid\ngraph TD", { width: 40 }))).toContain("graph TD"); // still streaming
+      renderMarkdown("```mermaid\ngraph TD\n```", { width: 40 });
+      expect(calls).toEqual(["graph TD"]); // drawn once, then remembered
+    } finally {
+      setFenceRenderers(() => undefined);
+    }
+  });
+
+  test("a renderer that gives up, throws or draws too wide leaves the source", () => {
+    const answers: Record<string, () => string[] | undefined> = {
+      none: () => undefined,
+      boom: () => {
+        throw new Error("x");
+      },
+      wide: () => ["x".repeat(100)],
+    };
+    setFenceRenderers((lang) => answers[lang]);
+    try {
+      for (const lang of Object.keys(answers)) expect(strip(renderMarkdown(`\`\`\`${lang}\nsource here\n\`\`\``, { width: 40 }))).toContain("source here");
+    } finally {
+      setFenceRenderers(() => undefined);
+    }
   });
 });

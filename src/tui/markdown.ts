@@ -5,9 +5,11 @@
 // Callers hand it whole lines. A stream is never cut inside a fence or a table (splitStable), so
 // every block here is seen whole or, while it is still streaming, from its start.
 
-import { codeBlock } from "./code.ts";
+import type { FenceRenderer } from "../ext.ts";
+import { codeBlock, drawnBlock } from "./code.ts";
 import { isTableStart, renderTable } from "./table.ts";
 import { visibleLength, wrapWords } from "./style.ts";
+import { isTreeLine, treeRows } from "./tree.ts";
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
@@ -32,6 +34,37 @@ export interface MarkdownOptions {
 /** A fence opener: ``` or ~~~ (three or more), optionally followed by a language. */
 const FENCE = /^\s*(`{3,}|~{3,})\s*([\w+#.-]*)/;
 
+/** Who draws a fence's language instead of showing it as code (extensions: ```mermaid). */
+let fences: (lang: string) => FenceRenderer | undefined = () => undefined;
+
+export function setFenceRenderers(lookup: (lang: string) => FenceRenderer | undefined): void {
+  fences = lookup;
+}
+
+// A drawing is redone on every frame while the reply streams: the last ones are kept, per renderer.
+const drawings = new WeakMap<FenceRenderer, Map<string, string[] | undefined>>();
+
+/** A closed fence drawn by its renderer, or undefined (none, it gave up, it threw, too wide). */
+function drawn(lang: string, source: string, width: number): string[] | undefined {
+  const render = fences(lang);
+  if (render === undefined) return undefined;
+  const seen = drawings.get(render) ?? new Map<string, string[] | undefined>();
+  drawings.set(render, seen);
+  const key = `${width}\n${source}`;
+  if (!seen.has(key)) {
+    let rows: string[] | undefined;
+    try {
+      rows = render(source, width);
+    } catch {
+      rows = undefined; // a broken renderer shows the source, never breaks the transcript
+    }
+    if (rows?.some((row) => visibleLength(row) > width)) rows = undefined;
+    if (seen.size >= 16) seen.delete(seen.keys().next().value ?? "");
+    seen.set(key, rows);
+  }
+  return seen.get(key);
+}
+
 export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string {
   const color = opts.color ?? true;
   const width = Math.max(10, opts.width ?? 80);
@@ -48,7 +81,11 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
       const marker = fence[1] ?? "```";
       let end = i + 1;
       while (end < lines.length && !isClosing(lines[end] ?? "", marker)) end++;
-      out.push(...codeBlock(lines.slice(i + 1, end), { lang: fence[2] ?? "", width, color }));
+      const lang = fence[2] ?? "";
+      const body = lines.slice(i + 1, end);
+      // Still streaming (no closing fence yet): the source, drawn once it is whole.
+      const rows = color && end < lines.length ? drawn(lang, body.join("\n"), width - 3) : undefined;
+      out.push(...(rows === undefined ? codeBlock(body, { lang, width, color }) : drawnBlock(rows, { lang, width })));
       i = end + 1;
       continue;
     }
@@ -57,6 +94,15 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
       let end = i + 2;
       while (end < lines.length && (lines[end] ?? "").includes("|") && (lines[end] ?? "").trim() !== "") end++;
       out.push(...renderTable(lines.slice(i, end), width, (cell) => fmt(cell), color));
+      i = end;
+      continue;
+    }
+
+    // A directory tree outside a fence: kept aligned, never read as markdown (__init__.py).
+    if (isTreeLine(lines[i + 1] ?? "") && (isTreeLine(line) || /^\S+\/$/.test(line.trim()))) {
+      let end = i + 1;
+      while (end < lines.length && isTreeLine(lines[end] ?? "")) end++;
+      out.push(...treeRows(lines.slice(i, end), width, color));
       i = end;
       continue;
     }

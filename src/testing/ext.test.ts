@@ -83,6 +83,7 @@ describe("extension loader", () => {
   k.on("session_start", (info) => k.registerCommand("mode", () => info.mode + " ${v}"));
   k.registerTool({ name: "tool_${v}", description: "", schema: {}, run: async () => "" });
   k.on("tool_result", (r) => { r.output += " [${v}]"; });
+  k.registerRenderer("Demo", (source, width) => ["${v} " + source + " " + width]);
 }\n`,
       );
     const { ext } = extBus();
@@ -99,8 +100,10 @@ describe("extension loader", () => {
     const result = { name: "read", output: "x", signal: new AbortController().signal };
     ext.emit("tool_result", result);
     expect(result.output).toBe("x [core] [v2]");
+    expect(ext.renderer("demo")?.("src", 30)).toEqual(["v2 src 30"]); // fence languages ignore case
     expect(ext.unload("a-live")).toBe(true);
     expect(ext.tools()).toEqual([]);
+    expect(ext.renderer("demo")).toBeUndefined();
     expect(ext.command("mode")).toBeUndefined();
     expect(ext.unload("a-live")).toBe(false);
     writeFileSync(`${dir}/index.ts`, "export default 1;\n");

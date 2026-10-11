@@ -13,6 +13,7 @@ import { Extensions, extensionName, loadExtensions, loadOne } from "./ext.ts";
 import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
 import { App } from "./tui/app.ts";
 import { THINKING } from "./tui/menu-pages.ts";
+import { setFenceRenderers } from "./tui/markdown.ts";
 import { Term } from "./tui/term.ts";
 import { placeLine } from "./tui/place.ts";
 import { ansi } from "./tui/render.ts";
@@ -81,6 +82,7 @@ const ext = new Extensions();
 const extensionPaths = await loadExtensions(ext, { cwd: cwd });
 const loadedExtensions = new Set(extensionPaths.map(extensionName)); // /extensions changes it live
 for (const path of extensionPaths) process.stderr.write(`[ext] loaded ${path}\n`);
+setFenceRenderers((lang) => ext.renderer(lang)); // ```mermaid and the like, drawn by extensions
 
 if (prompt !== undefined && prompt.startsWith("/")) {
   const [name, ...rest] = prompt.slice(1).split(" ");
