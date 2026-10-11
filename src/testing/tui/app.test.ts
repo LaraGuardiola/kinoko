@@ -1,7 +1,7 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
-import { ANSI as STYLE } from "../../tui/style.ts";
+import { ANSI as STYLE, visibleLength } from "../../tui/style.ts";
 import type { AppOptions, ModelsHost } from "../../tui/app.ts";
 import { readIntegrations, setTelegram } from "../../integrations.ts";
 import type { FilesState } from "../../tui/integrations-menu.ts";
@@ -1070,7 +1070,7 @@ describe("side panel", () => {
     expect(raw).toContain(`\x1b[1;${120 - 36}H`); // its first row: the screen's top, the right columns
     h.press(HALF);
     const gone = h.out.findLast((chunk) => chunk.includes("tok")) ?? "";
-    expect(gone).toContain(`\x1b[1;${120 - 36}H\x1b[K`); // erased where it was
+    expect(gone).toContain("\x1b[H\x1b[2J"); // the screen drawn again at the full width, no column
     expect(await paint(h)).not.toContain("Plan");
     expect(h.app.editorText).toBe(""); // the answers typed nothing
   });
@@ -1716,6 +1716,35 @@ describe("/profile", () => {
     expect(fake.toggled).toEqual(["web off"]);
     expect(h.app.marker).toContain("1 off; thinking low");
     expect(await Bun.file(`${home}/.kinoko/profile.json`).json()).toEqual({ name: "mycena" });
+  });
+});
+
+/** The widths of the rows on a tool's green band, in what was written. */
+const band = (chunk: string): number[] => chunk.split("\r\n").filter((row) => row.includes(STYLE.bgOk)).map((row) => visibleLength(row.replace(ANSI, "")));
+
+describe("a resize redraws the transcript at the new width", () => {
+  test("a tool's band and a reply printed wide are drawn again narrower, and wide again when it widens", async () => {
+    const reply = "The tool ran fine and this sentence is long enough to wrap when the window gets narrow.";
+    const turns: StreamEvent[][] = [
+      [{ type: "tool_call", call: { id: "c1", name: "slow", args: {} } }, { type: "done", stop: "tool_use" }],
+      [{ type: "text", delta: reply }, { type: "done", stop: "end" }],
+    ];
+    const h = await harness(turns, { tools: [slow], viewportRows: 30, viewportCols: 100 });
+    h.press("go\r");
+    await settle(h.agent);
+    await new Promise((r) => setTimeout(r, 120));
+    h.out.length = 0;
+    h.app.resize(60, 31);
+    const narrow = h.out.join("");
+    expect(narrow).toContain("\x1b[2J"); // drawn again
+    expect(band(narrow).length).toBeGreaterThan(0);
+    expect(Math.max(...band(narrow))).toBeLessThanOrEqual(60); // no row of the band wider than the window
+    expect(narrow).toContain("this sentence is long enough to wrap"); // the reply rewrapped by words
+    h.out.length = 0;
+    h.app.resize(100, 31);
+    const wide = h.out.join("");
+    expect(Math.max(...band(wide))).toBeGreaterThan(60); // the band fills the wide window again
+    expect(wide).toContain(reply.slice(0, 80)); // and the reply takes the width again
   });
 });
 
