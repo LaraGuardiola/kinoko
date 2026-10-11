@@ -279,10 +279,11 @@ export function wire(messages: Message[]): object[] {
     let j = i + 1;
     for (; j < messages.length && messages[j]!.role === "tool"; j++) {
       const t = messages[j]!;
+      const images = (t.images ?? []).map((img) => ({ type: "image", source: { type: "base64", media_type: img.mime, data: img.data } }));
       results.push({
         type: "tool_result",
         tool_use_id: t.toolCallId,
-        content: t.content,
+        content: images.length > 0 ? [{ type: "text", text: t.content }, ...images] : t.content,
         ...(t.content.startsWith("ERROR:") ? { is_error: true } : {}),
       });
     }

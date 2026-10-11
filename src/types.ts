@@ -16,7 +16,7 @@ export interface Usage {
 
 export type StopReason = "end" | "tool_use" | "length" | "aborted" | "error";
 
-/** An image the user attached: raw bytes as base64, and their media type (image/png...). */
+/** An image the user attached or a tool returned: raw bytes as base64, and their media type (image/png...). */
 export interface Image {
   mime: string;
   data: string;
@@ -32,7 +32,7 @@ export interface Message {
   thinking?: string;
   toolCalls?: ToolCall[];
   toolCallId?: string; // toolCallId only on role "tool"
-  images?: Image[]; // only on role "user"; the text refers to them as [Image #N]
+  images?: Image[]; // role "user" (the text refers to them as [Image #N]) or "tool" (a vision tool's result)
   stop?: StopReason;
   usage?: Usage;
   // Provider-opaque content replayed unchanged to the provider that produced it (Anthropic's signed
@@ -81,8 +81,14 @@ export interface ToolContext {
   onOutput?: (chunk: string) => void;
 }
 
+/** A tool's answer with images for the model to look at (a picture, a video's frames, a screenshot). */
+export interface ToolResult {
+  text: string;
+  images?: Image[];
+}
+
 export interface Tool extends ToolSpec {
   readOnly?: boolean;
   // oxlint-disable-next-line typescript/no-explicit-any -- Tool.run args are validated by schema, so the wire type stays open.
-  run(args: any, ctx: ToolContext): Promise<string>;
+  run(args: any, ctx: ToolContext): Promise<string | ToolResult>;
 }

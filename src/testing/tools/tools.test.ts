@@ -12,10 +12,11 @@ function fresh(name: string): string {
   return dir;
 }
 
-function pick(name: string): Tool {
+/** A core tool; they all answer in text, never with images. */
+function pick(name: string): Tool & { run: (args: unknown, ctx: { signal: AbortSignal; cwd: string }) => Promise<string> } {
   const found = defaultTools().find((t) => t.name === name);
   if (!found) throw new Error(`tool ${name} not registered`);
-  return found;
+  return { ...found, run: async (args, c) => String(await found.run(args, c)) };
 }
 
 function ctx(cwd: string): { signal: AbortSignal; cwd: string } {
