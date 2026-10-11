@@ -53,6 +53,9 @@ type Incoming = {
   name?: string;
   arg?: string;
   width?: number;
+  request?: string; // approve: the approval_request's id
+  allow?: boolean;
+  remember?: boolean;
 };
 
 export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Agents; stop: () => void } {
@@ -106,6 +109,13 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
       case "follow_up":
       case "abort": {
         const reply = await agents.send(agent, { type: msg.type, text: msg.text, images: msg.images });
+        return reply.type === "ok" ? ok({ text: reply.text }) : fail(reply.detail ?? "refused");
+      }
+      case "approve": {
+        // The first answer wins: one that comes late (the terminal answered) is refused.
+        if (typeof msg.request !== "string" || typeof msg.allow !== "boolean") return fail("approve needs request and allow");
+        const reply = await agents.send(agent, { type: "approve", request: msg.request, allow: msg.allow, remember: msg.remember === true, by: "app" });
+        if (reply.type === "ok") log(`${ws.data.device.name} ${msg.allow ? "allowed" : "denied"} a call of ${agent}`);
         return reply.type === "ok" ? ok({ text: reply.text }) : fail(reply.detail ?? "refused");
       }
       case "commands": {

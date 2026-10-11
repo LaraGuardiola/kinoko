@@ -90,6 +90,7 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `commands` | `agent` | the slash commands it takes → `commands` |
 | `render` | `text`, `width` | a fenced block or a table drawn as the TUI draws it → `rendered` |
 | `command` | `agent`, `name`, `arg?` | runs one → `command_result` |
+| `approve` | `agent`, `request`, `allow`, `remember?` | answers the call waiting (`AgentInfo.approval.id`): `allow` runs it, `remember` allows the same call for the rest of the session; refused when another client answered first |
 
 `images`: `[{"mime": "image/jpeg", "data": "<base64>"}]`. Messages up to 32 MB.
 
@@ -119,6 +120,16 @@ the list again and a `text` saying what was done. A `run` command answers with a
 true` (new) means the conversation was replaced: attach again. A TUI linked to the hub runs them
 through itself, so its screen shows what the phone changed.
 
+## Approvals
+
+An extension can ask the user before a tool call runs (permission-gate does for `sudo`, `rm -rf`…).
+The agent waits: `approval_request` comes as an event to attached devices, and the agent's
+`AgentInfo.approval` says it in the `agents` list every device gets (attached or not: that is the one
+to notify from, as with `ended`). Any client may answer with `approve`; the first answer wins (the
+terminal's y/n, the phone, later Telegram) and `approval_end` says who (`by`). Show the call
+(`call.name`, and `call.args.command` for `bash`), the `reason`, and Allow / Deny / For this session.
+An abort of the run, or nobody answering in 10 minutes (`approvalTimeoutMs`), denies it.
+
 ## Shapes
 
 ```ts
@@ -132,6 +143,7 @@ AgentInfo {
   error?: string;        // why it exited
   ended?: "done" | "aborted" | "error" | "limit";   // how its last run ended (none while one runs)
   last?: string;         // the start of its last reply, one line: what a notification says
+  approval?: { id: string; call: { id: string; name: string; args: object }; reason: string };   // a call waiting for the user
 }
 
 Project { cwd: string; name: string; updated: number; sessions: [{ id: string; title: string; updated: number }] }
@@ -165,6 +177,8 @@ Message {
 | `delivered` | `text` | a queued steer reached the model |
 | `compacting` / `compacted` | `phase, done, total?` / `keep` | the history is being summarised |
 | `retry` | `attempt, of, inMs, error` | a transient failure; trying again |
+| `approval_request` | `id`, `call {id, name, args}`, `reason` | the call waits for the user: Allow / Deny / For this session |
+| `approval_end` | `id`, `allow`, `by: tui \| app \| telegram \| timeout \| abort` | answered: the card shows the outcome |
 | `run_end` | `reason: done \| aborted \| error \| limit`, `detail?` | idle again |
 
 New event types may appear: an app ignores what it does not know.

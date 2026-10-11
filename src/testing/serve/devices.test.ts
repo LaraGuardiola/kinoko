@@ -41,4 +41,13 @@ describe("serve: devices", () => {
     expect(await a.check(paired?.token ?? "")).toBeUndefined();
     expect(await b.revoke("tablet")).toBe(false);
   });
+
+  test("changes at the same time all land: two pairings and the checks of two tokens", async () => {
+    const devices = new Devices(join(dir, "d.json"));
+    const [one, two] = await Promise.all([devices.code(), devices.code()]);
+    const paired = await Promise.all([devices.pair(one, "phone"), devices.pair(two, "tablet")]);
+    expect((await devices.list()).map((d) => d.name).toSorted()).toEqual(["phone", "tablet"]);
+    const seen = await Promise.all(paired.map((p) => devices.check(p?.token ?? "")));
+    expect(seen.map((d) => d?.name)).toEqual(["phone", "tablet"]);
+  });
 });

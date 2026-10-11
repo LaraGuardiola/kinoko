@@ -8,7 +8,7 @@
 import { basename } from "node:path";
 import type { AgentEvent } from "../loop.ts";
 import type { RpcCommand, RpcReply, RpcState } from "../rpc.ts";
-import type { Message } from "../types.ts";
+import type { Message, ToolCall } from "../types.ts";
 
 export interface AgentInfo {
   id: string;
@@ -30,6 +30,8 @@ export interface AgentInfo {
   ended?: "done" | "aborted" | "error" | "limit";
   /** The start of its last reply, one line: what a notification says. */
   last?: string;
+  /** A tool call waiting for the user's answer (approve), so every device knows, attached or not. */
+  approval?: { id: string; call: { id: string; name: string; args: Record<string, unknown> }; reason: string };
 }
 
 export interface Child {
@@ -102,6 +104,10 @@ export const spawnChild: Spawn = (cmd, cwd) => {
 export function gist(text: string): string {
   const flat = text.replace(/```[\s\S]*?```/g, " ").replace(/[#*_`>|]/g, "").replace(/\s+/g, " ").trim();
   return flat.length <= 160 ? flat : `${flat.slice(0, 159).trimEnd()}…`;
+}
+
+function plain(call: ToolCall): { id: string; name: string; args: Record<string, unknown> } {
+  return { id: call.id, name: call.name, args: call.args as Record<string, unknown> };
 }
 
 /** Events kept per agent for a late attach: the run in progress, never more than this. */
@@ -248,10 +254,13 @@ export class Agents {
     if (event.type === "run_end") {
       info.state = "idle";
       info.ended = event.reason;
+      info.approval = undefined;
     }
+    if (event.type === "approval_request") info.approval = { id: event.id, call: plain(event.call), reason: event.reason };
+    if (event.type === "approval_end" && info.approval?.id === event.id) info.approval = undefined;
     if (event.type === "message_end" && event.message.role === "assistant" && event.message.content.trim() !== "") info.last = gist(event.message.content);
     this.#onEvent(info.id, event);
-    if (event.type === "run_start" || event.type === "run_end") this.#onChange();
+    if (event.type === "run_start" || event.type === "run_end" || event.type === "approval_request" || event.type === "approval_end") this.#onChange();
   }
 
   /** One command to an agent; resolves with its first reply. */

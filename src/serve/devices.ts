@@ -41,6 +41,9 @@ function secret(): string {
 export class Devices {
   #file: string;
   #now: () => number;
+  // One read-change-write at a time in this process: two at once shared the temp file (ENOENT)
+  // and the later write dropped the earlier one's change (a device just paired, lost).
+  #turn: Promise<unknown> = Promise.resolve();
 
   constructor(file: string, now: () => number = Date.now) {
     this.#file = file;
@@ -56,6 +59,13 @@ export class Devices {
     }
   }
 
+  /** Runs `op` after the ones before it have finished. */
+  #serial<T>(op: () => Promise<T>): Promise<T> {
+    const run = this.#turn.then(op, op);
+    this.#turn = run.catch(() => undefined);
+    return run;
+  }
+
   async #save(store: Store): Promise<void> {
     // Written beside and renamed: a crash mid-write never leaves a broken file of tokens.
     const tmp = `${this.#file}.${process.pid}.tmp`;
@@ -65,39 +75,45 @@ export class Devices {
   }
 
   /** A new one-use pairing code, good for ten minutes. */
-  async code(): Promise<string> {
-    const store = await this.#load();
-    const code = secret();
-    store.pairing = [...store.pairing.filter((p) => p.expires > this.#now()), { hash: hash(code), expires: this.#now() + PAIRING_MS }];
-    await this.#save(store);
-    return code;
+  code(): Promise<string> {
+    return this.#serial(async () => {
+      const store = await this.#load();
+      const code = secret();
+      store.pairing = [...store.pairing.filter((p) => p.expires > this.#now()), { hash: hash(code), expires: this.#now() + PAIRING_MS }];
+      await this.#save(store);
+      return code;
+    });
   }
 
   /** Trades a pairing code for a device and its token; undefined when the code is wrong, used or old. */
-  async pair(code: string, name: string): Promise<{ device: Device; token: string } | undefined> {
-    const store = await this.#load();
-    const h = hash(code);
-    const match = store.pairing.find((p) => p.expires > this.#now() && same(p.hash, h));
-    if (match === undefined) return undefined;
-    const token = secret() + secret();
-    const device: Device = { id: crypto.randomUUID().slice(0, 8), name: name.trim().slice(0, 60) || "device", hash: hash(token), created: this.#now() };
-    store.pairing = store.pairing.filter((p) => p !== match && p.expires > this.#now());
-    store.devices.push(device);
-    await this.#save(store);
-    return { device, token };
+  pair(code: string, name: string): Promise<{ device: Device; token: string } | undefined> {
+    return this.#serial(async () => {
+      const store = await this.#load();
+      const h = hash(code);
+      const match = store.pairing.find((p) => p.expires > this.#now() && same(p.hash, h));
+      if (match === undefined) return undefined;
+      const token = secret() + secret();
+      const device: Device = { id: crypto.randomUUID().slice(0, 8), name: name.trim().slice(0, 60) || "device", hash: hash(token), created: this.#now() };
+      store.pairing = store.pairing.filter((p) => p !== match && p.expires > this.#now());
+      store.devices.push(device);
+      await this.#save(store);
+      return { device, token };
+    });
   }
 
   /** The device a token belongs to; its last-seen time is kept to the minute. */
   async check(token: string): Promise<Device | undefined> {
     if (token === "") return undefined;
-    const store = await this.#load();
-    const h = hash(token);
-    const device = store.devices.find((d) => same(d.hash, h));
-    if (device !== undefined && this.#now() - (device.seen ?? 0) > 60_000) {
-      device.seen = this.#now();
-      await this.#save(store);
-    }
-    return device;
+    return this.#serial(async () => {
+      const store = await this.#load();
+      const h = hash(token);
+      const device = store.devices.find((d) => same(d.hash, h));
+      if (device !== undefined && this.#now() - (device.seen ?? 0) > 60_000) {
+        device.seen = this.#now();
+        await this.#save(store);
+      }
+      return device;
+    });
   }
 
   async list(): Promise<Device[]> {
@@ -105,12 +121,14 @@ export class Devices {
   }
 
   /** Forgets a device by id or name; false when there is none. */
-  async revoke(which: string): Promise<boolean> {
-    const store = await this.#load();
-    const kept = store.devices.filter((d) => d.id !== which && d.name !== which);
-    if (kept.length === store.devices.length) return false;
-    store.devices = kept;
-    await this.#save(store);
-    return true;
+  revoke(which: string): Promise<boolean> {
+    return this.#serial(async () => {
+      const store = await this.#load();
+      const kept = store.devices.filter((d) => d.id !== which && d.name !== which);
+      if (kept.length === store.devices.length) return false;
+      store.devices = kept;
+      await this.#save(store);
+      return true;
+    });
   }
 }
