@@ -49,7 +49,7 @@ import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
 import { openIntegrations } from "./integrations-menu.ts";
-import type { IntegrationsHost } from "./integrations-menu.ts";
+import type { FilesState, IntegrationsHost } from "./integrations-menu.ts";
 import { hubRunning } from "../serve/link.ts";
 
 
@@ -94,7 +94,7 @@ export interface AppOptions {
   changes?: ChangesSource;
   /** /integrations: where integrations.json lives, Telegram's address and whether kinoko serve
    *  runs (tests pass fakes); unset: the user's home, the real Telegram, the hub's socket. */
-  integrations?: Partial<Pick<IntegrationsHost, "home" | "apiBase" | "hubRunning">>;
+  integrations?: Partial<Pick<IntegrationsHost, "home" | "apiBase" | "hubRunning" | "filesExtension">>;
 }
 
 /** What the models page needs from outside the TUI: other endpoints, and somewhere to save them. */
@@ -985,6 +985,29 @@ export class App {
         this.render();
       },
       hubRunning: this.#integrations?.hubRunning ?? (() => hubRunning(`${home}/.kinoko/serve.sock`)),
+      filesExtension: this.#integrations?.filesExtension ?? this.#telegramExtension(),
+    };
+  }
+
+  /** The telegram extension through the extensions catalog, as /extensions installs it. */
+  #telegramExtension(): IntegrationsHost["filesExtension"] {
+    const store = this.#catalogs.extensions;
+    if (store === undefined) return undefined;
+    const NAME = "telegram";
+    const state = async (): Promise<FilesState> => {
+      const entry = (await store.local()).find((e) => e.name === NAME);
+      return !entry?.installed ? "missing" : entry.enabled === false ? "off" : "on";
+    };
+    const apply = async (change: Change, done: Outcome): Promise<string> =>
+      done.ok && this.#apply ? `${done.note}: ${await this.#apply("extensions", NAME, change).catch((e: unknown) => `not applied: ${errorText(e)}`)}` : done.note;
+    return {
+      state,
+      turnOn: async () => {
+        const signal = AbortSignal.timeout(300_000);
+        if ((await state()) === "off") return apply("enable", await store.enable(NAME, true));
+        await store.list(signal); // the newest catalog: an old copy may not have it yet
+        return apply("install", await store.install(NAME, signal));
+      },
     };
   }
 
