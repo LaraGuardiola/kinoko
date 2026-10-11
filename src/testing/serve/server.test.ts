@@ -119,6 +119,11 @@ describe("serve: the hub", () => {
         if (e.type === "run_end") break;
       }
       expect(deltas.join("")).toBe("hola");
+      // The list says how the run ended and what it said: what the phone's notification shows.
+      let after = (await c.next("agents")) as { agents: Array<{ state: string; ended?: string; last?: string }> };
+      // oxlint-disable-next-line no-await-in-loop -- the list is pushed again until the run is over
+      while (after.agents[0]?.state !== "idle") after = (await c.next("agents")) as typeof after;
+      expect(after.agents[0]).toMatchObject({ ended: "done", last: "hola" });
 
       c.send({ id: "3", type: "attach", agent: id });
       const history = (await c.next("history")) as { messages: Array<{ role: string; images?: Array<{ mime: string; data: string; size: number }> }>; live: unknown[] };
