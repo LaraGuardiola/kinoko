@@ -120,6 +120,18 @@ export class Menu {
     if (this.#page === from) this.open(to);
   }
 
+  /** Like `refresh`, for a page redrawn after an action on it (a switch, an install): the same
+   *  item stays selected (by key or name), or the same place when it is gone. */
+  swap(from: MenuPage, to: MenuPage): void {
+    if (this.#page !== from) return;
+    const was = from.kind === "list" ? from.items[this.#index] : undefined;
+    const at = this.#index;
+    this.open(to);
+    if (to.kind !== "list" || to.items.length === 0) return;
+    const same = was === undefined ? -1 : to.items.findIndex((item) => (item.key ?? item.name) === (was.key ?? was.name) && !item.header);
+    this.#index = same >= 0 ? same : Math.min(at, to.items.length - 1);
+  }
+
   /** Esc: a page goes back to the root (true); at the root there is nothing to go back to (false). */
   back(): boolean {
     if (this.#page === undefined) return false;

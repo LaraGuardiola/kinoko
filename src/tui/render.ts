@@ -91,6 +91,10 @@ export class Renderer {
   /** The last rows printed above the region, as written (margin included): what a click lands on. */
   #printed: string[] = [];
   #lastSideErased = false;
+  /** Rows and history lines ever printed (absolute counts), and the blocks kept by key, to rewrite. */
+  #rowsOut = 0;
+  #linesOut = 0;
+  #blocks = new Map<string, { row: number; rows: number; line: number; lines: number }>();
 
   /** The screen row (1-based) the region starts on, once the terminal has said. */
   get top(): number | undefined {
@@ -155,14 +159,18 @@ export class Renderer {
    * where the region used to start (the terminal scrolls by itself when it reaches the bottom)
    * and the region is repainted below it. History is never rewritten, so it stays in scrollback.
    */
-  printAbove(text: string): void {
+  printAbove(text: string, key?: string): void {
     if (text === "") return;
     const lines = text.split("\n");
+    if (key !== undefined) this.#blocks.set(key, { row: this.#rowsOut, rows: 0, line: this.#linesOut, lines: lines.length });
+    this.#linesOut += lines.length;
     this.#history.push(...lines);
     if (this.#history.length > HISTORY) this.#history.splice(0, this.#history.length - HISTORY);
     const rows = lines.flatMap((line) => wrapAnsi(line, this.#textWidth()));
     const body = rows.map((line) => ` ${line}`).join("\r\n");
     this.#keepPrinted(rows);
+    const block = key === undefined ? undefined : this.#blocks.get(key);
+    if (block) block.rows = rows.length;
     // The side column goes first: the rows about to scroll into the scrollback leave it behind.
     const out = `${SYNC_START}${this.#eraseSide()}${this.#moveToTop()}${CLEAR_BELOW}${body}\r\n`;
     if (this.#top !== undefined) this.#top += rows.length;
@@ -173,6 +181,7 @@ export class Renderer {
 
   /** Wipes the screen and the terminal's scrollback (/clear): the region starts again on the top row. */
   clear(): void {
+    this.#blocks.clear();
     this.#history = [];
     this.#printed = [];
     this.#sideDrawn = undefined;
@@ -207,7 +216,45 @@ export class Renderer {
     return this.#printed.at(y - this.#top);
   }
 
+  /**
+   * Rewrites a block printed with `key` in place (the startup panel's capabilities), keeping its
+   * row count on screen: when the new text needs more rows, each line is cut instead. The history (what a redraw prints)
+   * follows; the screen only while the block is still on it. False when its first row is not on
+   * screen any more (scrolled into the scrollback, or wiped): the caller prints it anew.
+   */
+  rewrite(key: string, text: string): boolean {
+    const block = this.#blocks.get(key);
+    const lines = text.split("\n");
+    if (block === undefined) return false;
+    const first = this.#history.length - (this.#linesOut - block.line);
+    if (first >= 0) this.#history.splice(first, block.lines, ...lines);
+    // Its lines may be more or fewer now (wrapped at another width): the counts after it follow.
+    const delta = lines.length - block.lines;
+    this.#linesOut += delta;
+    for (const other of this.#blocks.values()) if (other.line > block.line) other.line += delta;
+    block.lines = lines.length;
+    const width = this.#textWidth();
+    let rows = lines.flatMap((line) => wrapAnsi(line, width));
+    if (rows.length > block.rows) rows = lines.map((line) => cut(line, width));
+    while (rows.length < block.rows) rows.push("");
+    rows = rows.slice(0, block.rows);
+    const at = this.#printed.length - (this.#rowsOut - block.row);
+    for (const [i, row] of rows.entries()) if (at + i >= 0 && at + i < this.#printed.length) this.#printed[at + i] = ` ${row}`;
+    if (this.#top === undefined) return false;
+    // Its first row's place on the screen: the region's top, less the rows printed since.
+    const screen = this.#top - (this.#rowsOut - block.row);
+    if (screen < 1) return false;
+    let out = "\x1b7"; // the cursor goes back where it was
+    for (const [i, row] of rows.entries()) {
+      const pad = Math.max(0, width - visibleLength(row));
+      out += `${ESC}${screen + i};1H${RESET} ${row}${RESET}${" ".repeat(pad)}`;
+    }
+    this.#write(`${SYNC_START}${out}\x1b8${SYNC_END}`);
+    return true;
+  }
+
   #keepPrinted(rows: string[]): void {
+    this.#rowsOut += rows.length;
     this.#printed.push(...rows.map((line) => ` ${line}`));
     if (this.#printed.length > 500) this.#printed.splice(0, this.#printed.length - 500);
   }
@@ -236,7 +283,20 @@ export class Renderer {
   #redraw(): void {
     this.#sideDrawn = undefined;
     const room = Math.max(0, this.#rows() - this.#state.lines.length);
-    const rows = this.#history.flatMap((line) => wrapAnsi(line, this.#textWidth())).slice(-room);
+    const wrapped = this.#history.map((line) => wrapAnsi(line, this.#textWidth()));
+    const all = wrapped.flat();
+    const rows = all.slice(-room);
+    // The kept blocks, rewrapped: where their rows are now (above the screen when cut off).
+    const count = (from: number, to: number): number => wrapped.slice(from, to).reduce((n, w) => n + w.length, 0);
+    for (const [key, block] of this.#blocks) {
+      const first = this.#history.length - (this.#linesOut - block.line);
+      if (first < 0) {
+        this.#blocks.delete(key);
+        continue;
+      }
+      block.row = this.#rowsOut + count(0, first) - (all.length - rows.length);
+      block.rows = count(first, first + block.lines);
+    }
     const body = rows.map((line) => ` ${line}\r\n`).join("");
     this.#printed = [];
     this.#keepPrinted(rows);
@@ -336,3 +396,9 @@ export const ansi = {
   inverse: `${ESC}7m`,
   clearScreen: `${ESC}2J${ESC}H`,
 };
+
+/** A styled line cut to `width` columns, an ellipsis at the end when it was longer. */
+function cut(line: string, width: number): string {
+  if (visibleLength(line) <= width) return line;
+  return `${wrapAnsi(line, Math.max(1, width - 1))[0] ?? ""}…`;
+}

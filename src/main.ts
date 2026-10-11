@@ -225,6 +225,8 @@ if (tui) {
     extensions: catalog({ kind: EXTENSIONS, home: process.env.HOME ?? "", repo: config.extensionsRepo }),
     skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
     apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
+    // What is on now, for the panel's [Capabilities] lines (skills read again: one may be new).
+    capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION }),
     newSession: async () => {
       // A new conversation: a new session file, the skills read again (installed ones join the
       // prompt), and no file counts as read until the model reads it in this conversation.
