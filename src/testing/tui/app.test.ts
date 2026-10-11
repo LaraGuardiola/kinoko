@@ -2,7 +2,9 @@ import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
 import { ANSI as STYLE } from "../../tui/style.ts";
-import type { ModelsHost } from "../../tui/app.ts";
+import type { AppOptions, ModelsHost } from "../../tui/app.ts";
+import { readIntegrations } from "../../integrations.ts";
+import { GOOD_TOKEN, fakeTelegram, said as tgSaid } from "../serve/fake-telegram.ts";
 import type { Catalog, Change, Entry } from "../../catalog.ts";
 import { EXTENSIONS } from "../../catalog.ts";
 import type { ChangesSource } from "../../tui/side.ts";
@@ -90,6 +92,7 @@ async function harness(
     changes?: ChangesSource;
     /** The loaded extensions (their tool_call hooks), not the /extensions catalog. */
     ext?: Extensions;
+    integrations?: AppOptions["integrations"];
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -136,6 +139,7 @@ async function harness(
     clipboard: opts.clipboard,
     changes: opts.changes ?? (async () => ({ files: [] })), // never the real git
     cwd: ROOT,
+    integrations: opts.integrations ?? { home: ROOT, hubRunning: async () => false },
   });
   return {
     app: app,
@@ -1451,5 +1455,87 @@ describe("approvals", () => {
     expect(h.app.approval).toBeUndefined();
     expect(h.app.marker).toBe("allowed from Telegram");
     await settle(h.agent);
+  });
+});
+
+/** Waits for `check`, repainting as the render timer would. */
+const until = async (h: Harness, check: () => boolean): Promise<void> => {
+  for (let i = 0; i < 150 && !check(); i++) {
+    // oxlint-disable-next-line no-await-in-loop -- polling is the point
+    await new Promise((r) => setTimeout(r, 10));
+    h.app.render();
+  }
+  expect(check()).toBe(true);
+};
+
+describe("/integrations: Telegram's setup", () => {
+
+  test("create the bot, a wrong token then the right one, pairing with the code, the options, disconnect", async () => {
+    const tg = fakeTelegram();
+    const home = `${ROOT}/integrations-home`;
+    try {
+      const h = await harness([], { integrations: { home, apiBase: tg.base, hubRunning: async () => true }, viewportRows: 40 });
+      h.press("/integrations\r");
+      await until(h, () => h.app.menuPage === "Integrations" && frame(h).join("\n").includes("Not set up"));
+      h.press("\r");
+      expect(h.app.menuPage).toBe("Telegram · 1/3 · create the bot");
+      h.press("\r");
+      expect(h.app.menuPage).toBe("Telegram · 2/3 · the token");
+      h.press("999:bad\r");
+      await until(h, () => h.screen().includes("not valid"));
+      expect(h.app.menuPage).toBe("Telegram · 2/3 · the token");
+      expect(h.screen()).not.toContain("999:bad"); // a secret page shows dots
+      h.press(`${GOOD_TOKEN}\r`);
+      await until(h, () => h.app.menuPage === "Telegram · 3/3 · pair your chat");
+      expect((await readIntegrations(home)).telegram).toMatchObject({ token: GOOD_TOKEN, bot: "kinoko_test_bot", on: true });
+      await new Promise((r) => setTimeout(r, 60)); // past the paint throttle
+      h.app.render();
+      const code = /\/start (\d{6})/.exec(frame(h).join("\n"))?.[1] ?? "";
+      expect(code).toMatch(/^\d{6}$/);
+      await new Promise((r) => setTimeout(r, 50)); // the wait has taken the updates already there
+      tg.push(tgSaid(`/start ${code}`, 4242));
+      await until(h, () => h.app.menuPage === "Telegram · @kinoko_test_bot · Lara");
+      expect((await readIntegrations(home)).telegram).toMatchObject({ chat: 4242, name: "Lara" });
+      expect(tg.calls.find((c) => c.method === "sendMessage")?.body).toMatchObject({ chat_id: 4242 });
+      expect(h.app.marker).toBe("Telegram: paired with Lara");
+
+      // Options: notify is the second item; Enter switches it off and the page stays.
+      h.press("\x1b[B\r");
+      await until(h, () => frame(h).join("\n").includes("notify"));
+      await until(h, () => h.app.menuPage !== undefined);
+      await new Promise((r) => setTimeout(r, 50));
+      expect((await readIntegrations(home)).telegram?.notify).toBe(false);
+      expect(h.app.menuPage).toBe("Telegram · @kinoko_test_bot · Lara");
+      // Disconnect: the last item, Del twice.
+      for (let i = 0; i < 4; i++) h.press("\x1b[B");
+      h.press("\x7f");
+      h.press("\x7f");
+      await until(h, () => h.app.menuPage === "Integrations");
+      expect((await readIntegrations(home)).telegram).toBeUndefined();
+    } finally {
+      tg.stop();
+    }
+  });
+
+  test("Esc on the pairing page stops the wait", async () => {
+    const tg = fakeTelegram();
+    const home = `${ROOT}/integrations-esc`;
+    try {
+      const h = await harness([], { integrations: { home, apiBase: tg.base, hubRunning: async () => false } });
+      h.press("/integrations\r");
+      await until(h, () => h.screen().includes("Not set up"));
+      h.press("\r\r");
+      h.press(`${GOOD_TOKEN}\r`);
+      await until(h, () => h.app.menuPage === "Telegram · 3/3 · pair your chat");
+      await new Promise((r) => setTimeout(r, 50));
+      const polls = (): number => tg.calls.filter((c) => c.method === "getUpdates").length;
+      h.press("\x1b");
+      expect(h.app.menuPage).toBeUndefined();
+      const after = polls();
+      await new Promise((r) => setTimeout(r, 400));
+      expect(polls()).toBe(after); // no more polling
+    } finally {
+      tg.stop();
+    }
   });
 });

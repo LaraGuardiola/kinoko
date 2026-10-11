@@ -40,6 +40,12 @@ export interface InfoPage {
   kind: "info";
   title: string;
   lines: string[];
+  /** Enter goes on to the next step (a setup's page), instead of back. */
+  next?: () => void;
+  /** The dim line at the bottom ("Esc to go back" when unset). */
+  hint?: string;
+  /** Runs when the page is left (Esc, another page, the menu closed): stops what it waits for. */
+  leave?: () => void;
 }
 
 /** One line of text to type in the menu (an endpoint, a key); Enter hands it over. */
@@ -98,6 +104,7 @@ export class Menu {
   }
 
   open(page: MenuPage): void {
+    this.#leave();
     this.#page = page;
     this.#text = "";
     this.#armed = undefined;
@@ -116,6 +123,7 @@ export class Menu {
   /** Esc: a page goes back to the root (true); at the root there is nothing to go back to (false). */
   back(): boolean {
     if (this.#page === undefined) return false;
+    this.#leave();
     this.#page = undefined;
     this.#index = 0;
     return true;
@@ -123,8 +131,14 @@ export class Menu {
 
   /** Back to a closed root, as after a pick. */
   close(): void {
+    this.#leave();
     this.#page = undefined;
     this.#index = 0;
+  }
+
+  #leave(): void {
+    const page = this.#page;
+    if (page?.kind === "info") page.leave?.();
   }
 
   /** Up/down through `count` items, wrapping at both ends and stepping over those `skip` names. */
@@ -199,5 +213,5 @@ export function pageRows(page: MenuPage, selected: number, text = "", armed?: st
       `  ${ANSI.dim}${page.hint}${ANSI.reset}`,
     ];
   }
-  return [`${ANSI.bold}${ORANGE}${page.title}${ANSI.reset}`, ...page.lines, `  ${ANSI.dim}Esc to go back${ANSI.reset}`];
+  return [`${ANSI.bold}${ORANGE}${page.title}${ANSI.reset}`, ...page.lines, `  ${ANSI.dim}${page.hint ?? "Esc to go back"}${ANSI.reset}`];
 }

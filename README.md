@@ -141,6 +141,14 @@ skills index in the system prompt stays as it was (so the engine keeps its cache
 start lists it there.
 `"skillsRepo"` points it at another repository.
 
+## Integrations
+
+`/` then **integrations** sets Telegram up step by step: create a bot with @BotFather, paste its
+token (checked with Telegram at once), then pair your chat by sending the bot a one-use code. The
+options switch the bot on or off, notifications when a run ends, prompts from the chat and approvals
+there. It is all kept in `~/.kinoko/integrations.json` (mode 600); `kinoko serve` runs the bot.
+Replies and prompts go through Telegram's servers.
+
 ## The side panel
 
 On a window two thirds of the screen wide or more, the screen splits in two columns: the transcript

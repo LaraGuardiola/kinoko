@@ -48,6 +48,9 @@ import { COPY, copyFor } from "./code.ts";
 import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
+import { openIntegrations } from "./integrations-menu.ts";
+import type { IntegrationsHost } from "./integrations-menu.ts";
+import { hubRunning } from "../serve/link.ts";
 
 
 
@@ -89,6 +92,9 @@ export interface AppOptions {
   cwd?: string;
   /** The side panel's changes (git by default). Tests pass a fake. */
   changes?: ChangesSource;
+  /** /integrations: where integrations.json lives, Telegram's address and whether kinoko serve
+   *  runs (tests pass fakes); unset: the user's home, the real Telegram, the hub's socket. */
+  integrations?: Partial<Pick<IntegrationsHost, "home" | "apiBase" | "hubRunning">>;
 }
 
 /** What the models page needs from outside the TUI: other endpoints, and somewhere to save them. */
@@ -136,6 +142,7 @@ export class App {
   #cwd: string;
   #files: FilePicker;
   #side: SidePanel;
+  #integrations: AppOptions["integrations"];
 
   #running = false;
   // The block being streamed (thinking or answer).
@@ -190,6 +197,7 @@ export class App {
     this.#cwd = opts.cwd ?? process.cwd();
     this.#files = new FilePicker(this.#cwd, () => this.render());
     this.#side = new SidePanel(this.#cwd, () => this.render(), opts.changes);
+    this.#integrations = opts.integrations;
     this.#agent.on((e) => this.#onAgentEvent(e));
     this.#refreshPlace();
   }
@@ -896,6 +904,8 @@ export class App {
         // A pick that opened another page (add model) keeps the menu, as does a page that stays
         // (switching things on and off); any other pick is done.
         if (this.#menu.page === page && !page.stay) this.#closeMenu();
+      } else if (page?.kind === "info" && page.next) {
+        page.next();
       } else if (page) {
         this.#menu.back();
       } else {
@@ -955,11 +965,35 @@ export class App {
     this.#editor.clear();
   }
 
+  #integrationsHost(): IntegrationsHost {
+    const home = this.#integrations?.home ?? process.env.HOME ?? "";
+    return {
+      home,
+      apiBase: this.#integrations?.apiBase,
+      open: (page) => {
+        this.#menu.open(page);
+        this.render();
+      },
+      swap: (from, to) => {
+        const at = this.#menu.index;
+        this.#menu.refresh(from, to);
+        if (this.#menu.page === to && to.kind === "list") this.#menu.select(Math.min(at, to.items.length - 1));
+        this.render();
+      },
+      note: (text) => {
+        this.#marker = this.#quiet = text;
+        this.render();
+      },
+      hubRunning: this.#integrations?.hubRunning ?? (() => hubRunning(`${home}/.kinoko/serve.sock`)),
+    };
+  }
+
   #openRoot(item: MenuItem): void {
     if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
     else if (item.name === "models") this.#openModels();
     else if (item.name === "extensions" || item.name === "skills") this.#openCatalog(item.name);
     else if (item.name === "session") this.#menu.open(this.#sessionPage());
+    else if (item.name === "integrations") openIntegrations(this.#integrationsHost());
     else if (item.name === "copy") this.#menu.open(copyPage(snippets(this.#agent.messages), (s) => this.#copy(s.code)));
     else {
       this.#closeMenu();
