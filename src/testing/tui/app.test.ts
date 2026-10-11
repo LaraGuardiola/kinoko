@@ -229,6 +229,17 @@ describe("TUI app with the agent", () => {
     expect(h.agent.messages.some((m) => m.content === "half an ans")).toBe(true);
   });
 
+  test("2b. a prompt that arrives from the phone (kinoko serve) is shown with a phone mark, and the run is the terminal's too", async () => {
+    const h = await harness([[{ type: "text", delta: "hola" }, { type: "done", stop: "end" }]], { pace: 40 });
+    const run = h.agent.prompt("desde el movil"); // what the link's rpc does
+    await new Promise((r) => setTimeout(r, 5));
+    expect(h.app.running).toBe(true); // Enter now steers, as for a run started here
+    await run;
+    await settle(h.agent);
+    expect(h.screen()).toContain("📱 desde el movil");
+    expect(h.app.running).toBe(false);
+  });
+
   test("3. Enter while running steers, and it is delivered after the tool batch", async () => {
     const h = await harness(
       [

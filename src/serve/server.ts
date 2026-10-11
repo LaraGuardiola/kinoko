@@ -2,12 +2,14 @@
 // protocol is in docs/protocol.md: pairing over HTTP, then one WebSocket per device carrying JSON
 // messages both ways: the agent list, agents started, attached to, prompted, aborted, stopped.
 
+import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
+import { dirname } from "node:path";
 import { stat } from "node:fs/promises";
 import type { Server, ServerWebSocket } from "bun";
 import type { AgentEvent } from "../loop.ts";
 import type { Image, Message } from "../types.ts";
-import { Agents } from "./agents.ts";
-import type { Spawn } from "./agents.ts";
+import { Agents, lineQueue } from "./agents.ts";
+import type { Child, Hello, Spawn } from "./agents.ts";
 import type { Device, Devices } from "./devices.ts";
 import { projects } from "./projects.ts";
 
@@ -25,6 +27,8 @@ export interface ServeOptions {
   command: string[];
   sessionsDir: string;
   version: string;
+  /** The Unix socket kinoko TUIs link themselves through (link.ts); none, no links. */
+  socket?: string;
   host?: string;
   spawn?: Spawn;
   log?: (line: string) => void;
@@ -99,8 +103,11 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
         const reply = await agents.send(agent, { type: msg.type, text: msg.text, images: msg.images });
         return reply.type === "ok" ? ok({ text: reply.text }) : fail(reply.detail ?? "refused");
       }
-      case "stop":
-        return agents.stop(agent) ? ok() : fail(`no agent ${agent}`);
+      case "stop": {
+        const result = agents.stop(agent);
+        if (result === "terminal") return fail("this agent runs in a terminal: it stops there");
+        return result === "stopped" ? ok() : fail(`no agent ${agent}`);
+      }
       default:
         return fail(`unknown message type: ${String(msg.type)}`);
     }
@@ -161,12 +168,99 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
     },
   });
 
+  // Terminals linking in are a bonus: a socket that cannot be opened (a path too long for one,
+  // a read-only home) leaves the phone side working, and says so.
+  let links: { stop: () => void } | undefined;
+  if (opts.socket !== undefined) {
+    try {
+      links = listenForTerminals(opts.socket, agents, log);
+    } catch (e) {
+      log(`terminals cannot link (${opts.socket}: ${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+
   return {
     server,
     agents,
     stop: () => {
       agents.stopAll();
+      links?.stop();
       void server.stop(true);
+    },
+  };
+}
+
+interface Link {
+  buffer: string;
+  queue: ReturnType<typeof lineQueue>;
+  closed: () => void;
+  linked: boolean;
+  child: Child;
+}
+
+/** The socket a kinoko TUI links itself through: its first line says who it is, the rest is rpc. */
+function listenForTerminals(path: string, agents: Agents, log: (line: string) => void): { stop: () => void } {
+  mkdirSync(dirname(path), { recursive: true }); // a first run: ~/.kinoko may not be there yet
+  try {
+    unlinkSync(path); // a socket left by a hub that died
+  } catch {
+    // none
+  }
+  const listener = Bun.listen<Link>({
+    unix: path,
+    socket: {
+      open(socket) {
+        const settle: { closed: () => void } = { closed: () => undefined };
+        const exited = new Promise<number>((resolve) => (settle.closed = () => resolve(0)));
+        const queue = lineQueue();
+        const child: Child = {
+          write: (line) => void socket.write(`${line}\n`),
+          lines: queue.lines,
+          errors: lineQueue().lines,
+          exited,
+          kill: () => socket.end(),
+        };
+        socket.data = { buffer: "", queue, closed: () => settle.closed(), linked: false, child };
+      },
+      data(socket, chunk) {
+        const link = socket.data;
+        link.buffer += chunk.toString();
+        let at = link.buffer.indexOf("\n");
+        while (at >= 0) {
+          const line = link.buffer.slice(0, at).trim();
+          link.buffer = link.buffer.slice(at + 1);
+          at = link.buffer.indexOf("\n");
+          if (line === "") continue;
+          if (link.linked) {
+            link.queue.push(line);
+            continue;
+          }
+          try {
+            const hello = JSON.parse(line) as Hello & { type?: string };
+            if (hello.type !== "hello" || typeof hello.cwd !== "string") throw new Error("no hello");
+            link.linked = true;
+            const info = agents.link(link.child, hello);
+            log(`a terminal linked: ${info.project} (${info.id})`);
+          } catch {
+            socket.end(); // not a kinoko
+          }
+        }
+      },
+      close(socket) {
+        socket.data.queue.end();
+        socket.data.closed();
+      },
+    },
+  });
+  chmodSync(path, 0o600); // only this user's processes may link
+  return {
+    stop: () => {
+      listener.stop(true);
+      try {
+        unlinkSync(path);
+      } catch {
+        // gone already
+      }
     },
   };
 }

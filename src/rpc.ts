@@ -35,9 +35,10 @@ export interface RpcState {
 
 export interface RpcDeps {
   agent: Agent;
-  model: string;
-  /** The session's id and the working directory, reported in get_state. */
-  session?: string;
+  /** The model, the session's id and the working directory, reported in get_state; functions for
+   *  a TUI whose model and session change while it is linked to `kinoko serve`. */
+  model: string | (() => string);
+  session?: string | (() => string);
   cwd?: string;
   /** Where replies and events go. Injectable so tests can read them without stdio. */
   write: (text: string) => void;
@@ -47,8 +48,9 @@ export interface RpcDeps {
 
 export class Rpc {
   #agent: Agent;
-  #model: string;
-  #session: string | undefined;
+  #model: string | (() => string);
+  #session: string | (() => string) | undefined;
+  #off: () => void;
   #cwd: string | undefined;
   #write: (text: string) => void;
   #onClose: (() => void) | undefined;
@@ -62,11 +64,17 @@ export class Rpc {
     this.#cwd = deps.cwd;
     this.#write = deps.write;
     this.#onClose = deps.onClose;
-    this.#agent.on((e) => this.#event(e));
+    this.#off = this.#agent.on((e) => this.#event(e));
   }
 
+  /** A run of this client's, or of anyone's (a TUI linked to kinoko serve runs its own). */
   get running(): boolean {
-    return this.#active !== undefined;
+    return this.#active !== undefined || this.#agent.state === "running";
+  }
+
+  /** Stops relaying the agent's events (the link to kinoko serve closed). */
+  dispose(): void {
+    this.#off();
   }
 
   get lastResult(): RunResult | undefined {
@@ -165,9 +173,9 @@ export class Rpc {
   #state(): RpcState {
     return {
       running: this.running,
-      model: this.#model,
+      model: typeof this.#model === "function" ? this.#model() : this.#model,
       messages: this.#agent.messages.length,
-      ...(this.#session ? { session: this.#session } : {}),
+      ...(this.#session ? { session: typeof this.#session === "function" ? this.#session() : this.#session } : {}),
       ...(this.#cwd ? { cwd: this.#cwd } : {}),
     };
   }

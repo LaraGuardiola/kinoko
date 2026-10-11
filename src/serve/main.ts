@@ -16,6 +16,8 @@ import { expose, tailnet, unexpose } from "./tailscale.ts";
 
 const HOME = join(process.env.HOME ?? homedir(), ".kinoko");
 const STATE = join(HOME, "serve-state.json");
+/** Where kinoko TUIs link themselves to the hub (link.ts). */
+export const SOCKET = join(HOME, "serve.sock");
 
 interface State {
   pid: number;
@@ -100,7 +102,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const publicPort = Number(flag(argv, "public-port") ?? 8443);
   const funnel = argv.includes("--funnel");
   const local = argv.includes("--local");
-  const hub = serve({ port, devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, log: (line) => out(dim(`${time()} ${line}`)) });
+  const hub = serve({ port, devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, log: (line) => out(dim(`${time()} ${line}`)) });
 
   let url = `http://127.0.0.1:${port}`;
   let shared = false;
