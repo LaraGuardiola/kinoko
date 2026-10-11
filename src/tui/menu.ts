@@ -44,6 +44,8 @@ export interface InfoPage {
   lines: string[];
   /** Enter goes on to the next step (a setup's page), instead of back. */
   next?: () => void;
+  /** Letters that do something here (R resumes a session), lower case. */
+  keys?: Record<string, () => void>;
   /** The dim line at the bottom ("Esc to go back" when unset). */
   hint?: string;
   /** Runs when the page is left (Esc, another page, the menu closed): stops what it waits for. */

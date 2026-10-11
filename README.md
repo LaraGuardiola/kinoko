@@ -184,6 +184,11 @@ including aborted ones. Sessions are kept per directory. When the TUI closes it 
 prefix of the id works too); the conversation is printed again and the model sees all of it.
 `--continue` (or `-c`) takes the directory's newest session. A session nothing was said in is not kept.
 
+`/sessions` lists this directory's sessions, the latest first, each with its first prompt and its
+tokens; the first row adds them all up. Enter on one shows its numbers (tokens sent, generated and
+cached, per reply, compactions, the tools it used and how they went); Enter again, one row per tool
+(calls, OK, errors, failed commands, success rate). R on a past session resumes it right there.
+
 Local engines reuse the prompt prefix between requests, and a change near the start costs a full
 re-read (about a minute per 30k tokens). So history is append-only and byte-stable: the system
 prompt and tool schemas never change mid-session, tool arguments serialize through one function,

@@ -21,7 +21,7 @@ import { replayBlocks } from "./replay.ts";
 import { answeredNote, approvalKey, approvalRows } from "./approval.ts";
 import type { ApprovalView } from "./approval.ts";
 import { MENU_ROWS, Menu, filterRoot, listRows, listWindow, pageRows } from "./menu.ts";
-import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
+import type { ListPage, MenuItem } from "./menu.ts";
 import { copyText } from "./clipboard.ts";
 import { ROOT, THINKING, catalogPage, copyPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
 import { snippets } from "./snippets.ts";
@@ -38,6 +38,8 @@ import type { BlockKind, OpenBlock, QueuedView, Region, ToolView } from "./view.
 import type { Agent, RunResult } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Session } from "../session.ts";
+import { sessionDir } from "../session.ts";
+import { dirname } from "node:path";
 import type { Image, Message } from "../types.ts";
 import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
@@ -49,6 +51,8 @@ import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
 import { openIntegrations } from "./integrations-menu.ts";
+import { openSessions } from "./sessions-menu.ts";
+import type { SessionsHost } from "./sessions-menu.ts";
 import { jobsLabel, openJobs } from "./jobs-view.ts";
 import { applyProfile, currentProfile, readProfiles } from "../profiles.ts";
 import type { Jobs } from "../jobs.ts";
@@ -90,6 +94,8 @@ export interface AppOptions {
   session?: Session;
   /** Called by /quit. The demo and the CLI pass the process exit. */
   onQuit?: () => void;
+  /** /sessions' R: that session loaded in place of this one, and the startup panel to print again. */
+  resumeSession?: (path: string) => Promise<{ session: Session; intro: string }>;
   /** /new: a new session for a new conversation, and the startup panel to print again. */
   newSession?: () => Promise<{ session: Session; intro: string }>;
   /** Rebuilds the agent after /fork moved the session head. */
@@ -144,6 +150,7 @@ export class App {
   #panel: { text: string; gap: boolean } | undefined;
   #panelStale = false; // changed while scrolled off screen: printed again when the menu closes
   #newSessionOf: AppOptions["newSession"];
+  #resumeOf: AppOptions["resumeSession"];
   #endpoint: string;
   #saved: SavedModel[];
   #viewportRows: number | undefined;
@@ -213,6 +220,7 @@ export class App {
     this.#jobs = opts.jobs;
     this.#jobs?.on(() => this.render()); // the label counts them
     this.#newSessionOf = opts.newSession;
+    this.#resumeOf = opts.resumeSession;
     this.#endpoint = opts.models?.endpoint ?? "";
     this.#saved = opts.models?.saved ?? [];
     this.#viewportRows = opts.viewportRows;
@@ -1003,6 +1011,8 @@ export class App {
         if (this.#menu.armed === item.key) page.remove(item);
         else this.#menu.arm(item.key);
       }
+    } else if (page?.kind === "info" && key.name === "char" && page.keys?.[key.char?.toLowerCase() ?? ""]) {
+      page.keys[key.char?.toLowerCase() ?? ""]?.();
     } else if (page?.kind === "list" && page.update && key.name === "char" && key.char?.toLowerCase() === "u") {
       const item = page.items[this.#menu.index];
       if (item !== undefined && !item.header) page.update(item);
@@ -1201,7 +1211,7 @@ export class App {
     if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
     else if (item.name === "models") this.#openModels();
     else if (item.name === "extensions" || item.name === "skills") this.#openCatalog(item.name);
-    else if (item.name === "session") this.#menu.open(this.#sessionPage());
+    else if (item.name === "sessions") openSessions(this.#sessionsHost());
     else if (item.name === "jobs") this.#openJobs();
     else if (item.name === "integrations") openIntegrations(this.#integrationsHost());
     else if (item.name === "profile") this.#openProfiles();
@@ -1534,11 +1544,27 @@ export class App {
       .finally(() => this.render());
   }
 
-  #sessionPage(): InfoPage {
+  #sessionsHost(): SessionsHost {
     const s = this.#session;
-    if (s === undefined) return { kind: "info", title: "Session", lines: ["  no session"] };
-    const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#tokens.context, window: this.#window };
-    return { kind: "info", title: "Session", lines: sessionLines(facts, this.#width) };
+    return {
+      dir: s ? dirname(s.path) : sessionDir(this.#cwd),
+      current: s ? { id: s.meta.id, context: this.#tokens.context, window: this.#window } : undefined,
+      resume: this.#resumeOf
+        ? (path) => {
+            this.#closeMenu();
+            void this.#resumeSession(path).then(() => this.render());
+          }
+        : undefined,
+      width: () => this.#width,
+      open: (page) => {
+        this.#menu.open(page);
+        this.render();
+      },
+      swap: (from, to) => {
+        this.#menu.swap(from, to);
+        this.render();
+      },
+    };
   }
 
   /** Moves the session head back one message; a fork is only ever a pointer move. */
@@ -1569,6 +1595,24 @@ export class App {
     this.#clearScreen();
     this.intro(intro);
     this.#marker = this.#quiet = "new session: the model starts with no history";
+  }
+
+  /** /sessions' R: that session's conversation, in place of this one (the model in use stays). */
+  async #resumeSession(path: string): Promise<void> {
+    if (this.#running) {
+      this.#marker = "a run is going: Esc it first, then resume";
+      return;
+    }
+    const { session, intro } = (await this.#resumeOf?.(path)) ?? {};
+    if (session === undefined || intro === undefined) return;
+    this.#session = session;
+    this.#tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
+    this.#cost = 0;
+    this.#queued = [];
+    this.#clearScreen();
+    this.intro(intro);
+    this.replay(this.#agent.messages, `resumed session ${session.meta.id}`);
+    this.#marker = this.#quiet = "resumed: the model has that conversation again";
   }
 
   async #forkHead(): Promise<string> {
