@@ -486,3 +486,34 @@ describe("restart (/new)", () => {
     expect(agent.messages.map((m) => m.content)).toEqual(["two", "ok"]); // no old note
   });
 });
+
+describe("steers", () => {
+  test("steers typed while the model answers all reach it together, in order, at its next step", async () => {
+    const seen: Message[][] = [];
+    let release: (() => void) | undefined;
+    const provider = {
+      stream: async function* (req: { messages: Message[] }): AsyncIterable<StreamEvent> {
+        seen.push([...req.messages]);
+        if (seen.length === 1) {
+          yield { type: "text", delta: "thinking about it" };
+          await new Promise<void>((r) => (release = r)); // still answering while the user types
+        } else yield { type: "text", delta: "got both" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [], maxTurns: 10, maxCost: 100 });
+    const delivered: string[] = [];
+    agent.on((e) => e.type === "delivered" && delivered.push(e.text));
+    const run = agent.prompt("start");
+    await new Promise((r) => setTimeout(r, 10));
+    agent.steer("use bun, not npm");
+    agent.steer("and keep it short", [{ mime: "image/png", data: "AAAA" }]);
+    release?.();
+    await run;
+    expect(seen.length).toBe(2); // one more request, not one per steer
+    const last = seen[1]!.at(-1)!;
+    expect(last).toMatchObject({ role: "user", content: "use bun, not npm\n\nand keep it short", images: [{ mime: "image/png", data: "AAAA" }] });
+    expect(delivered).toEqual(["use bun, not npm\n\nand keep it short"]);
+    expect(agent.messages.at(-1)?.content).toBe("got both");
+  });
+});

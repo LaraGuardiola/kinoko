@@ -12,7 +12,9 @@ group), ripgrep, and compaction.
    message with content "Aborted by user". Every tool call must end with exactly one result, so the
    transcript stays valid for providers. Running tools receive the aborted signal.
 4. STEER: steer(text) while running is queued and delivered as a user message AFTER the current tool
-   batch finishes and BEFORE the next model call. If the model was streaming a plain answer with no
+   batch finishes and BEFORE the next model call. Every steer waiting goes in that one message, in
+   the order typed (joined by a blank line, images kept): several typed during one reply all reach
+   the model at its next step. If the model was streaming a plain answer with no
    tools, it is delivered right after that message ends and the loop continues instead of stopping.
 5. FOLLOW-UP: followUp(text) is delivered ONLY when the agent would otherwise stop (no tool calls and
    an empty steer queue). Steer always has priority over follow-up. Each queue is FIFO.
