@@ -292,6 +292,22 @@ if (tui) {
     viewportCols: term.cols,
     place: () => placeLine(cwd),
     session: session,
+    // The user's shell on this terminal: kinoko lets go of it (raw mode, keys, mouse) and takes it
+    // back when the shell ends. A Ctrl-C meanwhile is the shell's (the App ignores the SIGINT).
+    handOver: async (command) => {
+      const size = `${term.cols}x${term.rows}`;
+      term.stop();
+      try {
+        const shell = process.env.SHELL || "/bin/sh";
+        const child = Bun.spawn(command ? [shell, "-c", command] : [shell], { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+        return await child.exited;
+      } finally {
+        term.start();
+        // Resized meanwhile: once the App is back, it hears the new size (only then: a resize
+        // redraws the screen from kinoko's history, and the shell's output is not in it).
+        if (`${term.cols}x${term.rows}` !== size) setTimeout(() => app.resize(term.cols, term.rows), 0);
+      }
+    },
     onQuit: () => {
       term.stop();
       process.stdout.write(farewell(session));

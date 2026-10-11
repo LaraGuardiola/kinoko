@@ -98,6 +98,7 @@ async function harness(
     integrations?: AppOptions["integrations"];
     capabilities?: AppOptions["capabilities"];
     jobs?: Jobs;
+    handOver?: AppOptions["handOver"];
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -147,6 +148,7 @@ async function harness(
     integrations: opts.integrations ?? { home: ROOT, hubRunning: async () => false },
     capabilities: opts.capabilities,
     jobs: opts.jobs,
+    handOver: opts.handOver,
   });
   return {
     app: app,
@@ -1655,6 +1657,66 @@ describe("the [Capabilities] lines follow /integrations", () => {
     const names = ROOT_MENU.map((item) => item.name);
     const at = names.indexOf("skills");
     expect(names.slice(at, at + 3)).toEqual(["skills", "extensions", "integrations"]);
+  });
+});
+
+/** A shell that runs until the test says how it ended. */
+function lent(): { handOver: (command: string) => Promise<number>; runs: string[]; end: (code: number) => void } {
+  const runs: string[] = [];
+  let finish: ((code: number) => void) | undefined;
+  return { runs, end: (code) => finish?.(code), handOver: (command) => (runs.push(command), new Promise((done) => (finish = done))) };
+}
+
+describe("the user's shell, lent the terminal", () => {
+  test("!command: echoed, run in the shell; meanwhile kinoko neither paints nor takes keys; back after", async () => {
+    const shell = lent();
+    const h = await harness([], { handOver: shell.handOver, viewportRows: 30 });
+    h.press("!sudo systemctl restart bluetooth\r");
+    await paced();
+    expect(shell.runs).toEqual(["sudo systemctl restart bluetooth"]);
+    expect(h.screen()).toContain("! sudo systemctl restart bluetooth");
+    h.out.length = 0;
+    h.press("typed into the shell");
+    h.app.render();
+    expect(h.out.join("")).toBe(""); // the screen and the keyboard are the shell's
+    shell.end(0);
+    await paced();
+    expect(h.out.join("")).toContain("\x1b[?1000h"); // clicks are kinoko's again
+    expect(h.app.editorText).toBe("");
+    h.press("hola");
+    expect(h.app.editorText).toBe("hola");
+  });
+
+  test("/shell: an interactive one; a non-zero exit is said; refused during a run", async () => {
+    const shell = lent();
+    const h = await harness([], { handOver: shell.handOver });
+    h.press("/shell\r");
+    await paced();
+    expect(shell.runs).toEqual([""]);
+    expect(h.screen()).toContain("your shell: exit (or Ctrl-D) comes back to kinoko");
+    shell.end(3);
+    await paced();
+    expect(h.app.marker).toBe("the shell exited with 3");
+
+    const busy = await harness([[{ type: "text", delta: "slow" }, { type: "text", delta: "er" }, { type: "done", stop: "end" }]], { handOver: shell.handOver, pace: 30 });
+    busy.press("go\r");
+    busy.press("!ls\r");
+    await new Promise((r) => setTimeout(r, 5));
+    expect(busy.app.marker).toBe("a run is going: Esc it first, then the shell");
+    expect(shell.runs).toEqual([""]);
+    await settle(busy.agent);
+  });
+
+  test("what is printed while the shell has the terminal waits, then shows", async () => {
+    const shell = lent();
+    const h = await harness([], { handOver: shell.handOver });
+    h.press("!make\r");
+    await paced();
+    await h.app.command("/model");
+    expect(h.screen()).not.toContain("model: ");
+    shell.end(0);
+    await paced();
+    expect(h.screen()).toContain("model: ");
   });
 });
 

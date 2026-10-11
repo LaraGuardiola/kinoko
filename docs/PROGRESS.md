@@ -766,3 +766,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 - The slash menu lists skills, extensions, integrations together and in that order, as the panel does (session, profile and jobs follow).
 - Tests: integrationsSummary's four cases; switching the bot off in /integrations rewrites the line (fails without the hook); the menu's order. Seen live in tmux with a sandbox HOME and a fake bot: off → on rewrote the line.
 - Not done: other integrations (only Telegram exists).
+
+## feat/tui-shell: the user's shell inside the TUI (branch feat/tui-shell)
+- `!command` (a line starting with `!`) runs it in `$SHELL -c` on this terminal, and `/shell` (menu item `shell`) opens an interactive shell until exit. kinoko lends the terminal: the region and side column are wiped (`Renderer.suspend`), `Term.stop` gives back cooked mode, keys and mouse, the shell runs with inherited stdio in kinoko's cwd, then `Term.start` and `Renderer.resume` paint the region below whatever the shell printed. sudo prompts work (a real tty); Ctrl-C reaches the shell, and the App ignores the SIGINT kinoko gets too.
+- While lent: the App neither paints nor takes keys; prints (a job's end, a capabilities refresh) wait and show after. Refused during a run (its output would land inside the shell's). A non-zero exit is said under the input.
+- The side column is drawn over the screen in absolute positions: after a shell it waits until kinoko has printed a screenful (or the screen was redrawn), so it never covers the shell's full-width lines. A resize is passed on only when the size really changed (a resize redraws from kinoko's history, which the shell's output is not in).
+- Seen live in tmux (sandbox HOME): a hidden `read -s` prompt took input, `/shell` with Ctrl-C on a sleep, `exit 3` said, typing after came back to the input, a long line stayed whole and the column came back after /help.
+- Tests: App (!command handed over, nothing painted and keys ignored meanwhile, mouse back; /shell, the exit code, refused during a run; held prints shown after), renderer (suspend/resume; the column waits for a screenful; fails without the guard).
+- Not done: the model cannot use this shell (on purpose: it is the user's); output of the shell is not in kinoko's history, so a resize after it redraws without it (it stays in the scrollback).

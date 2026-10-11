@@ -94,6 +94,9 @@ export class Renderer {
   #lastSideErased = false;
   /** Rows ever printed (an absolute count), and the pieces kept by key, to rewrite in place. */
   #rowsOut = 0;
+  /** After the user's shell: its output, full width, is on screen until kinoko has printed this
+   *  many rows (or redrawn the screen); the side column waits, not to be drawn over it. */
+  #foreignUntil = 0;
   #blocks = new Map<string, Printed>();
   /** The text width the screen was last drawn at: another one redraws it. */
   #paintedText: number | undefined;
@@ -194,6 +197,25 @@ export class Renderer {
     this.#write(`${SYNC_START}${RESET}${ESC}H${ESC}2J${ESC}3J${this.#paint()}${SYNC_END}`);
   }
 
+  /**
+   * Hands the screen over (to the user's shell): the region and the side column are wiped and the
+   * cursor is left where the region started. `resume()` paints it again wherever the cursor is then.
+   */
+  suspend(): void {
+    this.#write(`${SYNC_START}${this.#eraseSide()}${this.#moveToTop()}${CLEAR_BELOW}${SHOW_CURSOR}${SYNC_END}`);
+    this.#drawn = [];
+    this.#cursorRow = 0;
+    this.#top = undefined;
+  }
+
+  /** The screen is back: the region is painted on the cursor's row, and its place asked for. */
+  resume(): void {
+    this.#foreignUntil = this.#rowsOut + this.#rows();
+    this.#dirty = true;
+    this.flush();
+    this.requestPosition();
+  }
+
   /** Leaves the cursor on a fresh row under the region, e.g. before the process exits. */
   release(): void {
     const erase = this.#eraseSide();
@@ -292,6 +314,7 @@ export class Renderer {
    */
   #redraw(): void {
     this.#sideDrawn = undefined;
+    this.#foreignUntil = 0; // the screen is all kinoko's again
     const room = Math.max(0, this.#rows() - this.#state.lines.length);
     const width = this.#textWidth();
     // Each piece drawn again at this width when it can be (a reply rewraps, a band refills), else
@@ -356,7 +379,7 @@ export class Renderer {
     let out = lines.map((line) => ` ${line}`).join("\r\n");
     // A region that runs past the bottom scrolled the screen: it starts that much higher now.
     if (this.#top !== undefined) this.#top = Math.max(1, Math.min(this.#top, this.#rows() - lines.length + 1));
-    if (side !== undefined && this.#top !== undefined) {
+    if (side !== undefined && this.#top !== undefined && this.#rowsOut >= this.#foreignUntil) {
       const height = this.#top - 1 + side.upper;
       if (height > 0) {
         out += side.rows(height).map((r, i) => `${ESC}${i + 1};${side.col}H${r}`).join("");
