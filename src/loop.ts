@@ -74,6 +74,7 @@ export class Agent {
   #effort: ProviderRequest["effort"];
   #budget: number | undefined;
   #approvals: Approvals;
+  #background: ((command: string, cwd: string) => { id: number; pid: number; log: string }) | undefined;
 
   constructor(opts: {
     provider: Provider;
@@ -89,6 +90,7 @@ export class Agent {
     retries?: number; // a transient provider failure is retried this many times in a row (default 3)
     retryMs?: number; // the first wait; each next one doubles (default 2s: 2s, 4s, 8s)
     approvalTimeoutMs?: number; // an unanswered approval is a deny after this (default 10 min; 0: deny at once)
+    background?: (command: string, cwd: string) => { id: number; pid: number; log: string }; // bash background: true
   }) {
     this.#provider = opts.provider;
     this.#model = opts.model;
@@ -103,6 +105,7 @@ export class Agent {
     this.#retries = opts.retries ?? 3;
     this.#retryMs = opts.retryMs ?? 2000;
     this.#approvals = new Approvals(opts.approvalTimeoutMs ?? 600_000);
+    this.#background = opts.background;
     if (this.#session) this.#messages = [...this.#session.view()];
   }
 
@@ -496,7 +499,9 @@ export class Agent {
     const tool = this.#tools.find((t) => t.name === tc.name)!;
     this.#emit({ type: "tool_start", call: tc });
     const signal = this.#abortController!.signal;
-    const ctx: ToolContext = { signal: signal, cwd: process.cwd() };
+    const cwd = process.cwd();
+    const background = this.#background;
+    const ctx: ToolContext = { signal: signal, cwd, ...(background ? { background: (command: string) => background(command, cwd) } : {}) };
 
     // Extensions get the last word: they may rewrite args, or block the call outright.
     if (this.#ext) {

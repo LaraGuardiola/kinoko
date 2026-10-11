@@ -141,6 +141,20 @@ skills index in the system prompt stays as it was (so the engine keeps its cache
 start lists it there.
 `"skillsRepo"` points it at another repository.
 
+## Background jobs
+
+Ask for something long ("download this and then unpack it", "run the build and tell me how it
+went") and the model can start it with `bash` and `background: true`: the command runs on its own,
+in its own process group, and the model finishes its reply instead of waiting. When the job ends,
+the agent gets a message with its exit code and last lines and carries on by itself (woken when
+idle; mid-run, it hears it after its current step). With Telegram on, that run's end reaches your
+phone too.
+
+The rule above the input shows `⚙ 2 shells` while jobs run, left of the thinking level. Click it (or
+`/jobs`) for the list; Enter opens a job's window, its last lines in a frame that follows the
+output; Del twice stops a job. Esc never stops jobs (it stops the model); quitting kinoko does. All
+output is kept in `~/.kinoko/jobs/`.
+
 ## Integrations
 
 `/` then **integrations** sets Telegram up step by step: create a bot with @BotFather, paste its
