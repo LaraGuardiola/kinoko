@@ -44,6 +44,8 @@ const fakeSpawn: Spawn = (cmd, cwd): Child => {
       const c = JSON.parse(line) as { id: string; type: string; text?: string };
       if (c.type === "get_state") out.push(JSON.stringify({ type: "ok", id: c.id, state: { running: false, model: "qwen", messages: 0, session: "s-1", cwd } }));
       if (c.type === "get_messages") out.push(JSON.stringify({ type: "ok", id: c.id, messages }));
+      if (c.type === "get_commands") out.push(JSON.stringify({ type: "ok", id: c.id, commands: [{ name: "thinking", description: "d", kind: "list" }] }));
+      if (c.type === "command") out.push(JSON.stringify({ type: "ok", id: c.id, result: { text: `ran ${(c as { name?: string }).name} ${(c as { arg?: string }).arg}` } }));
       if (c.type === "prompt") {
         out.push(JSON.stringify({ type: "ok", id: c.id, text: "started" }));
         messages.push({ id: "u", role: "user", content: c.text, images: [{ mime: "image/png", data: "QUJDRA==" }] });
@@ -123,6 +125,11 @@ describe("serve: the hub", () => {
       expect(history.messages.map((m) => m.role)).toEqual(["user", "assistant"]);
       expect(history.messages[0]?.images).toEqual([{ mime: "image/png", data: "", size: 6 }]); // bytes stay home
       expect(history.live).toEqual([]);
+
+      c.send({ id: "c", type: "commands", agent: id });
+      expect(((await c.next("commands")) as { commands: Array<{ name: string }> }).commands.map((x) => x.name)).toEqual(["thinking"]);
+      c.send({ id: "r", type: "command", agent: id, name: "thinking", arg: "high" });
+      expect(await c.next("command_result")).toMatchObject({ id: "r", agent: id, result: { text: "ran thinking high" } });
 
       c.send({ id: "4", type: "stop", agent: id });
       await c.next("ok");

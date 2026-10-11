@@ -20,7 +20,9 @@ import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
 import { MENU_ROWS, Menu, filterRoot, listRows, listWindow, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
-import { ROOT, catalogPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { ROOT, THINKING, catalogPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import type { ThinkingProfile } from "./menu-pages.ts";
+import type { CommandHost } from "../commands.ts";
 import type { Catalog, Entry, Outcome, Change } from "../catalog.ts";
 import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
 import type { ModelChoice, ModelsView } from "./models-menu.ts";
@@ -37,7 +39,7 @@ import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
 import { compactingNote } from "./sprout.ts";
-import { ANSI } from "./style.ts";
+import { ANSI, stripAnsi } from "./style.ts";
 import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
@@ -917,13 +919,49 @@ export class App {
   }
 
   #thinkingPage(): ListPage {
-    return thinkingPage(this.#profile, (profile) => {
-      // Only an engine that takes a budget gets one; elsewhere the effort alone is the level.
-      this.#agent.setThinking(profile.effort, this.#budgets ? profile.budget : undefined);
-      this.#profile = profile.name;
-      this.#thinking = profileLabel(profile, this.#budgets);
-      this.#marker = `thinking: ${this.#thinking} from the next request`;
-    });
+    return thinkingPage(this.#profile, (profile) => this.#chooseThinking(profile));
+  }
+
+  #chooseThinking(profile: ThinkingProfile): string {
+    // Only an engine that takes a budget gets one; elsewhere the effort alone is the level.
+    this.#agent.setThinking(profile.effort, this.#budgets ? profile.budget : undefined);
+    this.#profile = profile.name;
+    this.#thinking = profileLabel(profile, this.#budgets);
+    this.#marker = `thinking: ${this.#thinking} from the next request`;
+    return this.#marker;
+  }
+
+  /** What the phone's slash commands act on (through kinoko serve): this TUI, so its screen follows. */
+  commandHost(): CommandHost {
+    return {
+      agent: this.#agent,
+      catalogs: this.#catalogs,
+      apply: this.#apply,
+      newSession: async () => {
+        await this.#newSession();
+        this.render();
+      },
+      thinking: {
+        current: () => this.#profile,
+        set: (name) => {
+          const profile = THINKING.find((p) => p.name === name);
+          if (profile === undefined) return `no thinking profile ${name}`;
+          const note = this.#chooseThinking(profile);
+          this.render();
+          return note;
+        },
+      },
+      session: () => {
+        const s = this.#session;
+        if (s === undefined) return "no session";
+        const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#tokens.context, window: this.#window };
+        return stripAnsi(sessionLines(facts, 60).join("\n"));
+      },
+      told: (note) => {
+        this.#marker = this.#quiet = note;
+        this.render();
+      },
+    };
   }
 
   #openModels(): void {

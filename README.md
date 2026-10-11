@@ -118,7 +118,7 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 The extensions live in their own repository,
 [kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, cliamp,
 github, herdr, mermaid, notify, permission-gate, plan-mode, vision, web. `/` then **extensions** lists them (the repository is fetched with
-git into `~/.kinoko/registry/extensions/`); Enter installs or updates one into `~/.kinoko/ext/<name>/`, running
+git into `~/.kinoko/registry/extensions/`); Enter installs one into `~/.kinoko/ext/<name>/`, running
 `bun install` there when it has dependencies; Del twice removes it. Both take effect at once: the
 extension is loaded (or taken back) while kinoko runs. One that adds or removes tools changes every
 request's opening bytes, so a local engine reads the whole prompt again once; the note says so.

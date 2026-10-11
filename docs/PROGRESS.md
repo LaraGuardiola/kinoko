@@ -584,3 +584,12 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Bugs found on the way: the socket's folder may not exist yet (a fresh HOME): EINVAL from listen, which also crashed the hub; now created first, and a failure is logged instead.
 - NOT done: approvals from the phone; push notifications; a systemd unit.
 - Tests: serve/link (a linked terminal listed with its title, history, a prompt from the phone runs in it, stop refused, gone when it closes; a hub that starts after the TUI is found), tui/app (a phone prompt shown with 📱, the run counted as the terminal's). `bun run check` passes.
+
+## feat/toggle-commands: switch extensions/skills on and off, the mouse in the menu, slash commands from the phone (branch feat/toggle-commands, on top of feat/link)
+- /extensions and /skills: Enter on an installed entry switches it off (○, `~/.kinoko/disabled.json`, unloaded or told to the model at once) or on again; Enter on one not installed installs it; U updates; Del twice removes; the page stays open. Loading and skills discovery skip disabled ones.
+- The menu takes the mouse while it is open (SGR mouse on, off when it closes, so selecting text works otherwise): a click picks, the wheel moves. Checked in tmux with real mouse sequences.
+- Phone prompts are no longer marked with 📱 in the TUI.
+- Slash commands for the phone (src/commands.ts): new, compact, thinking, extensions, skills, session, through rpc `get_commands`/`command`, relayed by the hub (`commands`/`command_result`); a linked TUI runs them through itself (its marker says what the phone changed). kinoko-android (feat/commands): typing "/" shows the commands above the input; list commands open a panel (tap: on/off/install or pick a profile; hold: update/remove).
+- Checked live (sandbox HOME, emulator, TUI in tmux): /extensions from the app switched check-early off and on in the TUI; /thinking high on a hub agent.
+- Incident: a bare `adb uninstall` meant for the emulator hit the user's phone while it was the only device; reinstalled and re-paired over USB. adb always takes -s now.
+- NOT done: highlighted code and mermaid in the app (next phase), models from the phone.

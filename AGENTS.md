@@ -54,5 +54,6 @@ src/context.ts     AGENTS.md / skills discovery      src/prompt.ts  system promp
 src/session.ts     append-only JSONL (id + parentId)  src/compact.ts threshold compaction
 src/ext.ts         extension loader + event bus       src/config.ts  layered config
 src/serve/         `kinoko serve`: hub for the phone app (agents as rpc children, devices, QR, Tailscale)
+src/commands.ts    slash commands for the phone (rpc)   src/disabled.ts extensions/skills switched off
 src/tui/           raw-ANSI renderer, editor, markdown-lite, slash menu, side panel (plan + git changes)
 src/testing/       the tests, same layout as src/ (src/testing/tui/app.test.ts tests src/tui/app.ts)

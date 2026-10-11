@@ -6,6 +6,7 @@
 
 import { stat } from "node:fs/promises";
 import type { Socket } from "bun";
+import type { CommandHost } from "../commands.ts";
 import type { Agent } from "../loop.ts";
 import { Rpc } from "../rpc.ts";
 
@@ -18,6 +19,8 @@ export interface LinkOptions {
   cwd: string;
   model: () => string;
   session: () => string;
+  /** The TUI's own command host: the phone's slash commands run through it. */
+  commands?: CommandHost;
 }
 
 /** Keeps the TUI linked to the hub while one runs. Returns a function that ends it. */
@@ -44,7 +47,7 @@ export function linkToHub(opts: LinkOptions): () => void {
         socket: {
           open(socket) {
             const write = (text: string): void => void socket.write(text);
-            rpc = new Rpc({ agent: opts.agent, model: opts.model, session: opts.session, cwd: opts.cwd, write });
+            rpc = new Rpc({ agent: opts.agent, model: opts.model, session: opts.session, cwd: opts.cwd, commands: opts.commands, write });
             write(`${JSON.stringify({ type: "hello", origin: "terminal", pid: process.pid, cwd: opts.cwd, model: opts.model(), session: opts.session(), running: opts.agent.state === "running" })}\n`);
           },
           data(_socket, chunk) {

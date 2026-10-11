@@ -1,0 +1,111 @@
+import { describe, expect, test } from "bun:test";
+import type { Catalog, Entry } from "../catalog.ts";
+import { EXTENSIONS } from "../catalog.ts";
+import { commandList, runCommand } from "../commands.ts";
+import type { CommandHost } from "../commands.ts";
+import { Agent } from "../loop.ts";
+import { Rpc } from "../rpc.ts";
+import type { RpcReply } from "../rpc.ts";
+
+const signal = new AbortController().signal;
+const agent = (): Agent => new Agent({ provider: { stream: async function* () {} } as never, model: "m", system: "", tools: [], maxTurns: 2, maxCost: 1 });
+
+function fakeCatalog(entries: Entry[], offline = false): { store: Catalog; log: string[] } {
+  const log: string[] = [];
+  const find = (name: string): Entry | undefined => entries.find((e) => e.name === name);
+  return {
+    log,
+    store: {
+      kind: EXTENSIONS,
+      repo: "r",
+      local: async () => entries.map((e) => ({ ...e })),
+      list: async () => (offline ? Promise.reject(new Error("could not fetch r: offline")) : entries.map((e) => ({ ...e }))),
+      install: async (name) => {
+        log.push(`install ${name}`);
+        Object.assign(find(name) ?? {}, { installed: true, enabled: true });
+        return { ok: true, note: `${name} installed` };
+      },
+      remove: async (name) => {
+        log.push(`remove ${name}`);
+        Object.assign(find(name) ?? {}, { installed: false });
+        return { ok: true, note: `${name} removed` };
+      },
+      enable: async (name, on) => {
+        log.push(`${on ? "on" : "off"} ${name}`);
+        Object.assign(find(name) ?? {}, { enabled: on });
+        return { ok: true, note: `${name} ${on ? "on" : "off"}` };
+      },
+    },
+  };
+}
+
+describe("slash commands for the phone", () => {
+  test("only those the host can do are listed", () => {
+    expect(commandList({ agent: agent() }).map((c) => c.name)).toEqual(["compact"]);
+    const full: CommandHost = { agent: agent(), newSession: async () => undefined, thinking: { current: () => "low", set: () => "" }, catalogs: { extensions: fakeCatalog([]).store }, session: () => "" };
+    expect(commandList(full).map((c) => [c.name, c.kind])).toEqual([["new", "run"], ["compact", "run"], ["thinking", "list"], ["extensions", "list"], ["session", "run"]]);
+  });
+
+  test("thinking: the profiles with the one in use; choosing one says so, and the terminal hears it", async () => {
+    let current = "low";
+    const told: string[] = [];
+    const host: CommandHost = { agent: agent(), thinking: { current: () => current, set: (n) => ((current = n), `thinking: ${n}`) }, told: (n) => told.push(n) };
+    expect((await runCommand(host, "thinking", "", signal)).items?.find((i) => i.current)?.name).toBe("low");
+    const chosen = await runCommand(host, "thinking", "high", signal);
+    expect(chosen.text).toBe("thinking: high");
+    expect(chosen.items?.find((i) => i.current)?.name).toBe("high");
+    expect(told).toEqual(["thinking: high"]);
+  });
+
+  test("extensions: listed with their state; switched off and on, removed, installed, each applied", async () => {
+    const { store, log } = fakeCatalog([
+      { name: "web", description: "web tools", installed: true, enabled: true },
+      { name: "mermaid", description: "diagrams", installed: false },
+    ]);
+    const applied: string[] = [];
+    const host: CommandHost = { agent: agent(), catalogs: { extensions: store }, apply: async (_k, name, change) => (applied.push(`${change} ${name}`), "done") };
+    const listed = await runCommand(host, "extensions", "", signal);
+    expect(listed.items).toEqual([
+      { name: "web", description: "web tools", installed: true, current: true, off: false, shared: false },
+      { name: "mermaid", description: "diagrams", installed: false, current: false, off: false, shared: false },
+    ]);
+    const off = await runCommand(host, "extensions", "off web", signal);
+    expect(off.text).toBe("web off: done");
+    expect(off.items?.[0]).toMatchObject({ current: false, off: true });
+    await runCommand(host, "extensions", "on web", signal);
+    await runCommand(host, "extensions", "install mermaid", signal);
+    await runCommand(host, "extensions", "remove web", signal);
+    expect(log).toEqual(["off web", "on web", "install mermaid", "remove web"]);
+    expect(applied).toEqual(["disable web", "enable web", "install mermaid", "remove web"]);
+  });
+
+  test("offline: the list on this computer, and why", async () => {
+    const host: CommandHost = { agent: agent(), catalogs: { skills: fakeCatalog([{ name: "x", description: "", installed: true, enabled: true }], true).store } };
+    const result = await runCommand(host, "skills", "", signal);
+    expect(result.items?.map((i) => i.name)).toEqual(["x"]);
+    expect(result.hint).toBe("could not fetch r: offline · showing what is on this computer");
+  });
+
+  test("new resets the conversation; unknown commands say so", async () => {
+    let fresh = false;
+    const host: CommandHost = { agent: agent(), newSession: async () => void (fresh = true) };
+    expect(await runCommand(host, "new", "", signal)).toEqual({ text: "new session: the model starts with no history", reset: true });
+    expect(fresh).toBe(true);
+    expect((await runCommand(host, "dance", "", signal)).text).toBe("no command /dance here");
+    expect((await runCommand(host, "compact", "", signal)).text).toBe("nothing to compact yet");
+  });
+
+  test("through the rpc mode: get_commands and command", async () => {
+    const lines: RpcReply[] = [];
+    let current = "low";
+    const rpc = new Rpc({ agent: agent(), model: "m", commands: { agent: agent(), thinking: { current: () => current, set: (n) => ((current = n), `thinking: ${n}`) } }, write: (t) => lines.push(JSON.parse(t) as RpcReply) });
+    rpc.handle(JSON.stringify({ type: "get_commands", id: "c" }));
+    expect(lines[0]?.commands?.map((c) => c.name)).toEqual(["compact", "thinking"]);
+    rpc.handle(JSON.stringify({ type: "command", id: "t", name: "thinking", arg: "medium" }));
+    await new Promise((r) => setTimeout(r, 10));
+    expect(lines[1]).toMatchObject({ type: "ok", id: "t", result: { text: "thinking: medium" } });
+    const bare = new Rpc({ agent: agent(), model: "m", write: (t) => lines.push(JSON.parse(t) as RpcReply) });
+    bare.handle(JSON.stringify({ type: "command", id: "x", name: "new" }));
+    expect(lines.at(-1)).toEqual({ type: "error", id: "x", detail: "no commands here" });
+  });
+});

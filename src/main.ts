@@ -14,6 +14,7 @@ import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
 import type { Change } from "./catalog.ts";
 import { App } from "./tui/app.ts";
 import { THINKING } from "./tui/menu-pages.ts";
+import type { CommandHost } from "./commands.ts";
 import { setFenceRenderers } from "./tui/markdown.ts";
 import { Term } from "./tui/term.ts";
 import { placeLine } from "./tui/place.ts";
@@ -258,17 +259,47 @@ if (tui) {
   // While `kinoko serve` runs, this terminal shows up in the phone app (KINOKO_LINK=0: it does not).
   if (process.env.KINOKO_LINK !== "0") {
     const { linkToHub } = await import("./serve/link.ts");
-    linkToHub({ agent, socket: join(process.env.HOME ?? "", ".kinoko", "serve.sock"), cwd, model: () => agent.model, session: () => session.meta.id });
+    linkToHub({ agent, socket: join(process.env.HOME ?? "", ".kinoko", "serve.sock"), cwd, model: () => agent.model, session: () => session.meta.id, commands: app.commandHost() });
   }
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
   clearInterval(loop);
 } else if (mode === "rpc") {
+  // The phone's slash commands, for an agent kinoko serve started: the same as the TUI's menu.
+  let profile = THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name;
+  const commands: CommandHost = {
+    agent,
+    catalogs: {
+      extensions: catalog({ kind: EXTENSIONS, home: process.env.HOME ?? "", repo: config.extensionsRepo }),
+      skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
+    },
+    apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
+    newSession: async () => {
+      const last = session;
+      session = await Session.create({ cwd, model: agent.model });
+      skills = await discoverSkills(cwd);
+      tracker.reset();
+      agent.restart(session);
+      if (last.empty) await rm(last.path, { force: true });
+    },
+    thinking: {
+      current: () => profile,
+      set: (name) => {
+        const chosen = THINKING.find((p) => p.name === name);
+        if (chosen === undefined) return `no thinking profile ${name}`;
+        agent.setThinking(chosen.effort, config.thinkingBudget !== undefined ? chosen.budget : undefined);
+        profile = chosen.name;
+        return `thinking: ${chosen.name} from the next request`;
+      },
+    },
+    session: () => `id ${session.meta.id}\nmessages ${agent.messages.length}\nmodel ${agent.model}`,
+  };
   const rpc = new Rpc({
     agent: agent,
-    model: start.model,
-    session: session.meta.id,
+    model: () => agent.model,
+    session: () => session.meta.id,
     cwd: cwd,
+    commands,
     write: (text) => process.stdout.write(text),
     // stdin closed: the client is gone, so the run and the process end here.
     onClose: () => {

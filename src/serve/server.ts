@@ -48,6 +48,8 @@ type Incoming = {
   model?: string;
   text?: string;
   images?: Image[];
+  name?: string;
+  arg?: string;
 };
 
 export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Agents; stop: () => void } {
@@ -102,6 +104,14 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
       case "abort": {
         const reply = await agents.send(agent, { type: msg.type, text: msg.text, images: msg.images });
         return reply.type === "ok" ? ok({ text: reply.text }) : fail(reply.detail ?? "refused");
+      }
+      case "commands": {
+        const reply = await agents.send(agent, { type: "get_commands" });
+        return reply.type === "ok" ? send(ws, { type: "commands", id: msg.id, agent, commands: reply.commands ?? [] }) : fail(reply.detail ?? "refused");
+      }
+      case "command": {
+        const reply = await agents.send(agent, { type: "command", name: msg.name, arg: msg.arg });
+        return reply.type === "ok" ? send(ws, { type: "command_result", id: msg.id, agent, result: reply.result ?? {} }) : fail(reply.detail ?? "refused");
       }
       case "stop": {
         const result = agents.stop(agent);
