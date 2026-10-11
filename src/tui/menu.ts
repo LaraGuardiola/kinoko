@@ -175,9 +175,10 @@ export function listRows(items: MenuItem[], selected: number, title?: string, em
     const chosen = start + i === selected;
     const name = `${chosen ? ANSI.bold : ""}${ORANGE}${item.name.padEnd(width)}${ANSI.reset}`;
     const mark = item.current ? `${ORANGE}● ${ANSI.reset}` : item.off ? `${ANSI.dim}○ ${ANSI.reset}` : "";
+    // The selected row stands out: its name bold, its description in full colour, not dimmed.
     const about = item.key !== undefined && item.key === armed
       ? `${ANSI.amanita}Del again to remove${ANSI.reset}`
-      : `${ANSI.dim}${item.description}${ANSI.reset}`;
+      : chosen ? `${ANSI.cream}${item.description}${ANSI.reset}` : `${ANSI.dim}${item.description}${ANSI.reset}`;
     rows.push(`${chosen ? `${ORANGE}→${ANSI.reset} ` : "  "}${name}${mark}${about}`);
   }
   // Headers are not counted: "(2/3)" is the second of three things to pick.

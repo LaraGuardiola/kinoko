@@ -1295,15 +1295,15 @@ describe("the mouse in the menu", () => {
   test("it is the menu's only while the menu is open; the wheel moves the selection", async () => {
     const h = await harness([], { viewportRows: 30 });
     h.app.render();
-    expect(h.out.join("")).not.toContain("\x1b[?1000h");
+    expect(h.out.join("")).not.toContain("\x1b[?1003h");
     h.press("/");
-    expect(h.out.join("")).toContain("\x1b[?1000h\x1b[?1006h");
+    expect(h.out.join("")).toContain("\x1b[?1003h\x1b[?1006h");
     h.app.handleKey({ name: "mouse", mouse: { x: 1, y: 1, button: 0, press: true, wheel: "down" } });
     await paced();
     h.app.render();
     expect(h.screen()).toContain("→ models");
     h.press("\x1b"); // closed: the terminal gets its mouse back
-    expect(h.out.join("")).toContain("\x1b[?1000l\x1b[?1006l");
+    expect(h.out.join("")).toContain("\x1b[?1003l\x1b[?1006l");
   });
 });
 

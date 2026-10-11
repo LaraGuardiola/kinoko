@@ -27,6 +27,7 @@ describe("tui key parser", () => {
       { name: "mouse", mouse: { x: 12, y: 30, button: 0, press: false } },
     ]);
     expect(parse("\x1b[<64;1;2M", "\x1b[<65;1;2M").map((k) => k.mouse?.wheel)).toEqual(["up", "down"]);
+    expect(parse("\x1b[<35;7;9M")).toEqual([{ name: "mouse", mouse: { x: 7, y: 9, button: 3, press: false, move: true } }]); // a hover
   });
 
   test("2. control keys", () => {

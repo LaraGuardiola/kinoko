@@ -204,7 +204,8 @@ export class App {
     const menuOpen = this.#menu.page !== undefined || (this.#rootItems()?.length ?? 0) > 0;
     if (menuOpen !== this.#mouse) {
       this.#mouse = menuOpen;
-      this.#write(menuOpen ? "\x1b[?1000h\x1b[?1006h" : "\x1b[?1000l\x1b[?1006l");
+      // 1003: every motion too, so hovering an item selects it.
+      this.#write(menuOpen ? "\x1b[?1003h\x1b[?1006h" : "\x1b[?1003l\x1b[?1006l");
     }
   }
 
@@ -886,20 +887,35 @@ export class App {
       this.#menuKey({ name: m.wheel === "up" ? "up" : "down" });
       return;
     }
+    const index = this.#menuItemAt(m.y);
+    if (index === undefined) return;
+    // Hovering an item selects it (bold, its arrow); a click picks it, as Enter would.
+    if (m.move) {
+      if (index !== this.#menu.index) {
+        this.#menu.select(index);
+        this.render();
+      }
+      return;
+    }
     if (!m.press || m.button !== 0) return;
+    this.#menu.select(index);
+    this.#menuKey({ name: "enter" });
+  }
+
+  /** The menu item on screen row `y`, if there is one. */
+  #menuItemAt(y: number): number | undefined {
     const top = this.#renderer.top;
     const page = this.#menu.page;
     const items = page?.kind === "list" ? page.items : page === undefined ? (this.#rootItems() ?? []) : undefined;
-    if (top === undefined || items === undefined) return;
+    if (top === undefined || items === undefined) return undefined;
     // The menu sits at the region's foot: its rows, then the place line (if any), then the status.
     const rows = this.#state().lines.length;
     const menu = this.#menuRows().length;
     const end = top + rows - 1 - 1 - (this.#place ? 1 : 0);
-    const row = m.y - (end - menu + 1) - (page === undefined ? 0 : 1); // a page's first row is its title
+    const row = y - (end - menu + 1) - (page === undefined ? 0 : 1); // a page's first row is its title
     const index = listWindow(items.length, this.#menu.index) + row;
-    if (row < 0 || row >= Math.min(items.length, MENU_ROWS) || items[index] === undefined || items[index]?.header) return;
-    this.#menu.select(index);
-    this.#menuKey({ name: "enter" });
+    if (row < 0 || row >= Math.min(items.length, MENU_ROWS) || items[index] === undefined || items[index]?.header) return undefined;
+    return index;
   }
 
   #closeMenu(): void {
