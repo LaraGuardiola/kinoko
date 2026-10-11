@@ -395,7 +395,7 @@ export class Agent {
 
       if (toolCalls.length > 0) this.#nudges = 0;
       if (toolCalls.length === 0) {
-        const steer = this.#steerQueue.shift();
+        const steer = this.#takeSteers();
         if (steer !== undefined) {
           await this.#deliver(steer);
           continue;
@@ -455,12 +455,24 @@ export class Agent {
       }
       if (stuck >= STOP_CALLS) return { reason: "limit", detail: `stuck: the same call returned the same result ${stuck} times` };
 
-      const steerAfter = this.#steerQueue.shift();
+      const steerAfter = this.#takeSteers();
       if (steerAfter !== undefined) {
         await this.#deliver(steerAfter);
         continue;
       }
     }
+  }
+
+  /**
+   * Every steer waiting, as one message in the order they were typed: several typed while the
+   * model was still answering all reach it at its next step (one at a time, each waited for a whole
+   * reply). Follow-ups stay one at a time: each is a task for after.
+   */
+  #takeSteers(): Queued | undefined {
+    const all = this.#steerQueue.splice(0);
+    if (all.length <= 1) return all[0];
+    const images = all.flatMap((q) => q.images ?? []);
+    return { text: all.map((q) => q.text).join("\n\n"), ...(images.length > 0 ? { images } : {}) };
   }
 
   /** A queued message leaves the queue and becomes the next user message, in that order. */
