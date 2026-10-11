@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { discoverSkills } from "../context.ts";
 import { EXTENSIONS, SKILLS, catalog, spawnRun } from "../catalog.ts";
 import type { Run } from "../catalog.ts";
 
@@ -52,8 +53,8 @@ describe("the extensions catalog", () => {
 
   test("lists the repository's folders with an index.ts, with their descriptions", async () => {
     expect(await store.list(signal)).toEqual([
-      { name: "alpha", description: "The first one", installed: false },
-      { name: "beta", description: "Needs a library", installed: false },
+      { name: "alpha", description: "The first one", installed: false, enabled: false },
+      { name: "beta", description: "Needs a library", installed: false, enabled: false },
     ]);
     expect(existsSync(join(HOME, ".kinoko", "registry", "extensions", ".git"))).toBe(true);
   });
@@ -100,11 +101,11 @@ describe("the extensions catalog", () => {
     const offline = catalog({ kind: EXTENSIONS, home: HOME, repo: REPO, run: async () => ({ code: 128, out: "fatal: unable to access" }) });
     await expect(offline.list(signal)).rejects.toThrow(/^could not update .*: fatal: unable to access$/);
     expect(await offline.local()).toEqual([
-      { name: "alpha", description: "The first one", installed: false },
-      { name: "beta", description: "Needs a library", installed: true },
-      { name: "gamma", description: "", installed: false },
-      { name: "mine", description: "installed, not in the repository", installed: true },
-      { name: "solo", description: "installed, not in the repository", installed: true },
+      { name: "alpha", description: "The first one", installed: false, enabled: false },
+      { name: "beta", description: "Needs a library", installed: true, enabled: true },
+      { name: "gamma", description: "", installed: false, enabled: false },
+      { name: "mine", description: "installed, not in the repository", installed: true, enabled: true },
+      { name: "solo", description: "installed, not in the repository", installed: true, enabled: true },
     ]);
     expect(await offline.remove("solo")).toEqual({ ok: true, note: "solo removed" });
   });
@@ -137,7 +138,7 @@ describe("the skills catalog", () => {
     await spawnRun(["git", "init", "--quiet", SKILL_REPO], ROOT, signal);
     await spawnRun(["git", "-C", SKILL_REPO, "add", "-A"], ROOT, signal);
     await spawnRun(["git", "-C", SKILL_REPO, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--quiet", "-m", "s"], ROOT, signal);
-    expect(await skills.list(signal)).toEqual([{ name: "write-ext", description: "Write an extension for kinoko.", installed: false }]);
+    expect(await skills.list(signal)).toEqual([{ name: "write-ext", description: "Write an extension for kinoko.", installed: false, enabled: false }]);
     expect(await skills.install("write-ext", signal)).toEqual({ ok: true, note: "write-ext installed" });
     expect(existsSync(join(home, ".kinoko", "skills", "write-ext", "SKILL.md"))).toBe(true);
     expect(await skills.install("half", signal)).toEqual({ ok: false, note: `no skill called half in ${SKILL_REPO}` });
@@ -154,12 +155,20 @@ describe("the skills catalog", () => {
     mkdirSync(join(home, ".agents", "skills", "write-ext"), { recursive: true }); // same name as an installed one: listed once
     writeFileSync(join(home, ".agents", "skills", "write-ext", "SKILL.md"), "---\nname: write-ext\ndescription: x\n---\n");
     expect(await skills.local()).toEqual([
-      { name: "linked", description: "through a link", installed: true, shared: true },
-      { name: "omarchy", description: "Omarchy config", installed: true, shared: true },
-      { name: "write-ext", description: "Write an extension for kinoko.", installed: true },
+      { name: "linked", description: "through a link", installed: true, shared: true, enabled: true },
+      { name: "omarchy", description: "Omarchy config", installed: true, shared: true, enabled: true },
+      { name: "write-ext", description: "Write an extension for kinoko.", installed: true, enabled: true },
     ]);
     expect(await skills.install("omarchy", signal)).toEqual({ ok: false, note: "omarchy lives in ~/.agents/skills, shared with other agents: kinoko leaves it alone" });
     expect(await skills.remove("omarchy")).toEqual({ ok: false, note: "omarchy is not installed" });
     expect(existsSync(join(home, ".agents", "skills", "omarchy", "SKILL.md"))).toBe(true);
+
+    // Switched off and on again: still installed, kinoko skips it while off, the shared folder untouched.
+    expect(await skills.enable("omarchy", false)).toEqual({ ok: true, note: "omarchy off" });
+    expect((await skills.local()).find((e) => e.name === "omarchy")?.enabled).toBe(false);
+    expect((await discoverSkills(home, home)).map((s) => s.name)).not.toContain("omarchy");
+    expect(await skills.enable("omarchy", true)).toEqual({ ok: true, note: "omarchy on" });
+    expect((await discoverSkills(home, home)).map((s) => s.name)).toContain("omarchy");
+    expect(await skills.enable("nope", false)).toEqual({ ok: false, note: "nope is not installed" });
   });
 });

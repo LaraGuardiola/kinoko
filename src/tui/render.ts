@@ -90,6 +90,11 @@ export class Renderer {
   #history: string[] = [];
   #lastSideErased = false;
 
+  /** The screen row (1-based) the region starts on, once the terminal has said. */
+  get top(): number | undefined {
+    return this.#top;
+  }
+
   constructor(opts: RendererOptions) {
     this.#write = opts.write;
     this.#minInterval = opts.minIntervalMs ?? DEFAULT_INTERVAL;

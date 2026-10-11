@@ -128,6 +128,11 @@ export function wrapWords(line: string, max: number, indent = ""): string[] {
 
 const SGR = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 
+/** The text without its colours: for a client that draws its own (the phone). */
+export function stripAnsi(text: string): string {
+  return text.replace(SGR, "");
+}
+
 /** Terminal columns a styled row takes. */
 export function visibleLength(line: string): number {
   let visible = 0;

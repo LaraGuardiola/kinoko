@@ -7,6 +7,8 @@
 import { cp, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { frontmatter } from "./context.ts";
+import { readDisabled, setDisabled } from "./disabled.ts";
+import type { Toggleable } from "./disabled.ts";
 
 /** What sets one catalog apart from another. */
 export interface Kind {
@@ -53,6 +55,8 @@ export interface Entry {
   name: string;
   description: string;
   installed: boolean;
+  /** Installed and not switched off (disabled.json): kinoko loads it. */
+  enabled?: boolean;
   /** Found in the kind's shared folder: kinoko loads it, others manage it. */
   shared?: boolean;
 }
@@ -69,7 +73,12 @@ export interface Catalog {
   install(name: string, signal: AbortSignal): Promise<Outcome>;
   /** Deletes an installed one; says what happened. */
   remove(name: string): Promise<Outcome>;
+  /** Switches an installed one on or off, without uninstalling it. */
+  enable(name: string, on: boolean): Promise<Outcome>;
 }
+
+/** What a catalog's page did to an entry, for kinoko to put into effect. */
+export type Change = "install" | "remove" | "enable" | "disable";
 
 /** What an install or a removal did: `ok` when it is on disk as asked, and a line saying so. */
 export interface Outcome {
@@ -180,7 +189,8 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
     const taken = new Set([...offered, ...own]);
     const others = shared === undefined ? [] : (await names(kind, shared)).filter((name) => !taken.has(name));
     const theirs = await Promise.all(others.map(async (name) => ({ name, description: await kind.describe(join(shared ?? "", name)), installed: true, shared: true })));
-    return [...fromRepo, ...mine, ...theirs].toSorted(byName);
+    const off = new Set((await readDisabled(opts.home))[kind.name as Toggleable] ?? []);
+    return [...fromRepo, ...mine, ...theirs].map((e): Entry => Object.assign(e, { enabled: e.installed && !off.has(e.name) })).toSorted(byName);
   }
 
   return {
@@ -221,7 +231,15 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
       await rm(join(target, name), { recursive: true, force: true });
       const old = legacy(name);
       if (old !== undefined) await rm(old, { force: true });
+      await setDisabled(opts.home, kind.name as Toggleable, name, false); // a later install starts on
       return { ok: true, note: `${name} removed` };
+    },
+
+    async enable(name, on) {
+      const here = NAME.test(name) && ((await installed(name)) || (shared !== undefined && (await exists(join(shared, name, kind.entry)))));
+      if (!here) return { ok: false, note: `${name} is not installed` };
+      await setDisabled(opts.home, kind.name as Toggleable, name, !on);
+      return { ok: true, note: `${name} ${on ? "on" : "off"}` };
     },
   };
 }

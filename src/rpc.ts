@@ -1,16 +1,20 @@
 // RPC mode: JSONL over stdio, one object per line, in both directions.
 //
-// Commands in: prompt, steer, follow_up, abort, get_state, get_messages. Events out: the
-// AgentEvent stream.
+// Commands in: prompt, steer, follow_up, abort, get_state, get_messages, and (with a command host)
+// get_commands and command: the slash commands a phone runs. Events out: the AgentEvent stream.
 // steer, follow_up and abort work while a run is in progress, because they go straight to the
 // Agent. One request at a time: a second prompt while busy is refused, never queued silently.
 
 import type { Agent, RunResult } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
 import type { Image, Message } from "./types.ts";
+import { commandList, runCommand } from "./commands.ts";
+import type { CommandHost, CommandInfo, CommandResult } from "./commands.ts";
 
 export interface RpcCommand {
-  type: "prompt" | "steer" | "follow_up" | "abort" | "get_state" | "get_messages";
+  type: "prompt" | "steer" | "follow_up" | "abort" | "get_state" | "get_messages" | "get_commands" | "command";
+  name?: string; // command: which (new, thinking, extensions…)
+  arg?: string; // command: what to do with it ("off web", "high")
   text?: string;
   images?: Image[]; // prompt, steer, follow_up: pictures that go with the text
   id?: string; // optional, echoed back on the reply
@@ -23,6 +27,8 @@ export interface RpcReply {
   detail?: string;
   state?: RpcState;
   messages?: Message[]; // get_messages: the conversation so far
+  commands?: CommandInfo[]; // get_commands
+  result?: CommandResult; // command
 }
 
 export interface RpcState {
@@ -40,6 +46,8 @@ export interface RpcDeps {
   model: string | (() => string);
   session?: string | (() => string);
   cwd?: string;
+  /** What the slash commands act on; without it, a client gets none. */
+  commands?: CommandHost;
   /** Where replies and events go. Injectable so tests can read them without stdio. */
   write: (text: string) => void;
   /** Runs when the caller closes stdin. */
@@ -51,6 +59,7 @@ export class Rpc {
   #model: string | (() => string);
   #session: string | (() => string) | undefined;
   #off: () => void;
+  #commands: CommandHost | undefined;
   #cwd: string | undefined;
   #write: (text: string) => void;
   #onClose: (() => void) | undefined;
@@ -62,6 +71,7 @@ export class Rpc {
     this.#model = deps.model;
     this.#session = deps.session;
     this.#cwd = deps.cwd;
+    this.#commands = deps.commands;
     this.#write = deps.write;
     this.#onClose = deps.onClose;
     this.#off = this.#agent.on((e) => this.#event(e));
@@ -114,6 +124,18 @@ export class Rpc {
       case "get_messages":
         this.#reply({ type: "ok", id: command.id, messages: this.#agent.messages });
         return;
+      case "get_commands":
+        this.#reply({ type: "ok", id: command.id, commands: this.#commands ? commandList(this.#commands) : [] });
+        return;
+      case "command": {
+        const host = this.#commands;
+        if (host === undefined) return this.#reply({ type: "error", id: command.id, detail: "no commands here" });
+        if (this.running && command.name === "new") return this.#reply({ type: "error", id: command.id, detail: "a run is going: stop it first, then /new" });
+        void runCommand(host, command.name ?? "", command.arg ?? "", AbortSignal.timeout(300_000))
+          .then((result) => this.#reply({ type: "ok", id: command.id, result }))
+          .catch((e: unknown) => this.#reply({ type: "error", id: command.id, detail: e instanceof Error ? e.message : String(e) }));
+        return;
+      }
       default:
         this.#reply({ type: "error", id: command.id, detail: `unknown command: ${command.type}` });
         return;

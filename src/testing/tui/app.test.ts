@@ -2,7 +2,7 @@ import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
 import type { ModelsHost } from "../../tui/app.ts";
-import type { Catalog, Entry } from "../../catalog.ts";
+import type { Catalog, Change, Entry } from "../../catalog.ts";
 import { EXTENSIONS } from "../../catalog.ts";
 import type { ChangesSource } from "../../tui/side.ts";
 import type { SavedModel } from "../../config.ts";
@@ -81,7 +81,7 @@ async function harness(
     modelsHost?: ModelsHost;
     extensions?: Catalog;
     skills?: Catalog;
-    apply?: (kind: "extensions" | "skills", name: string, change: "install" | "remove") => Promise<string>;
+    apply?: (kind: "extensions" | "skills", name: string, change: Change) => Promise<string>;
     /** /new: the harness gives it a fresh session and restarts the agent, as main does. */
     newSession?: boolean;
     clipboard?: (signal: AbortSignal) => Promise<Image | string>;
@@ -229,14 +229,14 @@ describe("TUI app with the agent", () => {
     expect(h.agent.messages.some((m) => m.content === "half an ans")).toBe(true);
   });
 
-  test("2b. a prompt that arrives from the phone (kinoko serve) is shown with a phone mark, and the run is the terminal's too", async () => {
+  test("2b. a prompt that arrives from the phone (kinoko serve) is shown as the user's, and the run is the terminal's too", async () => {
     const h = await harness([[{ type: "text", delta: "hola" }, { type: "done", stop: "end" }]], { pace: 40 });
     const run = h.agent.prompt("desde el movil"); // what the link's rpc does
     await new Promise((r) => setTimeout(r, 5));
     expect(h.app.running).toBe(true); // Enter now steers, as for a run started here
     await run;
     await settle(h.agent);
-    expect(h.screen()).toContain("📱 desde el movil");
+    expect(h.screen()).toContain("desde el movil");
     expect(h.app.running).toBe(false);
   });
 
@@ -1127,13 +1127,19 @@ describe("side panel", () => {
   });
 });
 
-function store(entries: Entry[]): { store: Catalog; installed: string[]; removed: string[] } {
+function store(entries: Entry[]): { store: Catalog; installed: string[]; removed: string[]; toggled: string[] } {
   const installed: string[] = [];
   const removed: string[] = [];
+  const toggled: string[] = [];
   return {
     installed,
     removed,
+    toggled,
     store: {
+      enable: async (name, on) => {
+        toggled.push(`${name} ${on ? "on" : "off"}`);
+        return { ok: true, note: `${name} ${on ? "on" : "off"}` };
+      },
       kind: EXTENSIONS,
       repo: "https://github.com/LaraGuardiola/kinoko-extensions.git",
       local: async () => [],
@@ -1215,6 +1221,39 @@ describe("the extensions and skills pages", () => {
     expect(h.app.marker).toBe("web installed: restart kinoko to apply it"); // no apply: at the next start
   });
 
+  test("Enter switches an installed one off and on, at once and with the page open; U updates it", async () => {
+    const fake = store([
+      { name: "herdr", description: "herdr agent", installed: true, enabled: true },
+      { name: "web", description: "web tools", installed: false },
+    ]);
+    const applied: string[] = [];
+    const apply = async (kind: string, name: string, change: string): Promise<string> => {
+      applied.push(`${change} ${name}`);
+      return change === "disable" ? "unloaded" : "loaded";
+    };
+    const h = await harness([], { extensions: fake.store, apply, viewportRows: 30 });
+    h.press("/extensions\r");
+    await paced();
+    h.press("\r"); // herdr: off
+    await paced();
+    expect(fake.toggled).toEqual(["herdr off"]);
+    expect(h.app.marker).toBe("herdr off: unloaded");
+    expect(h.app.menuPage).toBe("Extensions"); // still open: switch the next one
+    h.app.render();
+    expect(h.screen()).toContain("○ off · herdr agent");
+    h.press("\r"); // and on again
+    await paced();
+    expect(fake.toggled).toEqual(["herdr off", "herdr on"]);
+    h.press("u"); // fetched again from the repository
+    await paced();
+    expect(fake.installed).toEqual(["herdr"]);
+    h.press("\x1b[B");
+    h.press("\r"); // web is not installed: Enter installs it
+    await paced();
+    expect(fake.installed).toEqual(["herdr", "web"]);
+    expect(applied).toEqual(["disable herdr", "enable herdr", "install herdr", "install web"]);
+  });
+
   test("Del twice removes an installed one; a fetch that fails shows why", async () => {
     const fake = store([{ name: "herdr", description: "herdr agent", installed: true }]);
     const h = await harness([], { extensions: fake.store, viewportRows: 30 });
@@ -1249,6 +1288,22 @@ describe("the extensions and skills pages", () => {
     offline.app.render();
     expect(offline.screen()).toContain("herdr agent");
     expect(offline.screen()).toContain("could not update the repo: offline · showing what is on this computer");
+  });
+});
+
+describe("the mouse in the menu", () => {
+  test("it is the menu's only while the menu is open; the wheel moves the selection", async () => {
+    const h = await harness([], { viewportRows: 30 });
+    h.app.render();
+    expect(h.out.join("")).not.toContain("\x1b[?1003h");
+    h.press("/");
+    expect(h.out.join("")).toContain("\x1b[?1003h\x1b[?1006h");
+    h.app.handleKey({ name: "mouse", mouse: { x: 1, y: 1, button: 0, press: true, wheel: "down" } });
+    await paced();
+    h.app.render();
+    expect(h.screen()).toContain("→ models");
+    h.press("\x1b"); // closed: the terminal gets its mouse back
+    expect(h.out.join("")).toContain("\x1b[?1003l\x1b[?1006l");
   });
 });
 

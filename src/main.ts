@@ -11,8 +11,10 @@ import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Extensions, extensionName, loadExtensions, loadOne } from "./ext.ts";
 import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
+import type { Change } from "./catalog.ts";
 import { App } from "./tui/app.ts";
 import { THINKING } from "./tui/menu-pages.ts";
+import type { CommandHost } from "./commands.ts";
 import { setFenceRenderers } from "./tui/markdown.ts";
 import { Term } from "./tui/term.ts";
 import { placeLine } from "./tui/place.ts";
@@ -257,17 +259,47 @@ if (tui) {
   // While `kinoko serve` runs, this terminal shows up in the phone app (KINOKO_LINK=0: it does not).
   if (process.env.KINOKO_LINK !== "0") {
     const { linkToHub } = await import("./serve/link.ts");
-    linkToHub({ agent, socket: join(process.env.HOME ?? "", ".kinoko", "serve.sock"), cwd, model: () => agent.model, session: () => session.meta.id });
+    linkToHub({ agent, socket: join(process.env.HOME ?? "", ".kinoko", "serve.sock"), cwd, model: () => agent.model, session: () => session.meta.id, commands: app.commandHost() });
   }
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
   clearInterval(loop);
 } else if (mode === "rpc") {
+  // The phone's slash commands, for an agent kinoko serve started: the same as the TUI's menu.
+  let profile = THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name;
+  const commands: CommandHost = {
+    agent,
+    catalogs: {
+      extensions: catalog({ kind: EXTENSIONS, home: process.env.HOME ?? "", repo: config.extensionsRepo }),
+      skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
+    },
+    apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
+    newSession: async () => {
+      const last = session;
+      session = await Session.create({ cwd, model: agent.model });
+      skills = await discoverSkills(cwd);
+      tracker.reset();
+      agent.restart(session);
+      if (last.empty) await rm(last.path, { force: true });
+    },
+    thinking: {
+      current: () => profile,
+      set: (name) => {
+        const chosen = THINKING.find((p) => p.name === name);
+        if (chosen === undefined) return `no thinking profile ${name}`;
+        agent.setThinking(chosen.effort, config.thinkingBudget !== undefined ? chosen.budget : undefined);
+        profile = chosen.name;
+        return `thinking: ${chosen.name} from the next request`;
+      },
+    },
+    session: () => `id ${session.meta.id}\nmessages ${agent.messages.length}\nmodel ${agent.model}`,
+  };
   const rpc = new Rpc({
     agent: agent,
-    model: start.model,
-    session: session.meta.id,
+    model: () => agent.model,
+    session: () => session.meta.id,
     cwd: cwd,
+    commands,
     write: (text) => process.stdout.write(text),
     // stdin closed: the client is gone, so the run and the process end here.
     onClose: () => {
@@ -294,17 +326,18 @@ if (tui) {
  * and the agent's tools follow. Tools are part of every request's opening bytes, so a change to them
  * makes a local engine read the whole prompt again: said, so the next slow answer is no surprise.
  */
-async function applyExtension(name: string, change: "install" | "remove"): Promise<string> {
+async function applyExtension(name: string, change: Change): Promise<string> {
   const before = ext.tools().map((t) => t.name).join(",");
+  const load = change === "install" || change === "enable";
   let failed: string | undefined;
-  if (change === "install") failed = await loadOne(ext, join(process.env.HOME ?? "", ".kinoko", "ext", name, "index.ts"));
+  if (load) failed = await loadOne(ext, join(process.env.HOME ?? "", ".kinoko", "ext", name, "index.ts"));
   else ext.unload(name);
   if (failed) return failed;
-  if (change === "install") loadedExtensions.add(name);
+  if (load) loadedExtensions.add(name);
   else loadedExtensions.delete(name);
   agent.setTools([...defaultTools(), ...ext.tools()]);
   const toolsChanged = ext.tools().map((t) => t.name).join(",") !== before;
-  const done = change === "install" ? "loaded" : "unloaded";
+  const done = load ? "loaded" : "unloaded";
   return toolsChanged ? `${done}; its tools change the prompt, so the next request reads it all again` : done;
 }
 
@@ -313,10 +346,12 @@ async function applyExtension(name: string, change: "install" | "remove"): Promi
  * The skills index in the system prompt stays as it was (byte-stable, so the engine's cache too);
  * the next start lists the skill there.
  */
-async function applySkill(name: string, change: "install" | "remove"): Promise<string> {
-  const path = join(process.env.HOME ?? "", ".kinoko", "skills", name, "SKILL.md");
-  if (change === "remove") {
-    agent.note(`The skill ${name} was removed: do not use it.`);
+async function applySkill(name: string, change: Change): Promise<string> {
+  const installed = join(process.env.HOME ?? "", ".kinoko", "skills", name, "SKILL.md");
+  const sharedPath = join(process.env.HOME ?? "", ".agents", "skills", name, "SKILL.md");
+  const path = (await Bun.file(installed).exists()) ? installed : sharedPath;
+  if (change === "remove" || change === "disable") {
+    agent.note(`The skill ${name} was ${change === "remove" ? "removed" : "switched off"}: do not use it.`);
   } else {
     const meta = frontmatter(await Bun.file(path).text().catch(() => ""));
     agent.note(`A skill is now available (installed or updated), read its file when a task matches:\n<skill path="${path}" name="${meta.name ?? name}">${meta.description ?? ""}</skill>`);

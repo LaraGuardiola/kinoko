@@ -68,6 +68,8 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `history` | for `attach` | `agent`, `info: AgentInfo`, `messages: [Message]`, `live: [AgentEvent]` |
 | `event` | an attached agent did something | `agent`, `event: AgentEvent` |
 | `ok` | a command was taken | `id`, and per command: `agent` (start), `text` (prompt: "started") |
+| `commands` | for `commands` | `agent`, `commands: [{name, description, kind: "list" \| "run"}]` |
+| `command_result` | for `command` | `agent`, `result: {title?, text?, items?, hint?, reset?}` |
 | `error` | a command was refused | `id`, `detail` (a sentence for the user) |
 
 ### App → server
@@ -84,6 +86,8 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `follow_up` | `agent`, `text`, `images?` | queued for when the run ends |
 | `abort` | `agent` | Esc: the run stops |
 | `stop` | `agent` | the agent's process ends (its session stays on disk, resumable); refused for a terminal's |
+| `commands` | `agent` | the slash commands it takes → `commands` |
+| `command` | `agent`, `name`, `arg?` | runs one → `command_result` |
 
 `images`: `[{"mime": "image/jpeg", "data": "<base64>"}]`. Messages up to 32 MB.
 
@@ -99,8 +103,19 @@ A kinoko TUI started while the hub runs (or one that finds it within ~3 s of it 
 itself through the hub's Unix socket `~/.kinoko/serve.sock` (mode 600: this user's processes only),
 speaking the rpc mode's JSONL after a first `{"type": "hello", "origin": "terminal", "cwd", "pid",
 "model", "session", "running"}` line. It is listed with `origin: "terminal"` while it stays open; the
-phone attaches to it, prompts it (the terminal shows the prompt with a 📱), steers and aborts it like
+phone attaches to it, prompts it (the terminal shows the prompt as the user's), steers and aborts it like
 any agent, but cannot `stop` it: it ends in its terminal. `KINOKO_LINK=0` keeps a terminal out.
+
+## Slash commands
+
+What the TUI's menu does, for a client without it: `new`, `compact`, `thinking`, `extensions`,
+`skills`, `session` (each agent says which it takes). A `list` command answers with `items`
+(`{name, description, current?, off?, installed?, shared?}`: in effect, switched off, installed, a
+skill shared with other agents) to act on with an `arg`: `thinking` takes a profile's name; the
+catalogs take `on NAME`, `off NAME`, `install NAME`, `update NAME`, `remove NAME`, and answer with
+the list again and a `text` saying what was done. A `run` command answers with a `text`; `reset:
+true` (new) means the conversation was replaced: attach again. A TUI linked to the hub runs them
+through itself, so its screen shows what the phone changed.
 
 ## Shapes
 

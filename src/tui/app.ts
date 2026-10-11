@@ -18,10 +18,12 @@ import { errorBlock, pulseLevel, toolBlock, toolFailed, toolSummary } from "./to
 import { TODO_TOOL } from "./todos.ts";
 import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
-import { Menu, filterRoot, listRows, pageRows } from "./menu.ts";
+import { MENU_ROWS, Menu, filterRoot, listRows, listWindow, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
-import { ROOT, catalogPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
-import type { Catalog, Entry, Outcome } from "../catalog.ts";
+import { ROOT, THINKING, catalogPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import type { ThinkingProfile } from "./menu-pages.ts";
+import type { CommandHost } from "../commands.ts";
+import type { Catalog, Entry, Outcome, Change } from "../catalog.ts";
 import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
 import type { ModelChoice, ModelsView } from "./models-menu.ts";
 import type { SavedModel } from "../config.ts";
@@ -37,7 +39,7 @@ import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
 import { compactingNote } from "./sprout.ts";
-import { ANSI } from "./style.ts";
+import { ANSI, stripAnsi } from "./style.ts";
 import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
@@ -63,7 +65,7 @@ export interface AppOptions {
   skills?: Catalog;
   /** Puts an install or a removal into effect now (loads the extension, tells the model of the
    *  skill); says how. Without it, they take effect when kinoko starts again. */
-  apply?: (kind: "extensions" | "skills", name: string, change: "install" | "remove") => Promise<string>;
+  apply?: (kind: "extensions" | "skills", name: string, change: Change) => Promise<string>;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
@@ -146,8 +148,14 @@ export class App {
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
+  // The mouse is the terminal's (selecting, copying) except while the menu is open: then clicks
+  // pick and the wheel moves through it.
+  #mouse = false;
+  #write: (text: string) => void;
+
   constructor(opts: AppOptions) {
     this.#agent = opts.agent;
+    this.#write = opts.write;
     this.#renderer = new Renderer({
       write: opts.write,
       columns: () => this.#viewportCols ?? 80,
@@ -193,6 +201,12 @@ export class App {
   render(): void {
     this.#renderer.update(this.#state());
     this.#renderer.frame();
+    const menuOpen = this.#menu.page !== undefined || (this.#rootItems()?.length ?? 0) > 0;
+    if (menuOpen !== this.#mouse) {
+      this.#mouse = menuOpen;
+      // 1003: every motion too, so hovering an item selects it.
+      this.#write(menuOpen ? "\x1b[?1003h\x1b[?1006h" : "\x1b[?1003l\x1b[?1006l");
+    }
   }
 
   /** A resumed session: its conversation goes to the scrollback, and the context counter is back. */
@@ -274,6 +288,10 @@ export class App {
       if (key.at) this.#renderer.position(key.at.row);
       this.#renderer.update(this.#state());
       this.#renderer.flush();
+      return;
+    }
+    if (key.name === "mouse") {
+      this.#menuMouse(key);
       return;
     }
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
@@ -439,7 +457,7 @@ export class App {
         if (!this.#running) {
           this.#running = true;
           this.#marker = "";
-          this.#echoUser(`📱 ${e.prompt}`);
+          this.#echoUser(e.prompt);
         }
         return;
       case "message_delta":
@@ -829,6 +847,9 @@ export class App {
         if (this.#menu.armed === item.key) page.remove(item);
         else this.#menu.arm(item.key);
       }
+    } else if (page?.kind === "list" && page.update && key.name === "char" && key.char?.toLowerCase() === "u") {
+      const item = page.items[this.#menu.index];
+      if (item !== undefined && !item.header) page.update(item);
     } else if ((key.name === "up" || key.name === "down") && !key.alt) {
       this.#menu.arm(undefined); // moving away cancels a pending removal
       this.#menu.move(key.name === "up" ? -1 : 1, count, (i) => page?.kind === "list" && page.items[i]?.header === true);
@@ -840,8 +861,9 @@ export class App {
         const item = page.items[this.#menu.index];
         if (item === undefined || item.header) return true;
         page.pick(item);
-        // A pick that opened another page (add model) keeps the menu; any other pick is done.
-        if (this.#menu.page === page) this.#closeMenu();
+        // A pick that opened another page (add model) keeps the menu, as does a page that stays
+        // (switching things on and off); any other pick is done.
+        if (this.#menu.page === page && !page.stay) this.#closeMenu();
       } else if (page) {
         this.#menu.back();
       } else {
@@ -855,6 +877,45 @@ export class App {
     } // a page takes no typing
     this.render();
     return true;
+  }
+
+  /** The wheel moves through the open menu; a click on an item picks it, as Enter would. */
+  #menuMouse(key: Key): void {
+    const m = key.mouse;
+    if (m === undefined) return;
+    if (m.wheel !== undefined) {
+      this.#menuKey({ name: m.wheel === "up" ? "up" : "down" });
+      return;
+    }
+    const index = this.#menuItemAt(m.y);
+    if (index === undefined) return;
+    // Hovering an item selects it (bold, its arrow); a click picks it, as Enter would.
+    if (m.move) {
+      if (index !== this.#menu.index) {
+        this.#menu.select(index);
+        this.render();
+      }
+      return;
+    }
+    if (!m.press || m.button !== 0) return;
+    this.#menu.select(index);
+    this.#menuKey({ name: "enter" });
+  }
+
+  /** The menu item on screen row `y`, if there is one. */
+  #menuItemAt(y: number): number | undefined {
+    const top = this.#renderer.top;
+    const page = this.#menu.page;
+    const items = page?.kind === "list" ? page.items : page === undefined ? (this.#rootItems() ?? []) : undefined;
+    if (top === undefined || items === undefined) return undefined;
+    // The menu sits at the region's foot: its rows, then the place line (if any), then the status.
+    const rows = this.#state().lines.length;
+    const menu = this.#menuRows().length;
+    const end = top + rows - 1 - 1 - (this.#place ? 1 : 0);
+    const row = y - (end - menu + 1) - (page === undefined ? 0 : 1); // a page's first row is its title
+    const index = listWindow(items.length, this.#menu.index) + row;
+    if (row < 0 || row >= Math.min(items.length, MENU_ROWS) || items[index] === undefined || items[index]?.header) return undefined;
+    return index;
   }
 
   #closeMenu(): void {
@@ -874,13 +935,73 @@ export class App {
   }
 
   #thinkingPage(): ListPage {
-    return thinkingPage(this.#profile, (profile) => {
-      // Only an engine that takes a budget gets one; elsewhere the effort alone is the level.
-      this.#agent.setThinking(profile.effort, this.#budgets ? profile.budget : undefined);
-      this.#profile = profile.name;
-      this.#thinking = profileLabel(profile, this.#budgets);
-      this.#marker = `thinking: ${this.#thinking} from the next request`;
-    });
+    return thinkingPage(this.#profile, (profile) => this.#chooseThinking(profile));
+  }
+
+  #chooseThinking(profile: ThinkingProfile): string {
+    // Only an engine that takes a budget gets one; elsewhere the effort alone is the level.
+    this.#agent.setThinking(profile.effort, this.#budgets ? profile.budget : undefined);
+    this.#profile = profile.name;
+    this.#thinking = profileLabel(profile, this.#budgets);
+    this.#marker = `thinking: ${this.#thinking} from the next request`;
+    return this.#marker;
+  }
+
+  /** What the phone's slash commands act on (through kinoko serve): this TUI, so its screen follows. */
+  commandHost(): CommandHost {
+    return {
+      agent: this.#agent,
+      catalogs: this.#catalogs,
+      apply: this.#apply,
+      newSession: async () => {
+        await this.#newSession();
+        this.render();
+      },
+      thinking: {
+        current: () => this.#profile,
+        set: (name) => {
+          const profile = THINKING.find((p) => p.name === name);
+          if (profile === undefined) return `no thinking profile ${name}`;
+          const note = this.#chooseThinking(profile);
+          this.render();
+          return note;
+        },
+      },
+      models: {
+        // The saved models (any endpoint) and what the engine in use serves, once each.
+        list: async (signal) => {
+          const items = new Map(this.#saved.map((e) => [e.model, { name: e.model, description: e.label ?? hostOf(e.baseUrl) }]));
+          for (const m of await this.#agent.models(signal).catch(() => [] as string[])) if (!items.has(m)) items.set(m, { name: m, description: `served by ${hostOf(this.#endpoint)}` });
+          return [...items.values()];
+        },
+        set: (name) => {
+          const current = this.#saved.find((e) => e.baseUrl === this.#endpoint);
+          this.#useModel(this.#saved.find((e) => e.model === name) ?? { model: name, baseUrl: this.#endpoint, apiKey: current?.apiKey ?? "" });
+          this.render();
+          return this.#marker;
+        },
+      },
+      clear: () => {
+        this.#clearScreen();
+        this.render();
+      },
+      fork: async () => {
+        const moved = await this.#forkHead();
+        this.#print("system", moved);
+        this.render();
+        return moved;
+      },
+      session: () => {
+        const s = this.#session;
+        if (s === undefined) return "no session";
+        const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#tokens.context, window: this.#window };
+        return stripAnsi(sessionLines(facts, 60).join("\n"));
+      },
+      told: (note) => {
+        this.#marker = this.#quiet = note;
+        this.render();
+      },
+    };
   }
 
   #openModels(): void {
@@ -936,13 +1057,13 @@ export class App {
     }
     const state: { repo: string; entries?: Entry[]; error?: string } = { repo: store.repo };
     // On disk first, then into effect: loaded now, or (without `apply`) at the next start.
-    const settle = async (name: string, change: "install" | "remove", done: Outcome): Promise<Outcome> => {
+    const settle = async (name: string, change: Change, done: Outcome): Promise<Outcome> => {
       if (!done.ok) return done;
       const how = this.#apply ? await this.#apply(which, name, change).catch((e: unknown) => `not applied: ${errorText(e)}`) : "restart kinoko to apply it";
       return { ok: true, note: `${done.note}: ${how}` };
     };
     const install = (name: string): void => {
-      this.#marker = this.#quiet = `installing ${name}…`;
+      this.#marker = this.#quiet = `${state.entries?.find((e) => e.name === name)?.installed ? "updating" : "installing"} ${name}…`;
       void store
         .install(name, AbortSignal.timeout(300_000))
         .then((done) => settle(name, "install", done))
@@ -950,7 +1071,22 @@ export class App {
         .then(({ ok, note }) => {
           this.#marker = this.#quiet = note;
           const entry = state.entries?.find((e) => e.name === name);
-          if (entry && ok) entry.installed = true;
+          if (entry && ok) {
+            entry.installed = true;
+            entry.enabled = true;
+          }
+          redraw();
+        });
+    };
+    // On or off, at once: loaded or taken back (a skill: told to the model), still installed.
+    const toggle = (name: string, on: boolean): void => {
+      void store
+        .enable(name, on)
+        .then((done) => settle(name, on ? "enable" : "disable", done))
+        .then(({ ok, note }) => {
+          this.#marker = this.#quiet = note;
+          const entry = state.entries?.find((e) => e.name === name);
+          if (entry && ok) entry.enabled = on;
           redraw();
         });
     };
@@ -965,9 +1101,10 @@ export class App {
           redraw();
         });
     };
-    let page = catalogPage(title, state, install, remove);
+    const actions = { install, toggle, update: install, remove };
+    let page = catalogPage(title, state, actions);
     const redraw = (): void => {
-      const next = catalogPage(title, state, install, remove);
+      const next = catalogPage(title, state, actions);
       this.#menu.refresh(page, next);
       page = next;
       this.render();

@@ -21,6 +21,15 @@ describe("tui key parser", () => {
     ]);
   });
 
+  test("1b. mouse events in SGR form: a press, a release, the wheel", () => {
+    expect(parse("\x1b[<0;12;30M", "\x1b[<0;12;30m")).toEqual([
+      { name: "mouse", mouse: { x: 12, y: 30, button: 0, press: true } },
+      { name: "mouse", mouse: { x: 12, y: 30, button: 0, press: false } },
+    ]);
+    expect(parse("\x1b[<64;1;2M", "\x1b[<65;1;2M").map((k) => k.mouse?.wheel)).toEqual(["up", "down"]);
+    expect(parse("\x1b[<35;7;9M")).toEqual([{ name: "mouse", mouse: { x: 7, y: 9, button: 3, press: false, move: true } }]); // a hover
+  });
+
   test("2. control keys", () => {
     expect(names("\r", "\t", "\x7f", "\x03", "\x04")).toEqual([
       "enter",
