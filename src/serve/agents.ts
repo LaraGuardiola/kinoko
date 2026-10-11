@@ -30,6 +30,8 @@ export interface AgentInfo {
   ended?: "done" | "aborted" | "error" | "limit";
   /** The start of its last reply, one line: what a notification says. */
   last?: string;
+  /** Background jobs running in it (bash background: true): the phone shows ⚙ N. */
+  jobs?: number;
   /** A tool call waiting for the user's answer (approve), so every device knows, attached or not. */
   approval?: { id: string; call: { id: string; name: string; args: Record<string, unknown> }; reason: string };
 }
@@ -241,6 +243,11 @@ export class Agents {
 
   #event(agent: Running, event: AgentEvent): void {
     const info = agent.info;
+    if (event.type === "jobs") {
+      info.jobs = event.running > 0 ? event.running : undefined;
+      this.#onChange();
+      return; // not part of the run: nothing to replay to a late attach
+    }
     info.activity = Date.now();
     if (event.type === "run_start") {
       agent.live = [];

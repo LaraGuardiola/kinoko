@@ -36,6 +36,7 @@ export type AgentEvent =
   | { type: "compacted"; keep: number } // head of the history replaced by a summary, tail kept
   | { type: "approval_request"; id: string; call: ToolCall; reason: string } // an extension asks the user first
   | { type: "approval_end"; id: string; allow: boolean; by: ApprovalBy } // answered (the first answer wins)
+  | { type: "jobs"; running: number } // background jobs running now (bash background: true), when the count changes
   | { type: "retry"; attempt: number; of: number; inMs: number; error: string } // a transient failure: the same request again
   | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[]; detail?: string };
 
@@ -173,6 +174,11 @@ export class Agent {
   /** What the provider can serve, when it can say: an empty list otherwise. */
   async models(signal: AbortSignal): Promise<string[]> {
     return (await this.#provider.models?.(signal)) ?? [];
+  }
+
+  /** Something outside the loop the clients should hear of (the background jobs count). */
+  announce(e: AgentEvent): void {
+    this.#emit(e);
   }
 
   on(listener: (e: AgentEvent) => void): () => void {

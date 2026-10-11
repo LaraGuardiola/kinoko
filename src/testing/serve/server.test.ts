@@ -293,5 +293,41 @@ describe("serve: the hub", () => {
       hub.stop();
     }
   });
+
+  test("background jobs: the agent says how many run, the list carries it (none: no field), never replayed", async () => {
+    const child = { emit: (_e: object): void => undefined }; // what the fake agent says, once it runs
+    const spawn: Spawn = (_cmd, cwd): Child => {
+      const out = pipe();
+      const exit = { done: (_code: number): void => undefined };
+      child.emit = (event) => out.push(JSON.stringify({ type: "event", event }));
+      return {
+        write: (line) => {
+          const c = JSON.parse(line) as { id: string; type: string };
+          if (c.type === "get_state") out.push(JSON.stringify({ type: "ok", id: c.id, state: { running: false, model: "m", messages: 0, cwd } }));
+          if (c.type === "get_messages") out.push(JSON.stringify({ type: "ok", id: c.id, messages: [] }));
+        },
+        lines: out.iter,
+        errors: pipe().iter,
+        exited: new Promise((r) => (exit.done = r)),
+        kill: () => (out.end(), exit.done(0)),
+      };
+    };
+    const changes: number[] = [];
+    const hub = serve({ port: 0, devices: new Devices(join(dir, "jobs.json")), command: ["kinoko"], sessionsDir: dir, version: "t", spawn });
+    try {
+      const info = hub.agents.start({ cwd: dir });
+      await Bun.sleep(20);
+      child.emit({ type: "jobs", running: 2 });
+      await Bun.sleep(20);
+      changes.push(hub.agents.info(info.id)?.jobs ?? 0);
+      child.emit({ type: "jobs", running: 0 });
+      await Bun.sleep(20);
+      expect(changes).toEqual([2]);
+      expect(hub.agents.info(info.id)?.jobs).toBeUndefined();
+      expect((await hub.agents.snapshot(info.id))?.live).toEqual([]);
+    } finally {
+      hub.stop();
+    }
+  });
 });
 

@@ -150,6 +150,7 @@ AgentInfo {
   ended?: "done" | "aborted" | "error" | "limit";   // how its last run ended (none while one runs)
   last?: string;         // the start of its last reply, one line: what a notification says
   approval?: { id: string; call: { id: string; name: string; args: object }; reason: string };   // a call waiting for the user
+  jobs?: number;         // background jobs running in it (none: no field)
 }
 
 Project { cwd: string; name: string; updated: number; sessions: [{ id: string; title: string; updated: number }] }
@@ -183,6 +184,7 @@ Message {
 | `delivered` | `text` | a queued steer reached the model |
 | `compacting` / `compacted` | `phase, done, total?` / `keep` | the history is being summarised |
 | `retry` | `attempt, of, inMs, error` | a transient failure; trying again |
+| `jobs` | `running` | how many background jobs run now (it updates `AgentInfo.jobs`; not replayed) |
 | `approval_request` | `id`, `call {id, name, args}`, `reason` | the call waits for the user: Allow / Deny / For this session |
 | `approval_end` | `id`, `allow`, `by: tui \| app \| telegram \| timeout \| abort` | answered: the card shows the outcome |
 | `run_end` | `reason: done \| aborted \| error \| limit`, `detail?` | idle again |
