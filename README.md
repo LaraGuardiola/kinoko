@@ -288,6 +288,14 @@ The `delegate` extension uses them for other coding agents: "ask opencode to wri
 run them" starts opencode (or pi, Claude Code, Codex, another kinoko: whichever are installed) on
 the task in the background; you watch it under ⚙ shells, and kinoko is woken with its answer.
 
+## Your shell, inside kinoko
+
+A line that starts with `!` runs in your own shell, right there: `!sudo pacman -Syu` asks for the
+password as usual, and its output stays above when kinoko comes back below it. `/shell` opens an
+interactive shell the same way, until `exit` (or Ctrl-D). Meanwhile the terminal is the shell's:
+Ctrl-C stops the command, not kinoko. Not during a run (Esc it first). It is for you, not the model:
+nothing typed there reaches the conversation.
+
 ## Integrations
 
 `/` then **integrations** sets Telegram up step by step: create a bot with @BotFather, paste its

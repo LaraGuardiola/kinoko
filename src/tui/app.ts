@@ -94,6 +94,9 @@ export interface AppOptions {
   newSession?: () => Promise<{ session: Session; intro: string }>;
   /** Rebuilds the agent after /fork moved the session head. */
   rebuild?: () => Agent;
+  /** Lends the terminal to the user's shell (`command`, or an interactive one when empty) and
+   *  takes it back once that ends: its exit code. */
+  handOver?: (command: string) => Promise<number>;
   /** Reads the clipboard image for Ctrl+V (an Image, or why not). Tests pass a fake. */
   clipboard?: (signal: AbortSignal) => Promise<Image | string>;
   /** Where a pasted relative image path is read from, and git is asked about changes. */
@@ -148,6 +151,9 @@ export class App {
   #session: Session | undefined;
   #rebuild: (() => Agent) | undefined;
   #onQuit: (() => void) | undefined;
+  #handOver: AppOptions["handOver"];
+  /** The terminal is the shell's: nothing is painted, and what would be printed waits here. */
+  #away: Array<() => void> | undefined;
   #placeOf: (() => Promise<string>) | undefined;
   #place = "";
   #images = new ImageRegistry();
@@ -214,6 +220,7 @@ export class App {
     this.#session = opts.session;
     this.#rebuild = opts.rebuild;
     this.#onQuit = opts.onQuit;
+    this.#handOver = opts.handOver;
     this.#placeOf = opts.place;
     this.#clipboard = opts.clipboard ?? ((signal) => clipboardImage(signal));
     this.#cwd = opts.cwd ?? process.cwd();
@@ -236,6 +243,7 @@ export class App {
 
   /** Repaints the live region (throttled). */
   render(): void {
+    if (this.#away) return;
     this.#renderer.update(this.#state());
     this.#renderer.frame();
     const menuOpen = this.#menu.page !== undefined || (this.#rootItems()?.length ?? 0) > 0;
@@ -277,6 +285,10 @@ export class App {
     const panel = this.#panel;
     const fresh = await this.#capabilities?.().catch(() => undefined);
     if (panel === undefined || fresh === undefined) return;
+    if (this.#away) {
+      this.#away.push(() => void this.#refreshCapabilities());
+      return;
+    }
     const text = withCapabilities(panel.text, fresh);
     if (text === panel.text) return;
     panel.text = text;
@@ -350,6 +362,7 @@ export class App {
   // ---- input ----
 
   handleKey(key: Key): void {
+    if (this.#away) return; // the shell has the keyboard (a stray SIGINT included)
     // The terminal answering the size query: the side panel may come or go.
     if (key.name === "size-report" || key.name === "cursor-report") {
       if (key.size) this.#side.size(key.size);
@@ -427,6 +440,12 @@ export class App {
   async #submit(): Promise<void> {
     const text = this.#editor.text.trim();
     if (text === "") return;
+    if (text.startsWith("!")) {
+      this.#editor.remember(text);
+      this.#editor.clear();
+      await this.#shell(text.slice(1).trim());
+      return;
+    }
     if (text.startsWith("/")) {
       this.#editor.clear();
       if (!(await this.command(text))) this.#print("system", `unknown command ${text}: try /help`);
@@ -468,6 +487,41 @@ export class App {
   async #run(text: string): Promise<void> {
     await this.#agent.prompt(text, this.#images.attached(text));
     this.#running = false;
+    this.render();
+  }
+
+  /**
+   * The terminal lent to the user's shell: `command` run there (`!ls`), or an interactive shell
+   * until it exits (/shell). What it prints stays above; kinoko comes back below it. Not during a
+   * run: its output would land in the middle of the shell's.
+   */
+  async #shell(command: string): Promise<void> {
+    this.#closeMenu();
+    if (this.#handOver === undefined) {
+      this.#marker = "no terminal to lend here";
+      this.render();
+      return;
+    }
+    if (this.#running) {
+      this.#marker = "a run is going: Esc it first, then the shell";
+      this.render();
+      return;
+    }
+    this.#marker = "";
+    this.#print("system", command ? `${ANSI.dim}!${ANSI.reset} ${command}` : `${ANSI.dim}your shell: exit (or Ctrl-D) comes back to kinoko${ANSI.reset}`);
+    this.#renderer.update(this.#state());
+    this.#renderer.flush();
+    this.#away = [];
+    this.#renderer.suspend();
+    const code = await this.#handOver(command).catch(() => -1);
+    const held = this.#away;
+    this.#away = undefined;
+    this.#renderer.resume();
+    // The shell turned the mouse off: clicks (⧉, the jobs label) are kinoko's again.
+    this.#mouse = false;
+    this.#write("\x1b[?1000h\x1b[?1006h");
+    for (const print of held) print();
+    if (code !== 0) this.#marker = `${command ? "the command" : "the shell"} exited with ${code}`;
     this.render();
   }
 
@@ -730,6 +784,10 @@ export class App {
   /** Sends one finished piece to the scrollback. `gap` defaults to the usual blank row between blocks. */
   #print(kind: BlockKind, text: string, gap = this.#printedAny, key?: string, render?: (width: number) => string): void {
     if (text === "") return;
+    if (this.#away) {
+      this.#away.push(() => this.#print(kind, text, gap, key, render));
+      return;
+    }
     // The renderer repaints the region right after the text: it has to know the current state.
     this.#renderer.update(this.#state());
     // `render` draws it again at another text width (a resize): a reply rewraps, a band refills.
@@ -854,6 +912,9 @@ export class App {
         return true;
       case "quit":
         this.#quit();
+        return true;
+      case "shell":
+        await this.#shell(input.replace(/^\/?shell\s*/, ""));
         return true;
       default:
         return false;

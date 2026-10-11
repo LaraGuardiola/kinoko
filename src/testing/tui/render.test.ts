@@ -202,6 +202,33 @@ test("clear: screen and scrollback wiped, the region painted from the top, nothi
   expect(written).not.toContain("an old line");
 });
 
+describe("lending the screen to the user's shell", () => {
+  test("suspend wipes the region and shows the cursor; after resume the side column waits for the shell's output to scroll away", () => {
+    const out: string[] = [];
+    const renderer = new Renderer({ write: (t) => out.push(t), columns: () => 60, rows: () => 6, now: () => 1000 });
+    const side = { col: 41, upper: 1, rows: (h: number) => Array.from({ length: h }, (_, i) => `S${i}`), key: "k", text: 36 };
+    const state = { lines: ["rule", "> ", "status"], row: 1, col: 2, side };
+    renderer.update(state);
+    renderer.flush();
+    renderer.position(4);
+    renderer.update({ ...state, side: { ...side, key: "k2" } });
+    renderer.flush();
+    expect(out.at(-1)).toContain("S0");
+
+    renderer.suspend();
+    expect(out.at(-1)).toContain("\x1b[J"); // the region (and the column) wiped
+    expect(out.at(-1)).toContain("\x1b[?25h"); // the shell gets a cursor
+    renderer.resume();
+    renderer.position(5); // the shell printed: the region is lower now
+    renderer.update({ ...state, side: { ...side, key: "k3" } });
+    renderer.flush();
+    expect(out.at(-1)).not.toContain("S0"); // its full-width lines are still on screen
+
+    for (let i = 0; i < 6; i++) renderer.printAbove(`line ${i}`); // a screenful: they scrolled away
+    expect(out.at(-1)).toContain("S0");
+  });
+});
+
 describe("what a click lands on", () => {
   test("rowAt: the printed rows above the region, the region's rows, margin included; nothing before the terminal says where", () => {
     const { renderer } = harness();
