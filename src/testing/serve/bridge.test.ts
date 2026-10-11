@@ -193,4 +193,30 @@ describe("serve: the Telegram bridge", () => {
     await new Promise((r) => setTimeout(r, 80));
     expect(tg.calls.filter((c) => c.method === "getUpdates")).toEqual([]);
   });
+
+  test("files: a document is saved and the agent told where; a photo also goes as an image; too big says so", async () => {
+    const { agents } = await setup([agent("a1", "kinoko")]);
+    tg.push(said("/agents", CHAT));
+    tg.push(button("sel:a1"));
+    tg.file("doc1", new TextEncoder().encode("hello file"));
+    tg.push({ message: { message_id: 3, chat: { id: CHAT, type: "private" }, caption: "summarize this", document: { file_id: "doc1", file_name: "../notes.txt", file_size: 10 } } });
+    await until(() => agents.sent.some((s) => s.command.type === "prompt"));
+    const prompt = agents.sent.find((s) => s.command.type === "prompt")!.command;
+    const path = /\[sent from Telegram: (\S+) \(10 B\)\]/.exec(prompt.text ?? "")?.[1] ?? "";
+    expect(prompt.text).toStartWith("summarize this\n\n[sent from Telegram: ");
+    expect(path).toStartWith(join(home, ".kinoko", "telegram"));
+    expect(path).toEndWith("-notes.txt"); // its own name, no way out of the folder
+    expect(await Bun.file(path).text()).toBe("hello file");
+    expect(prompt.images).toBeUndefined();
+
+    tg.file("ph1", new Uint8Array([0xff, 0xd8, 0xff]));
+    tg.push({ message: { message_id: 4, chat: { id: CHAT, type: "private" }, photo: [{ file_id: "small", file_size: 1 }, { file_id: "ph1", file_size: 3 }] } });
+    await until(() => agents.sent.filter((s) => s.command.type === "prompt").length === 2);
+    const photo = agents.sent.filter((s) => s.command.type === "prompt")[1]!.command;
+    expect(photo.text).toMatch(/^\[sent from Telegram: \S+-photo\.jpg \(3 B\)\]$/);
+    expect(photo.images).toEqual([{ mime: "image/jpeg", data: "/9j/" }]);
+
+    tg.push({ message: { message_id: 5, chat: { id: CHAT, type: "private" }, document: { file_id: "big", file_name: "movie.mkv", file_size: 30 * 1024 * 1024 } } });
+    await until(() => texts().some((t) => t.includes("more than a bot may download")));
+  });
 });

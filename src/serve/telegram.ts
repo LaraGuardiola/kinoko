@@ -16,6 +16,21 @@ export interface TgMessage {
   /** When it was sent, epoch seconds. */
   date?: number;
   reply_to_message?: TgMessage;
+  /** The text that goes with a file. */
+  caption?: string;
+  /** A photo, in several sizes (the largest last). */
+  photo?: TgFile[];
+  document?: TgFile;
+  video?: TgFile;
+  audio?: TgFile;
+  voice?: TgFile;
+}
+
+export interface TgFile {
+  file_id: string;
+  file_name?: string;
+  mime_type?: string;
+  file_size?: number;
 }
 
 export interface TgCallback {
@@ -108,6 +123,23 @@ export class Telegram {
 
   answerCallbackQuery(id: string, signal: AbortSignal, text?: string): Promise<unknown> {
     return this.#call("answerCallbackQuery", { callback_query_id: id, ...(text ? { text } : {}) }, signal);
+  }
+
+  /** Where a file sent to the bot can be downloaded from (bots may download up to 20 MB). */
+  async getFile(id: string, signal: AbortSignal): Promise<string> {
+    const file = await this.#call<{ file_path?: string }>("getFile", { file_id: id }, signal);
+    if (!file.file_path) throw new TelegramError("Telegram gave no path for the file", 0);
+    return file.file_path;
+  }
+
+  /** The bytes of a file from getFile. */
+  async download(path: string, signal: AbortSignal): Promise<Uint8Array> {
+    const res = await fetch(`${this.#base}/file/bot${this.#token}/${path}`, { signal }).catch((e: unknown) => {
+      if (signal.aborted) throw e;
+      throw new TelegramError(this.#clean(`could not reach Telegram: ${e instanceof Error ? e.message : String(e)}`), 0);
+    });
+    if (!res.ok) throw new TelegramError(`the download failed (HTTP ${res.status})`, res.status);
+    return new Uint8Array(await res.arrayBuffer());
   }
 
   setMyCommands(commands: Array<{ command: string; description: string }>, signal: AbortSignal): Promise<unknown> {

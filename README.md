@@ -117,7 +117,7 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 
 The extensions live in their own repository,
 [kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, cliamp,
-github, herdr, mermaid, notify, permission-gate, plan-mode, vision, web. `/` then **extensions** lists them (the repository is fetched with
+github, herdr, mermaid, notify, permission-gate, plan-mode, telegram, vision, web. `/` then **extensions** lists them (the repository is fetched with
 git into `~/.kinoko/registry/extensions/`); Enter installs one into `~/.kinoko/ext/<name>/`, running
 `bun install` there when it has dependencies; Del twice removes it. Both take effect at once: the
 extension is loaded (or taken back) while kinoko runs. One that adds or removes tools changes every
@@ -153,6 +153,9 @@ In the chat: every run that ends is told with its reply (not the ones you stoppe
 those messages to prompt that agent (a steer if it is working); plain text goes to the agent selected
 last. `/agents` picks one, `/new` starts one in a project, `/status`, `/stop`, `/compact`, `/models`.
 An approval comes with ✅ Allow · ❌ Deny · ✅ This session, and the message says who answered.
+Send the bot a file or a photo (a caption becomes the prompt): it is saved in `~/.kinoko/telegram/`
+and the agent is told where; a photo also goes as an image. The other way, the `telegram` extension
+gives the model a `telegram_send` tool for files you ask to get there.
 
 ## The side panel
 
