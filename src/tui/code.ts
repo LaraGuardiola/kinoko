@@ -137,7 +137,7 @@ const NAMES: Record<string, string> = {
   rb: "Ruby", ruby: "Ruby", scala: "Scala", dart: "Dart", zig: "Zig", sql: "SQL", html: "HTML",
   xml: "XML", css: "CSS", scss: "SCSS", md: "Markdown", markdown: "Markdown", yml: "YAML", yaml: "YAML",
   toml: "TOML", ini: "INI", conf: "Config", dockerfile: "Dockerfile", diff: "Diff", patch: "Diff",
-  text: "Text", txt: "Text", tree: "Tree", mermaid: "Mermaid",
+  text: "Text", txt: "Text", tree: "Tree", mermaid: "Mermaid", vue: "Vue", svelte: "Svelte", astro: "Astro", htm: "HTML", svg: "SVG",
 };
 
 /** The language's full name for the label: "ts" reads "TypeScript". */

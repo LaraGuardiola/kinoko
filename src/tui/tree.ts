@@ -16,10 +16,13 @@ const CONNECTOR = /├──?|└──?|\|--|`--|\+--|\\--/;
 /** Where a comment starts after a name: `# why`, `// why`, `← why`, or two spaces. */
 const COMMENT_START = /\s+(?=(?:#|\/\/|←|<-+|-->?)\s)|\s{2,}(?=\S)/;
 
-/** A line of a tree: guides (│ or |, spaces) then a connector (├── └── |-- `--). */
+/** A line of a tree: guides (│ or |, spaces) then a connector (├── └── |-- `--) and a name. A box
+ *  drawn in text is not one: its ├────┤ runs on in line, and its rows end on a border (│ ┤ ┐ ┘). */
 export function isTreeLine(line: string): boolean {
   const at = CONNECTOR.exec(line);
-  return at !== null && /^[\s│|]*$/.test(line.slice(0, at.index));
+  if (at === null || !/^[\s│|]*$/.test(line.slice(0, at.index))) return false;
+  const rest = line.slice(at.index + at[0].length);
+  return /^\s*[^\s─━│┃┤┐┘┼┬┴═║]/.test(rest) && !/[│┃┤┐┘║]\s*$/.test(rest);
 }
 
 /** A fence holds a tree when at least two of its lines are tree lines. */
