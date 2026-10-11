@@ -203,7 +203,11 @@ jobs?.on(() => {
   jobsRunning = jobs.running;
   agent.announce({ type: "jobs", running: jobsRunning });
 });
-if (jobs) process.on("SIGTERM", () => process.exit(143));
+// Closing the terminal's window hangs kinoko up (SIGHUP): its jobs go with it too.
+if (jobs) {
+  process.on("SIGTERM", () => process.exit(143));
+  process.on("SIGHUP", () => process.exit(129));
+}
 const agent = new Agent({
   provider: connect(start),
   model: start.model,
