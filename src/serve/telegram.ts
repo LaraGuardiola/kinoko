@@ -13,6 +13,8 @@ export interface TgMessage {
   chat: { id: number; type: string };
   from?: TgUser;
   text?: string;
+  /** When it was sent, epoch seconds. */
+  date?: number;
   reply_to_message?: TgMessage;
 }
 

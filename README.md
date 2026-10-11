@@ -149,6 +149,11 @@ options switch the bot on or off, notifications when a run ends, prompts from th
 there. It is all kept in `~/.kinoko/integrations.json` (mode 600); `kinoko serve` runs the bot.
 Replies and prompts go through Telegram's servers.
 
+In the chat: every run that ends is told with its reply (not the ones you stopped); reply to one of
+those messages to prompt that agent (a steer if it is working); plain text goes to the agent selected
+last. `/agents` picks one, `/new` starts one in a project, `/status`, `/stop`, `/compact`, `/models`.
+An approval comes with ✅ Allow · ❌ Deny · ✅ This session, and the message says who answered.
+
 ## The side panel
 
 On a window two thirds of the screen wide or more, the screen splits in two columns: the transcript
