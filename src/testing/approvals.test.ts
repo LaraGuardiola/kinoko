@@ -140,4 +140,20 @@ describe("approvals", () => {
     ext.on("tool_call", () => ({ block: true, reason: "never" }));
     expect(ext.beforeTool({ name: "bash", args: {}, signal: new AbortController().signal })).toEqual({ block: true, reason: "never" });
   });
+
+  test("auto approve (a profile that asks nothing): an ask runs at once, unasked; a block still blocks", async () => {
+    const { agent, events, ran } = setup(["sudo ls"]);
+    agent.setAutoApprove(true);
+    await agent.prompt("go");
+    expect(ran).toEqual(["sudo ls"]);
+    expect(events.some((e) => e.type === "approval_request")).toBe(false);
+    const ext = new Extensions(() => undefined);
+    ext.on("tool_call", () => ({ block: true, reason: "hardline" }));
+    const blocked: string[] = [];
+    const strict = new Agent({ provider: caller(["rm -rf /"]), model: "t", system: "", tools: [bash(blocked)], maxTurns: 5, maxCost: 1, extensions: ext });
+    strict.setAutoApprove(true);
+    await strict.prompt("go");
+    expect(blocked).toEqual([]);
+    expect(strict.messages.find((m) => m.role === "tool")?.content).toBe("hardline");
+  });
 });

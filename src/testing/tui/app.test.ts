@@ -1700,3 +1700,22 @@ describe("background jobs in the TUI", () => {
     expect(h.screen()).not.toContain("Last lines:");
   });
 });
+
+describe("/profile", () => {
+  test("lists the six with the one in use; Enter switches, the note says what changed", async () => {
+    const home = `${ROOT}/profiles-home`;
+    mkdirSync(`${home}/.kinoko`, { recursive: true });
+    const fake = store([{ name: "web", description: "web tools", installed: true, enabled: true }]);
+    const h = await harness([], { extensions: fake.store, apply: async () => "done", integrations: { home, hubRunning: async () => false }, viewportRows: 30 });
+    h.press("/profile\r");
+    await until(h, () => frame(h).join("\n").includes("Amanita Muscaria"));
+    expect(frame(h).join("\n")).toContain("Mycena · Light and fast");
+    for (let i = 0; i < 5; i++) h.press("\x1b[B"); // mycena: web goes off
+    h.press("\r");
+    await until(h, () => h.app.marker.startsWith("Mycena:"));
+    expect(fake.toggled).toEqual(["web off"]);
+    expect(h.app.marker).toContain("1 off; thinking low");
+    expect(await Bun.file(`${home}/.kinoko/profile.json`).json()).toEqual({ name: "mycena" });
+  });
+});
+

@@ -44,7 +44,7 @@ describe("slash commands for the phone", () => {
     expect(commandList({ agent: agent() }).map((c) => c.name)).toEqual(["compact", "models", "clear", "help"]);
     const full: CommandHost = { agent: agent(), newSession: async () => undefined, thinking: { current: () => "low", set: () => "" }, catalogs: { extensions: fakeCatalog([]).store }, session: () => "", fork: async () => "" };
     expect(commandList(full).map((c) => [c.name, c.kind])).toEqual([
-      ["new", "run"], ["compact", "run"], ["thinking", "list"], ["models", "list"], ["extensions", "list"], ["session", "run"], ["clear", "run"], ["fork", "run"], ["help", "run"],
+      ["new", "run"], ["compact", "run"], ["thinking", "list"], ["models", "list"], ["extensions", "list"], ["profile", "list"], ["session", "run"], ["clear", "run"], ["fork", "run"], ["help", "run"],
     ]);
   });
 

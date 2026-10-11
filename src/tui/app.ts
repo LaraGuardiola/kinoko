@@ -50,6 +50,7 @@ import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
 import { openIntegrations } from "./integrations-menu.ts";
 import { jobsLabel, openJobs } from "./jobs-view.ts";
+import { applyProfile, currentProfile, readProfiles } from "../profiles.ts";
 import type { Jobs } from "../jobs.ts";
 import type { FilesState, IntegrationsHost } from "./integrations-menu.ts";
 import { hubRunning } from "../serve/link.ts";
@@ -1017,6 +1018,35 @@ export class App {
     this.#menuClosed();
   }
 
+  /** The profiles, the one in use marked; Enter switches to one (installs, switches, thinking, asks). */
+  #openProfiles(): void {
+    const home = this.#integrations?.home ?? process.env.HOME ?? "";
+    const loading: ListPage = { kind: "list", title: "Profiles", items: [], empty: "reading…", pick: () => undefined, stay: true };
+    this.#menu.open(loading);
+    void Promise.all([readProfiles(home), currentProfile(home)]).then(([all, current]) => {
+      this.#menu.refresh(loading, {
+        kind: "list",
+        title: "Profiles",
+        items: all.map((p) => ({ name: p.name, description: `${p.title} · ${p.description}`, current: p.name === current })),
+        empty: "",
+        hint: "Enter switches to it: what is on, how much it thinks, what it asks",
+        pick: (item) => {
+          const profile = all.find((p) => p.name === item.name);
+          if (profile === undefined) return;
+          this.#marker = this.#quiet = `switching to ${profile.title}…`;
+          void applyProfile(this.commandHost(), home, profile, AbortSignal.timeout(300_000))
+            .catch((e: unknown) => `${profile.title}: ${errorText(e)}`)
+            .then(async (note) => {
+              await this.#refreshCapabilities();
+              this.#marker = this.#quiet = note;
+              this.render();
+            });
+        },
+      });
+      this.render();
+    });
+  }
+
   #openJobs(): void {
     const jobs = this.#jobs;
     if (jobs === undefined) {
@@ -1106,6 +1136,7 @@ export class App {
     else if (item.name === "session") this.#menu.open(this.#sessionPage());
     else if (item.name === "jobs") this.#openJobs();
     else if (item.name === "integrations") openIntegrations(this.#integrationsHost());
+    else if (item.name === "profile") this.#openProfiles();
     else if (item.name === "copy") this.#menu.open(copyPage(snippets(this.#agent.messages), (s) => this.#copy(s.code)));
     else {
       this.#closeMenu();
@@ -1199,6 +1230,7 @@ export class App {
       },
       told: (note) => {
         this.#marker = this.#quiet = note;
+        void this.#refreshCapabilities(); // a profile switched from the phone: the panel says which
         this.render();
       },
     };
