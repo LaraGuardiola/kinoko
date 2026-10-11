@@ -6,13 +6,43 @@
 import { diffLines, isDiff } from "./diff.ts";
 import { highlightLine } from "./highlight.ts";
 import type { HighlightState } from "./highlight.ts";
-import { cells, visibleLength, wrapAnsi } from "./style.ts";
+import { cells, stripAnsi, visibleLength, wrapAnsi } from "./style.ts";
 import { isTree, treeRows } from "./tree.ts";
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const PANEL = `${ESC}48;2;36;38;52m`;
 const LABEL = `${ESC}3m${ESC}38;2;150;156;182m`;
+/** The copy mark after the language: a click on it copies the block (the phone app's: a tap). */
+export const COPY = "⧉";
+
+/**
+ * The blocks drawn lately, for a click on a mark: each one's code and the text of its first rows
+ * under the label. The rows under a clicked mark are matched against them: nothing hidden is
+ * written to the terminal, so the rows the phone gets and every width stay as they are.
+ */
+const copies = new Map<string, string[]>();
+const KEPT_ROWS = 8;
+
+function keep(code: string, rows: string[]): void {
+  copies.delete(code);
+  copies.set(code, rows.slice(2, 2 + KEPT_ROWS).map((r) => stripAnsi(r).trim()));
+  if (copies.size > 200) copies.delete(copies.keys().next().value ?? "");
+}
+
+/** The code of the block whose first rows are `below` (the rows under a clicked mark), if one was drawn. */
+export function copyFor(below: string[]): string | undefined {
+  const shown = below.map((r) => stripAnsi(r).trim());
+  let best: { code: string; rows: number } | undefined;
+  for (const [code, rows] of copies) {
+    const n = rows.findIndex((r, i) => r !== shown[i]);
+    const matched = n === -1 ? rows.length : n;
+    // The whole block's first rows, or as many as the screen shows; the latest drawn wins a tie.
+    if ((n === -1 || matched === shown.length) && matched > 0 && matched >= (best?.rows ?? 0)) best = { code, rows: matched };
+  }
+  return best?.code;
+}
+const MARK = `${ESC}38;2;150;156;182m`;
 
 export interface CodeOptions {
   lang: string;
@@ -52,20 +82,24 @@ export function codeBlock(lines: string[], opts: CodeOptions): string[] {
     }
   }
   rows.push(row("", inner));
+  keep(lines.join("\n"), rows);
   return rows;
 }
 
 /** Rows an extension drew for the fence (a diagram), in the same panel, uncoloured by us. */
-export function drawnBlock(drawn: string[], opts: { lang: string; width: number }): string[] {
+export function drawnBlock(drawn: string[], opts: { lang: string; width: number; code: string }): string[] {
   const inner = Math.max(12, opts.width) - 2;
-  return [row("", inner), row(label(opts.lang, inner), inner), ...drawn.map((line) => row(` ${line}`, inner)), row("", inner)];
+  const rows = [row("", inner), row(label(opts.lang, inner), inner), ...drawn.map((line) => row(` ${line}`, inner)), row("", inner)];
+  keep(opts.code, rows);
+  return rows;
 }
 
-/** The language's name in the top-right corner, a couple of columns in from the edge. A padding row
- *  above it keeps it off the pane's top edge. */
+/** The language's name in the top-right corner, then ⧉: /copy copies the block. A padding row above
+ *  it keeps it off the pane's top edge. */
 function label(lang: string, inner: number): string {
   const name = languageName(lang);
-  return name === "" ? "" : `${" ".repeat(Math.max(0, inner - name.length - 2))}${LABEL}${name}${RESET}`;
+  const named = name === "" ? " " : `${LABEL}${name}${RESET} `;
+  return `${" ".repeat(Math.max(0, inner - name.length - 2))}${named}${MARK}${COPY}${RESET}`;
 }
 
 /**

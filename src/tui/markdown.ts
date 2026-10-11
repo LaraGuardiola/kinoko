@@ -85,7 +85,7 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
       const body = lines.slice(i + 1, end);
       // Still streaming (no closing fence yet): the source, drawn once it is whole.
       const rows = color && end < lines.length ? drawn(lang, body.join("\n"), width - 3) : undefined;
-      out.push(...(rows === undefined ? codeBlock(body, { lang, width, color }) : drawnBlock(rows, { lang, width })));
+      out.push(...(rows === undefined ? codeBlock(body, { lang, width, color }) : drawnBlock(rows, { lang, width, code: body.join("\n") })));
       i = end + 1;
       continue;
     }

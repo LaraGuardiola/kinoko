@@ -88,6 +88,8 @@ export class Renderer {
   #asked: { row: number; top: number | undefined } | undefined;
   /** What was printed, for redrawing the screen after a resize the side column was on. */
   #history: string[] = [];
+  /** The last rows printed above the region, as written (margin included): what a click lands on. */
+  #printed: string[] = [];
   #lastSideErased = false;
 
   /** The screen row (1-based) the region starts on, once the terminal has said. */
@@ -160,6 +162,7 @@ export class Renderer {
     if (this.#history.length > HISTORY) this.#history.splice(0, this.#history.length - HISTORY);
     const rows = lines.flatMap((line) => wrapAnsi(line, this.#textWidth()));
     const body = rows.map((line) => ` ${line}`).join("\r\n");
+    this.#keepPrinted(rows);
     // The side column goes first: the rows about to scroll into the scrollback leave it behind.
     const out = `${SYNC_START}${this.#eraseSide()}${this.#moveToTop()}${CLEAR_BELOW}${body}\r\n`;
     if (this.#top !== undefined) this.#top += rows.length;
@@ -171,6 +174,7 @@ export class Renderer {
   /** Wipes the screen and the terminal's scrollback (/clear): the region starts again on the top row. */
   clear(): void {
     this.#history = [];
+    this.#printed = [];
     this.#sideDrawn = undefined;
     this.#lastSideErased = false;
     this.#top = 1;
@@ -187,6 +191,25 @@ export class Renderer {
     this.#write(`${erase}${back}\r\n${SHOW_CURSOR}`);
     this.#drawn = [];
     this.#cursorRow = 0;
+  }
+
+  /**
+   * What screen row `y` (1-based) shows, as written: a printed row above the region, or one of the
+   * region's. Undefined while the terminal has not said where the region is, or for a row never
+   * written. Column `x` (1-based) of the screen is cell `x - 1` of it (the margin is included).
+   */
+  rowAt(y: number): string | undefined {
+    if (this.#top === undefined) return undefined;
+    if (y >= this.#top) {
+      const line = this.#drawn[y - this.#top];
+      return line === undefined ? undefined : ` ${line}`;
+    }
+    return this.#printed.at(y - this.#top);
+  }
+
+  #keepPrinted(rows: string[]): void {
+    this.#printed.push(...rows.map((line) => ` ${line}`));
+    if (this.#printed.length > 500) this.#printed.splice(0, this.#printed.length - 500);
   }
 
   /** Columns printed text takes: beside the side column, or the screen less its margins. */
@@ -215,6 +238,8 @@ export class Renderer {
     const room = Math.max(0, this.#rows() - this.#state.lines.length);
     const rows = this.#history.flatMap((line) => wrapAnsi(line, this.#textWidth())).slice(-room);
     const body = rows.map((line) => ` ${line}\r\n`).join("");
+    this.#printed = [];
+    this.#keepPrinted(rows);
     this.#top = rows.length + 1;
     this.#drawn = [];
     this.#cursorRow = 0;

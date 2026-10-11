@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { renderMarkdown, setFenceRenderers } from "../../tui/markdown.ts";
 import { highlightLine, SYNTAX } from "../../tui/highlight.ts";
-import { languageName } from "../../tui/code.ts";
+import { copyFor, languageName } from "../../tui/code.ts";
 import { visibleLength } from "../../tui/style.ts";
 
 const ESC = String.fromCharCode(27);
@@ -84,9 +84,9 @@ describe("markdown: code blocks", () => {
     expect(out.at(-1)).toBe("after");
     const pane = out.slice(1, -1);
     for (const row of pane) expect(visibleLength(row)).toBe(40);
-    // A padding row, then the full language name top right, two columns in from the edge.
+    // A padding row, then the full language name top right and the copy mark, two columns in from the edge.
     expect(strip(pane[0] ?? "").trim()).toBe("");
-    expect(strip(pane[1] ?? "")).toMatch(/ {20,}TypeScript {3}$/);
+    expect(strip(pane[1] ?? "")).toMatch(/ {20,}TypeScript ⧉ $/);
     expect(strip(pane[2] ?? "")).toStartWith("  const a = 1;");
     expect(strip(pane[3] ?? "")).toStartWith("  function f()");
     // The panel background is never cut mid-row by a full reset.
@@ -236,5 +236,16 @@ describe("markdown: markup and boxes", () => {
     const out = strip(renderMarkdown(box, { width: 40 }));
     expect(out).not.toContain("Tree");
     expect(renderMarkdown(box, { width: 40 })).not.toContain(`${ESC}[3m`);
+  });
+});
+
+describe("markdown: the copy mark", () => {
+  test("the rows under a block's label find its code; a longer block beats one its rows begin like", () => {
+    const short = renderMarkdown("```ts\nconst a = 1;\n```", { width: 40 }).split("\n");
+    const long = renderMarkdown("```ts\nconst a = 1;\nconst b = 2;\n```", { width: 40 }).split("\n");
+    // On screen: the rows printed under the label, with the renderer's margin and whatever follows.
+    expect(copyFor(short.slice(2).map((r) => ` ${r}`).concat([" next paragraph"]))).toBe("const a = 1;");
+    expect(copyFor(long.slice(2).map((r) => ` ${r}`))).toBe("const a = 1;\nconst b = 2;");
+    expect(copyFor([" nothing drawn like this"])).toBeUndefined();
   });
 });

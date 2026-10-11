@@ -1,6 +1,7 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
+import { ANSI as STYLE } from "../../tui/style.ts";
 import type { ModelsHost } from "../../tui/app.ts";
 import type { Catalog, Change, Entry } from "../../catalog.ts";
 import { EXTENSIONS } from "../../catalog.ts";
@@ -1292,18 +1293,51 @@ describe("the extensions and skills pages", () => {
 });
 
 describe("the mouse in the menu", () => {
-  test("it is the menu's only while the menu is open; the wheel moves the selection", async () => {
+  test("clicks only, until the menu opens: then motion too, and the wheel moves the selection", async () => {
     const h = await harness([], { viewportRows: 30 });
     h.app.render();
     expect(h.out.join("")).not.toContain("\x1b[?1003h");
+    expect(h.out.join("")).toContain("\x1b[?1000h\x1b[?1006h");
     h.press("/");
     expect(h.out.join("")).toContain("\x1b[?1003h\x1b[?1006h");
     h.app.handleKey({ name: "mouse", mouse: { x: 1, y: 1, button: 0, press: true, wheel: "down" } });
     await paced();
     h.app.render();
     expect(h.screen()).toContain("→ models");
-    h.press("\x1b"); // closed: the terminal gets its mouse back
-    expect(h.out.join("")).toContain("\x1b[?1003l\x1b[?1006l");
+    h.press("\x1b"); // closed: back to clicks only
+    expect(h.out.join("")).toContain("\x1b[?1003l\x1b[?1000h\x1b[?1006h");
+  });
+});
+
+describe("a click on a code block's mark", () => {
+  test("copies that block (OSC 52); a click anywhere else copies nothing", async () => {
+    // No clipboard tool: the test must not write to this machine's clipboard.
+    const saved = { wayland: process.env.WAYLAND_DISPLAY, display: process.env.DISPLAY };
+    delete process.env.WAYLAND_DISPLAY;
+    delete process.env.DISPLAY;
+    try {
+      const reply = "First:\n```ts\nconst a = 1;\n```\nThen:\n```sh\nls -la\n```";
+      const h = await harness([[{ type: "text", delta: reply }, { type: "done", stop: "end" }]], { viewportRows: 30, viewportCols: 60 });
+      h.press("code please\r");
+      await settle(h.agent);
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      h.app.render();
+      h.app.handleKey({ name: "cursor-report", at: { row: 28, col: 1 } });
+      const copied = (): string[] => h.out.filter((s) => s.startsWith("\x1b]52;c;")).map((s) => Buffer.from(s.slice(7, -1), "base64").toString());
+      const click = (x: number, y: number): void => h.app.handleKey({ name: "mouse", mouse: { x, y, button: 0, press: true } });
+      for (let y = 1; y <= 30; y++) for (let x = 1; x <= 60; x++) click(x, y);
+      // Each mark has three cells that take a click (it and one either side): both blocks, three times.
+      expect(copied().toSorted()).toEqual([...Array(3).fill("const a = 1;"), ...Array(3).fill("ls -la")].toSorted());
+      // The note only informs: cream, no inverse background.
+      h.app.render();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      h.app.render();
+      expect(h.out.join("")).toContain(`${STYLE.cream}copied: 1 line${STYLE.reset}`);
+      expect(h.out.join("")).not.toContain(`${STYLE.inverse}copied`);
+    } finally {
+      if (saved.wayland !== undefined) process.env.WAYLAND_DISPLAY = saved.wayland;
+      if (saved.display !== undefined) process.env.DISPLAY = saved.display;
+    }
   });
 });
 

@@ -3,6 +3,8 @@
 import type { Entry } from "../catalog.ts";
 import type { ProviderRequest, Message } from "../types.ts";
 import type { ListPage, MenuItem } from "./menu.ts";
+import { languageName } from "./code.ts";
+import type { Snippet } from "./snippets.ts";
 import { renderTable } from "./table.ts";
 
 export const ROOT: MenuItem[] = [
@@ -11,6 +13,7 @@ export const ROOT: MenuItem[] = [
   { name: "extensions", description: "Install, switch on or off, update or remove extensions" },
   { name: "skills", description: "Install, switch on or off, update or remove skills" },
   { name: "session", description: "This session: file, id, messages, tokens" },
+  { name: "copy", description: "Copy a code block from the replies (or click its ⧉)" },
   { name: "new", description: "Start a new session: empty context, same model" },
   { name: "clear", description: "Clear the screen (the context stays)" },
   { name: "compact", description: "Summarize the history now" },
@@ -51,6 +54,25 @@ export function thinkingPage(current: string | undefined, choose: (profile: Thin
     pick: (item) => {
       const profile = THINKING.find((p) => p.name === item.name);
       if (profile) choose(profile);
+    },
+  };
+}
+
+/** The copy page: the replies' code blocks, newest first; Enter or a click copies one. */
+export function copyPage(list: Snippet[], copy: (snippet: Snippet) => void): ListPage {
+  return {
+    kind: "list",
+    title: "Copy",
+    items: list.map((s, i) => {
+      const lines = s.code.split("\n");
+      const first = (lines.find((l) => l.trim() !== "") ?? "").trim();
+      const preview = first.length > 48 ? `${first.slice(0, 47)}…` : first;
+      return { name: languageName(s.lang) || "Text", key: String(i), description: `${preview}  · ${lines.length} line${lines.length === 1 ? "" : "s"}` };
+    }),
+    empty: "no code blocks in the replies yet",
+    pick: (item) => {
+      const snippet = list[Number(item.key)];
+      if (snippet) copy(snippet);
     },
   };
 }
@@ -120,6 +142,8 @@ const KEYS: Array<[string, string]> = [
   ["Ctrl-P / Ctrl-N", "Previous / next history entry"],
   ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],
   ["@", "Reference a file: lists the directory as you type; arrows, Tab or Enter to complete"],
+  ["Click ⧉", "Copy the code block (the mouse is kinoko's)"],
+  ["Shift + wheel / drag", "The terminal's: scroll the history, select text"],
 ];
 
 /** /help: one table for the keys, one for the menu (built from ROOT, so it cannot fall behind). */
