@@ -15,6 +15,9 @@ import { projects } from "./projects.ts";
 
 export const PROTOCOL = 1;
 
+/** Told of every agent's events (the bridge). */
+export type Watcher = (agent: string, event: AgentEvent) => void;
+
 interface Socket {
   device: Device;
   attached: Set<string>;
@@ -58,8 +61,10 @@ type Incoming = {
   remember?: boolean;
 };
 
-export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Agents; stop: () => void } {
+export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Agents; watch: (listener: Watcher) => () => void; stop: () => void } {
   const sockets = new Set<ServerWebSocket<Socket>>();
+  // Every agent's events, attached or not: the Telegram bridge listens here.
+  const watchers = new Set<Watcher>();
   const log = opts.log ?? (() => undefined);
   const send = (ws: ServerWebSocket<Socket>, msg: object): void => void ws.send(JSON.stringify(msg));
   const broadcast = (msg: object): void => {
@@ -71,6 +76,7 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
     spawn: opts.spawn,
     onChange: () => broadcast({ type: "agents", agents: agents.list() }),
     onEvent: (id: string, event: AgentEvent) => {
+      for (const w of watchers) w(id, event);
       const msg = JSON.stringify({ type: "event", agent: id, event: event.type === "message_end" ? { ...event, message: light(event.message) } : event });
       for (const ws of sockets) if (ws.data.attached.has(id)) ws.send(msg);
     },
@@ -211,6 +217,10 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
   return {
     server,
     agents,
+    watch: (listener) => {
+      watchers.add(listener);
+      return () => watchers.delete(listener);
+    },
     stop: () => {
       agents.stopAll();
       links?.stop();

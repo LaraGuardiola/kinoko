@@ -14,6 +14,8 @@ import { renderMarkdown, setFenceRenderers } from "../tui/markdown.ts";
 import { Devices } from "./devices.ts";
 import { qrText } from "./qr.ts";
 import { serve } from "./server.ts";
+import { Bridge } from "./bridge.ts";
+import { projects } from "./projects.ts";
 import { expose, tailnet, unexpose } from "./tailscale.ts";
 
 const HOME = join(process.env.HOME ?? homedir(), ".kinoko");
@@ -113,6 +115,12 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   setFenceRenderers((lang) => ext.renderer(lang));
   const hub = serve({ port, devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
 
+  // Telegram (set up from the TUI's /integrations): it answers while the hub runs.
+  const bridgeStop = new AbortController();
+  const bridge = new Bridge({ home: process.env.HOME ?? homedir(), agents: hub.agents, projects: () => projects(join(HOME, "sessions")), log: (line) => out(dim(`${time()} ${line}`)) });
+  hub.watch((agent, event) => bridge.event(agent, event));
+  void bridge.run(bridgeStop.signal);
+
   let url = `http://127.0.0.1:${port}`;
   let shared = false;
   const signal = new AbortController().signal;
@@ -145,6 +153,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const stop = async (): Promise<void> => {
     if (stopping) return;
     stopping = true;
+    bridgeStop.abort();
     hub.stop();
     if (shared) await unexpose({ publicPort, funnel }, new AbortController().signal);
     await unlink(STATE).catch(() => undefined);
