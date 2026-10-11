@@ -162,4 +162,85 @@ describe("serve: the hub", () => {
       hub.stop();
     }
   });
+
+  test("approvals: every device sees the pending call in the list, an attached one gets the events, approve reaches the agent once", async () => {
+    // A child whose prompt runs a gated call and waits; approve settles it (the first one only).
+    const answers: object[] = [];
+    const spawn: Spawn = (_cmd, cwd): Child => {
+      const out = pipe();
+      const exit = { done: (_code: number): void => undefined };
+      const emit = (event: object): void => out.push(JSON.stringify({ type: "event", event }));
+      const call = { id: "c1", name: "bash", args: { command: "sudo ls" } };
+      let waiting = false;
+      return {
+        write: (line) => {
+          const c = JSON.parse(line) as { id: string; type: string; allow?: boolean };
+          if (c.type === "get_state") out.push(JSON.stringify({ type: "ok", id: c.id, state: { running: false, model: "qwen", messages: 0, cwd } }));
+          if (c.type === "get_messages") out.push(JSON.stringify({ type: "ok", id: c.id, messages: [] }));
+          if (c.type === "prompt") {
+            out.push(JSON.stringify({ type: "ok", id: c.id, text: "started" }));
+            emit({ type: "run_start", prompt: "go" });
+            emit({ type: "tool_start", call });
+            emit({ type: "approval_request", id: "q1", call, reason: "sudo needs confirmation" });
+            waiting = true;
+          }
+          if (c.type === "approve") {
+            answers.push(c);
+            if (!waiting) return out.push(JSON.stringify({ type: "error", id: c.id, detail: "not waiting: already answered" }));
+            waiting = false;
+            out.push(JSON.stringify({ type: "ok", id: c.id, text: c.allow ? "allowed" : "denied" }));
+            emit({ type: "approval_end", id: "q1", allow: c.allow, by: "app" });
+            emit({ type: "tool_end", call });
+            emit({ type: "run_end", reason: "done" });
+          }
+        },
+        lines: out.iter,
+        errors: pipe().iter,
+        exited: new Promise((r) => (exit.done = r)),
+        kill: () => (out.end(), exit.done(0)),
+      };
+    };
+    const devices = new Devices(join(dir, "approvals.json"));
+    const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: dir, version: "t", spawn });
+    const pair = async (name: string): Promise<string> =>
+      ((await (await fetch(`http://127.0.0.1:${hub.server.port}/v1/pair`, { method: "POST", body: JSON.stringify({ code: await devices.code(), name }) })).json()) as { token: string }).token;
+    try {
+      const phone = client(`ws://127.0.0.1:${hub.server.port}/v1/ws`, await pair("phone"));
+      const tablet = client(`ws://127.0.0.1:${hub.server.port}/v1/ws`, await pair("tablet")); // never attached
+      await phone.next("hello");
+      await tablet.next("hello");
+      phone.send({ id: "1", type: "start", cwd: dir });
+      const id = ((await phone.next("ok")) as { agent: { id: string } }).agent.id;
+      phone.send({ id: "2", type: "prompt", agent: id, text: "go" });
+      expect(await phone.next("ok")).toMatchObject({ id: "2", text: "started" });
+
+      type Listed = { agents: Array<{ approval?: { id: string; call: { id: string; name: string; args: object }; reason: string } }> };
+      let listed = (await tablet.next("agents")) as Listed;
+      // oxlint-disable-next-line no-await-in-loop -- the list is pushed on each change
+      while (listed.agents[0]?.approval === undefined) listed = (await tablet.next("agents")) as Listed;
+      expect(listed.agents[0]?.approval).toEqual({ id: "q1", call: { id: "c1", name: "bash", args: { command: "sudo ls" } }, reason: "sudo needs confirmation" });
+      let e = (await phone.next("event")).event as { type: string };
+      // oxlint-disable-next-line no-await-in-loop -- events arrive one after another
+      while (e.type !== "approval_request") e = (await phone.next("event")).event as { type: string };
+
+      phone.send({ id: "3", type: "approve", agent: id });
+      expect(((await phone.next("error")) as { detail: string }).detail).toBe("approve needs request and allow");
+      phone.send({ id: "4", type: "approve", agent: id, request: "q1", allow: true, remember: true });
+      expect(await phone.next("ok")).toMatchObject({ id: "4", text: "allowed" });
+      tablet.send({ id: "5", type: "approve", agent: id, request: "q1", allow: false });
+      expect(((await tablet.next("error")) as { detail: string }).detail).toBe("not waiting: already answered");
+      expect(answers[0]).toMatchObject({ type: "approve", request: "q1", allow: true, remember: true, by: "app" });
+
+      // oxlint-disable-next-line no-await-in-loop -- the list is pushed on each change
+      while (listed.agents[0]?.approval !== undefined) listed = (await tablet.next("agents")) as Listed;
+      e = (await phone.next("event")).event as { type: string };
+      // oxlint-disable-next-line no-await-in-loop -- events arrive one after another
+      while (e.type !== "approval_end") e = (await phone.next("event")).event as { type: string };
+      expect(e).toMatchObject({ type: "approval_end", id: "q1", allow: true, by: "app" });
+      phone.close();
+      tablet.close();
+    } finally {
+      hub.stop();
+    }
+  });
 });
