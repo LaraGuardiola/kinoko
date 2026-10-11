@@ -760,3 +760,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Psilocybe (the media profile) switches the skill on.
 - Checked on the user's machine: `list` showed their two paired DualSense; a 10 s `scan` found their speaker ("LG CM2460(04)", audio-card) among the neighbours' TVs; a sandbox kinoko with the skill answered "which Bluetooth devices are paired" through bt.sh. Nothing was paired or connected (the speaker needs its pairing mode: the user's to do).
 - Tests (kinoko-skills): bt.sh against a fake bluetoothctl and pactl on PATH: list order and nameless count, a speaker never seen (scan, pair, connect, default sink), a paired controller (no scan, sound untouched), not in pairing mode, two of a name, nothing found, audio on a controller at once, forget. Both repos' checks pass.
+
+## feat/capabilities-integrations: Integrations in the [Capabilities] lines; the menu in their order (branch feat/capabilities-integrations)
+- The startup panel has an `Integrations:` line under Extensions: `telegram`, `telegram (off)` (the bot switched off), `telegram (not paired)`, or `none (/integrations)`. It follows /integrations live, like skills and extensions: every save there (set up, pair, a switch, disconnect) calls the host's `changed`, which rewrites the lines in place.
+- The slash menu lists skills, extensions, integrations together and in that order, as the panel does (session, profile and jobs follow).
+- Tests: integrationsSummary's four cases; switching the bot off in /integrations rewrites the line (fails without the hook); the menu's order. Seen live in tmux with a sandbox HOME and a fake bot: off → on rewrote the line.
+- Not done: other integrations (only Telegram exists).

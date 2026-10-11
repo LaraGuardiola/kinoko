@@ -26,6 +26,13 @@ export interface Integrations {
   telegram?: TelegramSettings;
 }
 
+/** The panel's [Capabilities] line: each integration set up, and when it does not run, why. */
+export function integrationsSummary(all: Integrations): string {
+  const t = all.telegram;
+  if (t === undefined) return "";
+  return t.chat === undefined ? "telegram (not paired)" : t.on ? "telegram" : "telegram (off)";
+}
+
 export function integrationsFile(home: string): string {
   return join(home, ".kinoko", "integrations.json");
 }

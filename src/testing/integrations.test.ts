@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { integrationsFile, readIntegrations, setTelegram } from "../integrations.ts";
+import { integrationsFile, integrationsSummary, readIntegrations, setTelegram } from "../integrations.ts";
 
 const home = mkdtempSync(join(tmpdir(), "kinoko-integrations-"));
 afterAll(() => rmSync(home, { recursive: true, force: true }));
@@ -16,6 +16,14 @@ describe("integrations.json", () => {
     expect((await readIntegrations(home)).telegram).toEqual({ token: "1:t", bot: "b", chat: 5, name: "Lara", notify: false, prompts: true, approvals: true, on: true });
     await setTelegram(home, () => undefined);
     expect(await readIntegrations(home)).toEqual({});
+  });
+
+  test("the panel's line: none, set up but not paired, running, or switched off", () => {
+    const t = { token: "1:t", bot: "b", notify: true, prompts: true, approvals: true, on: true };
+    expect(integrationsSummary({})).toBe("");
+    expect(integrationsSummary({ telegram: t })).toBe("telegram (not paired)");
+    expect(integrationsSummary({ telegram: { ...t, chat: 5 } })).toBe("telegram");
+    expect(integrationsSummary({ telegram: { ...t, chat: 5, on: false } })).toBe("telegram (off)");
   });
 
   test("a broken file or one without a token counts as not set up; missing switches are on", async () => {

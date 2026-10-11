@@ -3,7 +3,7 @@
 // options. Everything lands in ~/.kinoko/integrations.json; `kinoko serve` runs the bot.
 
 import { hostname } from "node:os";
-import { readIntegrations, setTelegram } from "../integrations.ts";
+import { readIntegrations, setTelegram as writeTelegram } from "../integrations.ts";
 import type { TelegramSettings } from "../integrations.ts";
 import { Telegram, TelegramError, waitForPairing } from "../serve/telegram.ts";
 import type { InfoPage, InputPage, ListPage, MenuItem, MenuPage } from "./menu.ts";
@@ -18,6 +18,8 @@ export interface IntegrationsHost {
   swap: (from: MenuPage, to: MenuPage) => void;
   /** A note above the input. */
   note: (text: string) => void;
+  /** Called after the settings change: the panel's [Capabilities] lines follow. */
+  changed?: () => void;
   /** Whether `kinoko serve` runs (the bot answers only then). */
   hubRunning: () => Promise<boolean>;
   /** The telegram extension (files from the model to the chat): its state, and switching it on. */
@@ -32,6 +34,13 @@ export interface IntegrationsHost {
 export type FilesState = "on" | "off" | "missing";
 
 const PAIRING_MS = 10 * 60_000;
+
+/** Saves Telegram's settings, then lets the host know (the panel's line follows). */
+async function save(host: IntegrationsHost, change: Parameters<typeof writeTelegram>[1]): ReturnType<typeof writeTelegram> {
+  const saved = await writeTelegram(host.home, change);
+  host.changed?.();
+  return saved;
+}
 
 /** The root page: each integration with its state (● on, ○ set up but off). */
 export function openIntegrations(host: IntegrationsHost): void {
@@ -92,7 +101,7 @@ function tokenPage(host: IntegrationsHost, why?: string): InputPage {
       new Telegram(token, host.apiBase)
         .getMe(AbortSignal.any([stop.signal, AbortSignal.timeout(10_000)]))
         .then(async (me) => {
-          const saved = await setTelegram(host.home, () => ({ token, bot: me.username ?? "", notify: true, prompts: true, approvals: true, on: true }));
+          const saved = await save(host, () => ({ token, bot: me.username ?? "", notify: true, prompts: true, approvals: true, on: true }));
           if (saved) pair(host, saved, checking);
         })
         .catch((e: unknown) => {
@@ -125,7 +134,7 @@ function pair(host: IntegrationsHost, saved: TelegramSettings, from?: MenuPage):
   waitForPairing(api, code, AbortSignal.any([stop.signal, AbortSignal.timeout(PAIRING_MS)]))
     .then(async (message) => {
       const name = message.from?.first_name ?? message.from?.username ?? "you";
-      await setTelegram(host.home, (t) => (t ? { ...t, chat: message.chat.id, name } : t));
+      await save(host, (t) => (t ? { ...t, chat: message.chat.id, name } : t));
       await api.sendMessage(message.chat.id, `🍄 paired with ${hostname()}`, AbortSignal.timeout(10_000)).catch(() => undefined);
       host.note(`Telegram: paired with ${name}`);
       openTelegram(host, page);
@@ -207,12 +216,12 @@ function optionsPage(host: IntegrationsHost, t: TelegramSettings, hub: string, f
       }
       if (item.name !== "on" && item.name !== "notify" && item.name !== "prompts" && item.name !== "approvals") return;
       const key = item.name;
-      void setTelegram(host.home, (cur) => (cur ? { ...cur, [key]: !cur[key] } : cur)).then((next) => {
+      void save(host, (cur) => (cur ? { ...cur, [key]: !cur[key] } : cur)).then((next) => {
         if (next) host.swap(page, optionsPage(host, next, hub, files));
       });
     },
     remove: () => {
-      void setTelegram(host.home, () => undefined).then(() => {
+      void save(host, () => undefined).then(() => {
         host.note("Telegram: disconnected, the token is forgotten");
         openIntegrations(host);
       });
