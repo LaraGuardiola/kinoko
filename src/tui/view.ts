@@ -63,6 +63,8 @@ export interface RegionInput {
   /** A quiet note (compaction): cream, no background. */
   markerCream?: boolean;
   queued: QueuedView[];
+  /** An approval waiting for the user: its rows, in the marker's place. */
+  approval?: string[];
   editorLines: string[];
   editorRow: number;
   editorCol: number;
@@ -193,6 +195,7 @@ export function liveRegion(input: RegionInput): Region {
     const style = input.markerAlert ? ANSI.amanita : input.markerCream ? ANSI.cream : ANSI.inverse;
     tail.push("", `${style}${input.marker}${ANSI.reset}`);
   }
+  if (input.approval !== undefined) tail.push(...input.approval);
   if (input.queued.length > 0) {
     // A row of air, the keys that act on the queue, then the messages waiting, in cream.
     const steering = input.queued.some((item) => item.kind === "steer");

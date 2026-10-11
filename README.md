@@ -112,7 +112,7 @@ transcript: rows at most `width` wide, or undefined to show the source. It is ca
 is closed, its drawing kept while the reply streams; one that throws or draws too wide shows the source.
 
 Events: `session_start`, `context` (rewrite the messages before a request), `before_provider_request`,
-`tool_call` (mutate args, or block), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
+`tool_call` (mutate args, block, or `{ask: true, reason}` to ask the user first), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
 throws is logged and skipped; a blocked call returns its reason to the model instead of running.
 
 The extensions live in their own repository,
@@ -178,6 +178,10 @@ out. `"none"` sends only a reply cut by the output limit, for models that copy o
 a row, after 2s, 4s, 8s...; the partial reply is dropped and the note above the input says so. Esc
 during the wait stops the run. `0` never retries.
 
+`"approvalTimeoutMs"` (default 600000, 10 min): a call an extension asks about (permission-gate's
+`sudo`, `rm -rf`...) waits this long for an answer (y, n or a in the TUI, or from the phone), then
+counts as denied.
+
 ```json
 { "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any",
   "model": "qwen3.8-flash-next-coder-iq1_m-120k", "contextWindow": 122880,
@@ -202,7 +206,8 @@ Anthropic: `"provider": "anthropic"` with a Console API key (`apiKey`, or `$ANTH
 - **`-p "prompt"`** — non-interactive: the full agent loop, the final answer on stdout, tool
   activity on stderr, non-zero exit if the run was aborted or failed.
 - **`--mode rpc`** — JSONL on stdin, JSONL on stdout. Commands: `prompt`, `steer`, `follow_up`,
-  `abort`, `get_state`, `get_messages`. Out: the AgentEvent stream. `steer`/`follow_up`/`abort` work mid-run.
+  `abort`, `get_state`, `get_messages`, `approve` (`request`, `allow`, `remember?`: answers an
+  `approval_request`). Out: the AgentEvent stream. `steer`/`follow_up`/`abort`/`approve` work mid-run.
 - **`kinoko serve`** — the hub for the phone app ([kinoko-android](https://github.com/LaraGuardiola/kinoko-android)):
   runs agents (an rpc child each, in its project) and streams their events to paired devices over a
   WebSocket ([docs/protocol.md](docs/protocol.md)). It listens on localhost and shares itself with

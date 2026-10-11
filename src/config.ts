@@ -23,6 +23,8 @@ export interface Config {
   thinkingReplay?: "turn" | "none";
   // A dropped connection or a 429/5xx is retried this many times in a row (2s, 4s, 8s...); 0: never.
   retries?: number;
+  // An approval nobody answers is a deny after this many ms (default 10 min).
+  approvalTimeoutMs?: number;
   // The git repositories /extensions and /skills install from (kinoko-extensions, kinoko-skills).
   extensionsRepo?: string;
   skillsRepo?: string;
@@ -39,7 +41,7 @@ export const DEFAULTS: Config = {
   maxOutputTokens: 8192,
 }
 
-const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens", "thinkingBudget", "retries"]);
+const NUM_KEYS: ReadonlySet<string> = new Set(["maxTurns", "maxCost", "contextWindow", "maxOutputTokens", "thinkingBudget", "retries", "approvalTimeoutMs"]);
 const FILE_KEYS: ReadonlySet<string> = new Set([
   "provider",
   "baseUrl",
@@ -54,6 +56,7 @@ const FILE_KEYS: ReadonlySet<string> = new Set([
   "label",
   "thinkingReplay",
   "retries",
+  "approvalTimeoutMs",
   "extensionsRepo",
   "skillsRepo",
 ]);

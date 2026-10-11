@@ -1,6 +1,7 @@
 import { expect, test, describe } from "bun:test";
 import { Rpc } from "../rpc.ts";
 import { Agent } from "../loop.ts";
+import { Extensions } from "../ext.ts";
 import type { RpcReply } from "../rpc.ts";
 import type { StreamEvent, Tool } from "../types.ts";
 
@@ -209,5 +210,32 @@ describe("rpc mode", () => {
     for (const line of r.lines) expect(line.type).toMatch(/event|ok|error/);
     const textDeltas = r.lines.filter((l) => l.event?.type === "message_delta");
     expect(textDeltas).toHaveLength(1); // newlines inside content never split a line
+  });
+});
+describe("rpc approve", () => {
+  test("answers an approval_request; a second answer is refused; bad input is answered", async () => {
+    const ext = new Extensions(() => undefined);
+    ext.on("tool_call", () => ({ ask: true, reason: "check" }));
+    const { stream } = scripted([[{ type: "tool_call", call: { id: "c1", name: "slow", args: {} } }, { type: "done", stop: "tool_use" }]], 1);
+    const agent = new Agent({ provider: { stream }, model: "m", system: "", tools: [slow], maxTurns: 8, maxCost: 10, extensions: ext });
+    const lines: Parsed[] = [];
+    const rpc = new Rpc({ agent, model: "m", write: (text) => lines.push(...parse(text)) });
+    rpc.handle(JSON.stringify({ type: "prompt", text: "go" }));
+    let request: { id?: string } | undefined;
+    for (let i = 0; i < 100 && request === undefined; i++) {
+      // oxlint-disable-next-line no-await-in-loop -- polling for the event is the point
+      await new Promise((r) => setTimeout(r, 2));
+      request = lines.find((l) => l.event?.type === "approval_request")?.event as { id?: string } | undefined;
+    }
+    rpc.handle(JSON.stringify({ type: "approve", id: "x" }));
+    rpc.handle(JSON.stringify({ type: "approve", id: "a1", request: request?.id, allow: true }));
+    rpc.handle(JSON.stringify({ type: "approve", id: "a2", request: request?.id, allow: false }));
+    // oxlint-disable-next-line no-await-in-loop -- polling is the point
+    for (let i = 0; i < 60 && agent.state === "running"; i++) await new Promise((r) => setTimeout(r, 5));
+    expect(lines.find((l) => l.id === "x")?.detail).toBe("approve needs request and allow");
+    expect(lines.find((l) => l.id === "a1")).toMatchObject({ type: "ok", text: "allowed" });
+    expect(lines.find((l) => l.id === "a2")?.type).toBe("error");
+    expect(lines.find((l) => l.event?.type === "approval_end")?.event).toMatchObject({ allow: true, by: "app" });
+    expect(agent.messages.find((m) => m.role === "tool")?.content).toBe("tool done");
   });
 });
