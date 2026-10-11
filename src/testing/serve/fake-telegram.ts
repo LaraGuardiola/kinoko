@@ -10,6 +10,8 @@ export interface FakeTelegram {
   calls: Array<{ method: string; body: Record<string, unknown> }>;
   /** An update for the next getUpdates (ids are given in order). */
   push: (update: Omit<TgUpdate, "update_id">) => void;
+  /** A file the bot can download, by its file_id. */
+  file: (id: string, bytes: Uint8Array) => void;
   stop: () => void;
 }
 
@@ -18,10 +20,14 @@ export function fakeTelegram(): FakeTelegram {
   let nextId = 100;
   let wake: (() => void) | undefined;
   const calls: FakeTelegram["calls"] = [];
+  const files = new Map<string, Uint8Array>();
   const server = Bun.serve({
     port: 0,
     async fetch(req) {
-      const [, bot, method] = new URL(req.url).pathname.split("/");
+      const parts = new URL(req.url).pathname.split("/");
+      // A file's bytes: /file/bot<token>/<path>.
+      if (parts[1] === "file") return parts[2] === `bot${GOOD_TOKEN}` ? new Response(files.get(parts.slice(3).join("/")) ?? "", { status: files.has(parts.slice(3).join("/")) ? 200 : 404 }) : new Response("", { status: 401 });
+      const [, bot, method] = parts;
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
       calls.push({ method: method ?? "", body });
       if (bot !== `bot${GOOD_TOKEN}`) return Response.json({ ok: false, error_code: 401, description: "Unauthorized" }, { status: 401 });
@@ -38,6 +44,7 @@ export function fakeTelegram(): FakeTelegram {
         }
         return Response.json({ ok: true, result: pick() });
       }
+      if (method === "getFile") return Response.json({ ok: true, result: { file_id: body.file_id, file_path: `docs/${String(body.file_id)}` } });
       if (method === "sendMessage") return Response.json({ ok: true, result: { message_id: calls.length, chat: { id: body.chat_id, type: "private" }, text: body.text } });
       return Response.json({ ok: true, result: true });
     },
@@ -49,6 +56,7 @@ export function fakeTelegram(): FakeTelegram {
       updates.push({ update_id: nextId++, ...update });
       wake?.();
     },
+    file: (id, bytes) => void files.set(`docs/${id}`, bytes),
     stop: () => void server.stop(true),
   };
 }

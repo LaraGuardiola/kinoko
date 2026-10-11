@@ -7,6 +7,9 @@
 //   - asks approvals with buttons, and edits the message when anyone answers.
 
 import { stat } from "node:fs/promises";
+import { join } from "node:path";
+import { fileOf, filePrompt, receive } from "./bridge-files.ts";
+import type { Image } from "../types.ts";
 import type { ApprovalBy } from "../approvals.ts";
 import { integrationsFile, readIntegrations } from "../integrations.ts";
 import type { TelegramSettings } from "../integrations.ts";
@@ -46,7 +49,7 @@ export class Bridge {
   #runs = new Map<string, { started: number; reply: string }>();
   #fromChat = new Set<string>(); // runs started from the chat: their end is told even with notify off
   #asks = new Map<string, Promise<{ message: number; text: string } | undefined>>();
-  #pending: string | undefined; // text waiting for "which agent?"
+  #pending: { text: string; images?: Image[] } | undefined; // waiting for "which agent?"
   #choices: string[] = []; // the last list of buttons' values (projects, models)
   #strangers = new Set<number>();
 
@@ -150,7 +153,7 @@ export class Bridge {
   async #update(u: TgUpdate, t: TelegramSettings, api: Telegram, signal: AbortSignal): Promise<void> {
     if (u.callback_query) return this.#button(u.callback_query, t, api, signal);
     const m = u.message;
-    if (m === undefined || m.text === undefined) return;
+    if (m === undefined || (m.text === undefined && fileOf(m) === undefined)) return;
     if (m.chat.id !== t.chat) {
       if (!this.#strangers.has(m.chat.id)) this.#o.log(`telegram: ignoring chat ${m.chat.id} (not the paired one)`);
       this.#strangers.add(m.chat.id);
@@ -158,24 +161,33 @@ export class Bridge {
     }
     if (m.date !== undefined && Date.now() / 1000 - m.date > STALE_S) return;
     if (!t.prompts) return void this.#send(t, "Prompts from Telegram are off (kinoko: /integrations).");
-    const text = m.text.trim();
+    let text = (m.text ?? "").trim();
     if (text.startsWith("/")) return this.#command(text, t);
+    let images: Image[] | undefined;
+    if (fileOf(m) !== undefined) {
+      // A file: saved on this computer first; the prompt says where (a photo goes as an image too).
+      const got = await receive(api, m, join(this.#o.home, ".kinoko", "telegram"), signal).catch((e: unknown) => e as Error);
+      if (got instanceof Error) return void this.#send(t, `⚠️ ${escapeHtml(got.message)}`);
+      this.#o.log(`telegram: received ${got.path}`);
+      text = filePrompt(m.caption, got);
+      images = got.image ? [got.image] : undefined;
+    }
     const about = m.reply_to_message ? this.#about.get(m.reply_to_message.message_id) : undefined;
     const target = about ?? this.#selected;
     if (target === undefined || this.#o.agents.info(target) === undefined) {
-      this.#pending = text;
+      this.#pending = { text, images };
       return void this.#send(t, "Which agent?", this.#agentButtons());
     }
-    await this.#deliver(target, text, t);
+    await this.#deliver(target, text, t, images);
   }
 
-  async #deliver(agent: string, text: string, t: TelegramSettings): Promise<void> {
+  async #deliver(agent: string, text: string, t: TelegramSettings, images?: Image[]): Promise<void> {
     const info = this.#o.agents.info(agent);
     if (!info) return;
     this.#selected = agent;
     const busy = info.state === "running" || info.state === "starting";
     if (!busy) this.#fromChat.add(agent);
-    const reply = await this.#o.agents.send(agent, { type: busy ? "steer" : "prompt", text });
+    const reply = await this.#o.agents.send(agent, { type: busy ? "steer" : "prompt", text, ...(images ? { images } : {}) });
     if (reply.type !== "ok") {
       this.#fromChat.delete(agent);
       return void this.#send(t, `⚠️ ${escapeHtml(reply.detail ?? "refused")}`);
@@ -245,7 +257,7 @@ export class Bridge {
       note = `${this.#o.agents.info(a)?.project}`;
       const pending = this.#pending;
       this.#pending = undefined;
-      if (pending !== undefined) await this.#deliver(a, pending, t);
+      if (pending !== undefined) await this.#deliver(a, pending.text, t, pending.images);
     } else if (kind === "new" && this.#choices[Number(a)] !== undefined) {
       await this.#start(this.#choices[Number(a)]!, t);
     } else if (kind === "mod" && this.#selected && this.#choices[Number(a)] !== undefined) {

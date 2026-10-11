@@ -65,6 +65,7 @@ export function answeredText(asked: string, allow: boolean, by: ApprovalBy): str
 
 export const HELP = [
   "Write to talk to the selected agent (a reply to one of my messages goes to that agent).",
+  "Send a file or a photo (with a caption): it is saved on the computer and the agent is told where.",
   "/agents · pick an agent",
   "/new · start an agent in a project",
   "/status · what the selected agent is doing",
