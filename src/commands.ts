@@ -6,6 +6,7 @@
 import type { Catalog, Change, Entry } from "./catalog.ts";
 import type { Agent } from "./loop.ts";
 import { THINKING } from "./tui/menu-pages.ts";
+import { applyProfile, currentProfile, readProfiles } from "./profiles.ts";
 
 export interface CommandInfo {
   name: string;
@@ -64,6 +65,7 @@ export function commandList(host: CommandHost): CommandInfo[] {
     { name: "models", description: "Pick the model for the next requests", kind: "list" },
     host.catalogs?.extensions !== undefined && { name: "extensions", description: "Switch extensions on or off, install, update, remove", kind: "list" },
     host.catalogs?.skills !== undefined && { name: "skills", description: "Switch skills on or off, install, update, remove", kind: "list" },
+    host.catalogs !== undefined && { name: "profile", description: "Switch profile: what is on, how much it thinks, what it asks", kind: "list" },
     host.session !== undefined && { name: "session", description: "This session: id, messages, tokens", kind: "run" },
     { name: "clear", description: "Clear the view (the context stays)", kind: "run" },
     host.fork !== undefined && { name: "fork", description: "Move the session head back one message", kind: "run" },
@@ -96,6 +98,17 @@ export async function runCommand(host: CommandHost, name: string, arg: string, s
     case "skills":
       if (host.catalogs?.[name] === undefined) break;
       return catalogCommand(host, name, arg, signal);
+    case "profile": {
+      if (host.catalogs === undefined) break;
+      const home = process.env.HOME ?? "";
+      const all = await readProfiles(home);
+      const chosen = arg.trim() === "" ? undefined : all.find((p) => p.name === arg.trim() || p.title.toLowerCase() === arg.trim().toLowerCase());
+      if (arg.trim() !== "" && chosen === undefined) return { text: `no profile ${arg.trim()}` };
+      const note = chosen ? await applyProfile(host, home, chosen, AbortSignal.any([signal, AbortSignal.timeout(300_000)])) : undefined;
+      if (note !== undefined) host.told?.(`profile ${note}`);
+      const current = await currentProfile(home);
+      return { title: "Profiles", text: note, items: all.map((p) => ({ name: p.name, description: `${p.title} · ${p.description}`, current: p.name === current })) };
+    }
     case "session":
       if (host.session === undefined) break;
       return { title: "Session", text: host.session() };

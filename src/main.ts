@@ -13,7 +13,8 @@ import { Extensions, extensionName, loadExtensions, loadOne } from "./ext.ts";
 import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
 import type { Change } from "./catalog.ts";
 import { App } from "./tui/app.ts";
-import { THINKING } from "./tui/menu-pages.ts";
+import { THINKING, profileLabel } from "./tui/menu-pages.ts";
+import { activeProfile } from "./profiles.ts";
 import type { CommandHost } from "./commands.ts";
 import { setFenceRenderers } from "./tui/markdown.ts";
 import { Term } from "./tui/term.ts";
@@ -218,17 +219,28 @@ if (previous) await restoreTracker(agent.messages, cwd);
 
 const startedAt = Date.now();
 
+// The profile chosen last (/profile): its thinking level and how approvals go, from the start.
+const startProfile = mode === "print" ? undefined : await activeProfile(process.env.HOME ?? "");
+const startThinking = THINKING.find((p) => p.name === startProfile?.thinking);
+if (startThinking) agent.setThinking(startThinking.effort, config.thinkingBudget !== undefined ? startThinking.budget : undefined);
+if (startProfile?.approvals === "auto") agent.setAutoApprove(true);
+/** The panel's profile line: which, and whether it asks. */
+const profileLine = async (): Promise<string | undefined> => {
+  const p = await activeProfile(process.env.HOME ?? "");
+  return p ? `${p.title}${p.approvals === "auto" ? " · nothing asked" : ""}` : undefined;
+};
+
 if (tui) {
   // The interactive mode: raw terminal in, live region out. Everything else is the same Agent.
   const term = new Term();
-  const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION });
+  const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine() });
   const app = new App({
     agent: agent,
     write: (text) => term.write(text),
     model: start.model,
     contextWindow: startWindow,
-    thinking: thinkingLabel(config.reasoningEffort, config.thinkingBudget),
-    thinkingProfile: THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name,
+    thinking: startThinking ? profileLabel(startThinking, config.thinkingBudget !== undefined) : thinkingLabel(config.reasoningEffort, config.thinkingBudget),
+    thinkingProfile: startThinking?.name ?? THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name,
     // A configured budget says the engine takes one: then the menu's profiles send theirs.
     budgets: config.thinkingBudget !== undefined,
     models: {
@@ -247,7 +259,7 @@ if (tui) {
     apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
     // What is on now, for the panel's [Capabilities] lines (skills read again: one may be new).
     jobs,
-    capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION }),
+    capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION, profile: await profileLine() }),
     newSession: async () => {
       // A new conversation: a new session file, the skills read again (installed ones join the
       // prompt), and no file counts as read until the model reads it in this conversation.
@@ -259,7 +271,7 @@ if (tui) {
       // The last one: deleted when nothing was said in it (as on quit), else how to come back to it.
       if (last.empty) await rm(last.path, { force: true });
       const back = last.empty ? "" : `\n\n${ANSI.dim}the last session:${ANSI.reset} ${ANSI.cream}kinoko --session ${last.meta.id}${ANSI.reset}`;
-      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION }) + back };
+      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine() }) + back };
     },
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
@@ -291,7 +303,7 @@ if (tui) {
   clearInterval(loop);
 } else if (mode === "rpc") {
   // The phone's slash commands, for an agent kinoko serve started: the same as the TUI's menu.
-  let profile = THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name;
+  let profile = startThinking?.name ?? THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name;
   const commands: CommandHost = {
     agent,
     catalogs: {
@@ -384,11 +396,12 @@ async function applySkill(name: string, change: Change): Promise<string> {
   return "the model hears of it with your next message";
 }
 
-function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string }): string {
+function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string; profile?: string }): string {
   return [
     `${ANSI.amanita}kinoko${ANSI.reset} ${ANSI.cream}v${parts.version}${ANSI.reset}`,
     "",
     "\x1b[38;5;214m[Capabilities]\x1b[0m",
+    `  Profile: ${parts.profile ? `${ANSI.cream}${parts.profile}${ANSI.reset}` : "none (/profile)"}`,
     `  Context: ${names(parts.context.map((file) => file.path.split("/").at(-1) ?? file.path), "none")}`,
     `  Skills: ${names(parts.skills.map((skill) => skill.name), "none")}`,
     `  Extensions: ${names(parts.extensions, "none")}`,

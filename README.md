@@ -4,7 +4,7 @@ A small, fast, hackable coding-agent harness. Bun + TypeScript, **zero runtime d
 
 **Contents:** [Quick start](#quick-start) · [Modes](#modes) · [Keys](#interruption-is-the-feature) ·
 [Config](#config) · [Tools](#the-six-tools) · [Sessions](#sessions-context-and-compaction) ·
-[Extensions](#extensions) · [Skills](#skills) · [Background jobs](#background-jobs) ·
+[Extensions](#extensions) · [Skills](#skills) · [Profiles](#profiles) · [Background jobs](#background-jobs) ·
 [Telegram & phone](#integrations) · [Development](#development)
 
 ## Quick start
@@ -248,6 +248,27 @@ A skill installed or removed is told to the model as a `[kinoko]` note before yo
 skills index in the system prompt stays as it was (so the engine keeps its cache), and the next
 start lists it there.
 `"skillsRepo"` points it at another repository.
+
+## Profiles
+
+`/` then **profile** (or `/profile` from the phone) switches what is on in one go: which extensions and
+skills (installed from the catalogs when missing, the rest switched off), how much the model thinks,
+and whether it asks before gated commands. It takes effect at once, the [Capabilities] lines say
+which profile is in use, and it stays chosen for the next kinoko.
+
+| profile | for | thinking | asks |
+| --- | --- | --- | --- |
+| **Amanita Muscaria** | everything on (but plan-mode): goes all in | high | never (the hardline still blocks) |
+| **Shiitake** | coding: check-early, github, delegate, mermaid, web, notify | medium | yes |
+| **Psilocybe** | media and the desktop: vision, cliamp, telegram; ffmpeg, torrente, flux-send, omarchy | low | yes |
+| **Morchella** | reviewing and planning: plan-mode (writes nothing), github, web, mermaid, vision | high | yes |
+| **Cordyceps** | orchestrating other agents: delegate, telegram, notify, github, web | medium | yes |
+| **Mycena** | a local model at its fastest: few tools, a short prompt | low | yes |
+
+`~/.kinoko/profiles.json` changes them or adds your own: `{ "profiles": [{ "name": "enoki", "title":
+"Enoki", "extensions": ["web"], "skills": [], "thinking": "low" }] }` (`"*"` is everything, minus
+`"except"`; `"approvals": "auto"` asks nothing). Switching tools makes a local engine read the whole
+prompt again once: switch at the start of a task.
 
 ## Background jobs
 

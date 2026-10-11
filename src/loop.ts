@@ -74,6 +74,7 @@ export class Agent {
   #effort: ProviderRequest["effort"];
   #budget: number | undefined;
   #approvals: Approvals;
+  #autoApprove = false;
   #background: ((command: string, cwd: string) => { id: number; pid: number; log: string }) | undefined;
 
   constructor(opts: {
@@ -190,6 +191,16 @@ export class Agent {
   abort(): void {
     if (this.#state !== "running") return;
     this.#abortController?.abort();
+  }
+
+  /** Calls an extension asks about run without asking (a profile that goes all in: Amanita).
+   *  What an extension blocks stays blocked. */
+  setAutoApprove(on: boolean): void {
+    this.#autoApprove = on;
+  }
+
+  get autoApprove(): boolean {
+    return this.#autoApprove;
   }
 
   /** Answers an approval request (`by` says who: the TUI, the phone, Telegram); false when it is not
@@ -544,7 +555,7 @@ export class Agent {
 
   /** Asks the user about a call and waits; undefined when allowed, else the tool's result. */
   async #ask(tc: ToolCall, reason: string, signal: AbortSignal): Promise<string | undefined> {
-    if (this.#approvals.remembered(tc)) return undefined;
+    if (this.#autoApprove || this.#approvals.remembered(tc)) return undefined;
     const id = crypto.randomUUID();
     this.#emit({ type: "approval_request", id, call: tc, reason });
     const answer = await this.#approvals.wait(id, tc, signal);
