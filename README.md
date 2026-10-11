@@ -202,7 +202,13 @@ Anthropic: `"provider": "anthropic"` with a Console API key (`apiKey`, or `$ANTH
 - **`-p "prompt"`** — non-interactive: the full agent loop, the final answer on stdout, tool
   activity on stderr, non-zero exit if the run was aborted or failed.
 - **`--mode rpc`** — JSONL on stdin, JSONL on stdout. Commands: `prompt`, `steer`, `follow_up`,
-  `abort`, `get_state`. Out: the AgentEvent stream. `steer`/`follow_up`/`abort` work mid-run.
+  `abort`, `get_state`, `get_messages`. Out: the AgentEvent stream. `steer`/`follow_up`/`abort` work mid-run.
+- **`kinoko serve`** — the hub for the phone app ([kinoko-android](https://github.com/LaraGuardiola/kinoko-android)):
+  runs agents (an rpc child each, in its project) and streams their events to paired devices over a
+  WebSocket ([docs/protocol.md](docs/protocol.md)). It listens on localhost and shares itself with
+  your tailnet through Tailscale (`--funnel`: with the internet; `--local`: not at all), taking the
+  share down when it stops. Pair a device by scanning `kinoko serve pair`'s QR code; `kinoko serve
+  devices` and `revoke <id>` manage them.
 
 ## Install
 

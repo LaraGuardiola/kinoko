@@ -60,6 +60,15 @@ function print(agent: Agent): void {
   });
 }
 
+// `kinoko serve ...`: the hub for the phone app, a program of its own (it runs agents as children).
+if (process.argv[2] === "serve") {
+  const { runServe } = await import("./serve/main.ts");
+  // Children run this same kinoko: the compiled binary itself, or bun with this file.
+  const command = Bun.main.endsWith(".ts") ? [process.execPath, Bun.main] : [process.execPath];
+  await runServe(process.argv.slice(3), { command, version: "0.1.0" });
+  process.exit(process.exitCode ?? 0);
+}
+
 const { prompt, flags, resume, session: sessionId, mode: askedMode, explicitMode } = parseArgs(process.argv.slice(2));
 // No prompt and no explicit mode: the interactive one, if there is a terminal to draw on.
 const mode = explicitMode || prompt !== undefined ? askedMode : process.stdin.isTTY ? "tui" : "print";
@@ -71,6 +80,7 @@ if (!prompt && mode === "print") {
   process.stderr.write('usage: kinoko                 (interactive)\n');
   process.stderr.write('       kinoko -p "prompt"      (print mode)\n');
   process.stderr.write('       kinoko --mode rpc       (JSONL on stdin)\n');
+  process.stderr.write('       kinoko serve            (the hub for the phone app)\n');
   process.exit(1);
 }
 
@@ -251,6 +261,8 @@ if (tui) {
   const rpc = new Rpc({
     agent: agent,
     model: start.model,
+    session: session.meta.id,
+    cwd: cwd,
     write: (text) => process.stdout.write(text),
     // stdin closed: the client is gone, so the run and the process end here.
     onClose: () => {
