@@ -20,7 +20,16 @@ export interface IntegrationsHost {
   note: (text: string) => void;
   /** Whether `kinoko serve` runs (the bot answers only then). */
   hubRunning: () => Promise<boolean>;
+  /** The telegram extension (files from the model to the chat): its state, and switching it on. */
+  filesExtension?: {
+    state: () => Promise<FilesState>;
+    /** Installs it (the catalog fetched first) or switches it back on; a line saying what was done. */
+    turnOn: () => Promise<string>;
+  };
 }
+
+/** The telegram extension: loaded, installed but switched off, or not installed. */
+export type FilesState = "on" | "off" | "missing";
 
 const PAIRING_MS = 10 * 60_000;
 
@@ -132,11 +141,20 @@ function pair(host: IntegrationsHost, saved: TelegramSettings, from?: MenuPage):
 function openTelegram(host: IntegrationsHost, from?: MenuPage): void {
   void readIntegrations(host.home).then(({ telegram }) => {
     if (telegram === undefined) return;
-    const page = optionsPage(host, telegram, "checking kinoko serve…");
+    const page = optionsPage(host, telegram, "checking kinoko serve…", undefined);
     if (from) host.swap(from, page);
     else host.open(page);
-    void host.hubRunning().then((running) => host.swap(page, optionsPage(host, telegram, hubLine(running))));
+    void Promise.all([host.hubRunning(), host.filesExtension?.state() ?? Promise.resolve(undefined)]).then(([running, files]) => host.swap(page, optionsPage(host, telegram, hubLine(running), files)));
   });
+}
+
+function filesItem(files: FilesState | undefined): MenuItem {
+  const description =
+    files === "on" ? "The model can send you files (the telegram extension)"
+    : files === "off" ? "The telegram extension is switched off: Enter switches it on"
+    : files === "missing" ? "Let the model send you files: Enter installs the telegram extension"
+    : "checking the telegram extension…";
+  return { name: "files", description, current: files === "on", off: files === "off" };
 }
 
 function hubLine(running: boolean): string {
@@ -148,7 +166,7 @@ function toggle(name: string, on: boolean, description: string): MenuItem {
   return { name, description, current: on, off: !on };
 }
 
-function optionsPage(host: IntegrationsHost, t: TelegramSettings, hub: string): ListPage {
+function optionsPage(host: IntegrationsHost, t: TelegramSettings, hub: string, files: FilesState | undefined): ListPage {
   const page: ListPage = {
     kind: "list",
     title: `Telegram · @${t.bot} · ${t.name ?? "paired"}`,
@@ -157,6 +175,7 @@ function optionsPage(host: IntegrationsHost, t: TelegramSettings, hub: string): 
       toggle("notify", t.notify, "Tell me when a run ends"),
       toggle("prompts", t.prompts, "Take prompts and commands from the chat"),
       toggle("approvals", t.approvals, "Ask approvals there too"),
+      ...(host.filesExtension ? [filesItem(files)] : []),
       { name: "test", description: "Send a test message" },
       { name: "disconnect", description: "Forget the token and the chat (Del twice)", removable: true, key: "disconnect" },
     ],
@@ -164,6 +183,20 @@ function optionsPage(host: IntegrationsHost, t: TelegramSettings, hub: string): 
     stay: true,
     hint: hub,
     pick: (item) => {
+      if (item.name === "files") {
+        const ext = host.filesExtension;
+        if (ext === undefined || files === undefined) return;
+        if (files === "on") return host.note("Telegram: the telegram extension is on (/extensions manages it)");
+        host.note(files === "missing" ? "installing the telegram extension…" : "switching the telegram extension on…");
+        void ext
+          .turnOn()
+          .then(async (note) => {
+            host.note(note);
+            host.swap(page, optionsPage(host, t, hub, await ext.state()));
+          })
+          .catch((e: unknown) => host.note(`the telegram extension: ${e instanceof Error ? e.message : String(e)}`));
+        return;
+      }
       if (item.name === "test") {
         if (t.chat === undefined) return;
         void new Telegram(t.token, host.apiBase)
@@ -175,7 +208,7 @@ function optionsPage(host: IntegrationsHost, t: TelegramSettings, hub: string): 
       if (item.name !== "on" && item.name !== "notify" && item.name !== "prompts" && item.name !== "approvals") return;
       const key = item.name;
       void setTelegram(host.home, (cur) => (cur ? { ...cur, [key]: !cur[key] } : cur)).then((next) => {
-        if (next) host.swap(page, optionsPage(host, next, hub));
+        if (next) host.swap(page, optionsPage(host, next, hub, files));
       });
     },
     remove: () => {

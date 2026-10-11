@@ -3,7 +3,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
 import { ANSI as STYLE } from "../../tui/style.ts";
 import type { AppOptions, ModelsHost } from "../../tui/app.ts";
-import { readIntegrations } from "../../integrations.ts";
+import { readIntegrations, setTelegram } from "../../integrations.ts";
+import type { FilesState } from "../../tui/integrations-menu.ts";
 import { GOOD_TOKEN, fakeTelegram, said as tgSaid } from "../serve/fake-telegram.ts";
 import type { Catalog, Change, Entry } from "../../catalog.ts";
 import { EXTENSIONS } from "../../catalog.ts";
@@ -1537,5 +1538,24 @@ describe("/integrations: Telegram's setup", () => {
     } finally {
       tg.stop();
     }
+  });
+
+  test("files: the telegram extension's state; Enter installs it and the item turns on", async () => {
+    const home = `${ROOT}/integrations-files`;
+    await setTelegram(home, () => ({ token: GOOD_TOKEN, bot: "kinoko_test_bot", chat: 1, name: "Lara", notify: true, prompts: true, approvals: true, on: true }));
+    let state: FilesState = "missing";
+    let installs = 0;
+    const filesExtension = { state: async () => state, turnOn: async () => (installs++, (state = "on"), "telegram installed: loaded") };
+    const h = await harness([], { integrations: { home, hubRunning: async () => false, filesExtension } });
+    h.press("/integrations\r");
+    await until(h, () => h.screen().includes("@kinoko_test_bot with Lara"));
+    h.press("\r");
+    await until(h, () => frame(h).join("\n").includes("Enter installs the telegram extension"));
+    for (let i = 0; i < 4; i++) h.press("\x1b[B");
+    h.press("\r");
+    await until(h, () => frame(h).join("\n").includes("The model can send you files"));
+    expect(installs).toBe(1);
+    expect(h.app.marker).toBe("telegram installed: loaded");
+    expect(h.app.menuPage).toBe("Telegram · @kinoko_test_bot · Lara");
   });
 });
