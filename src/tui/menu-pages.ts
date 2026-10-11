@@ -13,7 +13,7 @@ export const ROOT: MenuItem[] = [
   { name: "skills", description: "Install, switch on or off, update or remove skills" },
   { name: "extensions", description: "Install, switch on or off, update or remove extensions" },
   { name: "integrations", description: "Telegram (and more later): notifications, prompts, approvals" },
-  { name: "session", description: "This session: file, id, messages, tokens" },
+  { name: "sessions", description: "This directory's sessions: tokens, tools and how they went, resume one" },
   { name: "profile", description: "Switch profile: Amanita, Shiitake, Psilocybe, Morchella, Cordyceps, Mycena" },
   { name: "jobs", description: "Background shells: what runs, its window, stop one" },
   { name: "shell", description: "Your shell, here: run anything (sudo too), exit comes back" },

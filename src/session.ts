@@ -106,6 +106,7 @@ export class Session {
   #head: string | undefined;
   #compaction: { summary: string; keepFrom: string } | undefined;
   #model: SessionModel | undefined;
+  #compactions = 0;
 
   private constructor(path: string, meta: SessionMeta) {
     this.path = path;
@@ -164,6 +165,16 @@ export class Session {
     return this.#model;
   }
 
+  /** Every message ever appended, in order: what a session cost, compacted parts and forks included. */
+  get history(): readonly Message[] {
+    return this.#log;
+  }
+
+  /** How many times the history was summarized. */
+  get compactions(): number {
+    return this.#compactions;
+  }
+
   /** Nothing was ever said in it: not worth keeping, nor offering to resume. */
   get empty(): boolean {
     return this.#log.length === 0;
@@ -210,6 +221,7 @@ export class Session {
       this.#head = record.id;
     } else if (record.type === "compaction") {
       this.#compaction = { summary: record.summary, keepFrom: record.keepFrom };
+      this.#compactions++;
     } else if (record.type === "model") {
       const { type: _type, ...model } = record;
       this.#model = model;

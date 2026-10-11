@@ -99,6 +99,8 @@ async function harness(
     capabilities?: AppOptions["capabilities"];
     jobs?: Jobs;
     handOver?: AppOptions["handOver"];
+    /** /sessions' R: the harness loads the session and restarts the agent, as main does. */
+    resume?: boolean;
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -149,6 +151,13 @@ async function harness(
     capabilities: opts.capabilities,
     jobs: opts.jobs,
     handOver: opts.handOver,
+    resumeSession: opts.resume
+      ? async (path) => {
+          const loaded = await Session.load(path);
+          agent.restart(loaded);
+          return { session: loaded, intro: "kinoko vTEST\n  Skills: none" };
+        }
+      : undefined,
   });
   return {
     app: app,
@@ -754,24 +763,55 @@ describe("slash menu", () => {
 
   test("Esc on a page goes back to the root; Esc on the root closes it and empties the input", async () => {
     const h = await harness([]);
-    h.press("/session\r");
-    expect(h.app.menuPage).toBe("Session");
+    h.press("/sessions\r");
+    expect(h.app.menuPage).toBe("Sessions");
     h.press(ESC);
     expect(h.app.menuPage).toBeUndefined();
-    expect(h.app.editorText).toBe("/session"); // the root is back, as it was
+    expect(h.app.editorText).toBe("/sessions"); // the root is back, as it was
     h.press(UP);
     h.press(ESC);
     expect(h.app.editorText).toBe("");
   });
 
-  test("the session page is a table with this session's file and id", async () => {
-    const h = await harness([]);
-    h.press("/session\r");
-    await new Promise((r) => setTimeout(r, 40));
+  test("/sessions: R on a past session resumes it here: its conversation on screen and in the model", async () => {
+    const past = await Session.create({ cwd: ROOT, model: "test-model", home: ROOT });
+    await past.append({ id: "p1", role: "user", content: "una sesión antigua sobre setas" });
+    await past.append({ id: "p2", role: "assistant", content: "las amanitas son rojas" });
+    await Bun.sleep(15); // the latest, so the first after the totals
+    const h = await harness([], { resume: true });
+    h.press("/sessions\r");
+    await until(h, () => frame(h).join("\n").includes("una sesión antigua sobre setas"));
+    h.press(DOWN);
+    h.press("\r");
+    expect(h.app.menuPage).toStartWith("Session · ");
+    h.press("r");
+    await until(h, () => h.app.menuPage === undefined && h.screen().includes("las amanitas son rojas"));
+    expect(h.screen()).toContain(`resumed session ${past.meta.id}`);
+    expect(h.agent.messages.map((m) => m.content)).toEqual(["una sesión antigua sobre setas", "las amanitas son rojas"]);
+    expect(h.app.marker).toBe("resumed: the model has that conversation again");
+  });
+
+  test("/sessions: this one first after the totals, marked; Enter shows its numbers, Enter again per tool", async () => {
+    const h = await harness([[{ type: "text", delta: "hola" }, { type: "done", stop: "end", usage: { input: 120, output: 7 } }]]);
+    h.press("dime algo bonito\r");
+    await settle(h.agent);
+    h.press("/sessions\r");
+    await until(h, () => frame(h).join("\n").includes("dime algo bonito"));
+    expect(frame(h).join("\n")).toMatch(/all .*sessions · /);
+    h.press(DOWN);
+    h.press("\r");
+    expect(h.app.menuPage).toBe("Session · this one");
+    await paced();
     h.app.render();
     const text = frame(h).join("\n");
     expect(text).toContain("┌");
     expect(text).toContain(h.session.meta.id);
+    expect(text).toContain("120 sent, 7 generated");
+    h.press("\r");
+    expect(h.app.menuPage).toStartWith("Tools · ");
+    await paced();
+    h.app.render();
+    expect(frame(h).join("\n")).toContain("no tools were called");
   });
 
   test("Esc with the menu open closes the menu and does not abort the run", async () => {

@@ -275,6 +275,17 @@ if (tui) {
     // What is on now, for the panel's [Capabilities] lines (skills read again: one may be new).
     jobs,
     capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() }),
+    resumeSession: async (path) => {
+      // Another of this directory's sessions, in place of this one: the model in use stays.
+      const last = session;
+      session = await Session.load(path);
+      skills = await discoverSkills(cwd);
+      tracker.reset();
+      agent.restart(session);
+      await restoreTracker(agent.messages, cwd);
+      if (last.empty) await rm(last.path, { force: true });
+      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() }) };
+    },
     newSession: async () => {
       // A new conversation: a new session file, the skills read again (installed ones join the
       // prompt), and no file counts as read until the model reads it in this conversation.
