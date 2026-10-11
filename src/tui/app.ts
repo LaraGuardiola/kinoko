@@ -18,6 +18,8 @@ import { errorBlock, pulseLevel, toolBlock, toolFailed, toolSummary } from "./to
 import { TODO_TOOL } from "./todos.ts";
 import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
+import { answeredNote, approvalKey, approvalRows } from "./approval.ts";
+import type { ApprovalView } from "./approval.ts";
 import { MENU_ROWS, Menu, filterRoot, listRows, listWindow, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
 import { copyText } from "./clipboard.ts";
@@ -143,6 +145,7 @@ export class App {
   #tool: ToolView | undefined;
   #pending: { name: string; args: string } | undefined; // a call the model is still writing
   #queued: QueuedView[] = [];
+  #approval: ApprovalView | undefined; // a call waiting for the user's answer
   #toolBlocksFull = false; // ctrl+t
   #compacting: CompactProgress | undefined; // a summary on its way: the note animates
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
@@ -257,6 +260,11 @@ export class App {
     return this.#editor.text;
   }
 
+  /** The call waiting for the user's answer, if any. */
+  get approval(): ApprovalView | undefined {
+    return this.#approval;
+  }
+
   get queued(): QueuedView[] {
     return this.#queued.map((q) => ({ ...q }));
   }
@@ -298,6 +306,12 @@ export class App {
     if (key.name === "mouse") {
       if (this.#mouse) this.#menuMouse(key);
       else if (key.mouse?.press && key.mouse.button === 0 && key.mouse.wheel === undefined) this.#clickCopy(key.mouse.x, key.mouse.y);
+      return;
+    }
+    // An approval waiting takes its keys first (Esc denies it); ctrl-c still aborts the run.
+    if (this.#approval !== undefined && key.name !== "ctrl-c") {
+      const answer = approvalKey(key);
+      if (answer !== undefined) this.#agent.approve(this.#approval.id, answer.allow, { by: "tui", remember: answer.remember });
       return;
     }
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
@@ -536,6 +550,17 @@ export class App {
         if (this.#retrying) this.#marker = "";
         this.#retrying = false;
         return;
+      case "approval_request":
+        this.#approval = { id: e.id, call: e.call, reason: e.reason };
+        this.render();
+        return;
+      case "approval_end": {
+        if (this.#approval?.id === e.id) this.#approval = undefined;
+        const note = answeredNote(e.allow, e.by);
+        if (note !== "") this.#marker = this.#quiet = note;
+        this.render();
+        return;
+      }
       case "run_end":
         this.#finishRun(e.reason, e.dropped, e.detail);
         return;
@@ -716,6 +741,7 @@ export class App {
       markerAlert: !this.#compacting && this.#marker.startsWith("Interrupted"),
       markerCream: this.#compacting !== undefined || this.#marker.startsWith("compacted") || (this.#quiet !== "" && this.#marker === this.#quiet),
       queued: this.#queued,
+      approval: this.#approval === undefined ? undefined : approvalRows(this.#approval),
       editorLines: view.lines,
       editorRow: view.row,
       editorCol: view.col,

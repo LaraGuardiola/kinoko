@@ -28,6 +28,14 @@ export interface ToolCallBlock {
   reason: string; // becomes the tool result the model sees
 }
 
+/** Asks the user before the call runs (the loop waits for the answer); a deny is the tool's result. */
+export interface ToolCallAsk {
+  ask: true;
+  reason: string; // shown to the user with the call
+}
+
+export type ToolCallDecision = ToolCallBlock | ToolCallAsk;
+
 export interface ToolResultEvent {
   name: string;
   output: string; // mutate in place to rewrite what the model sees
@@ -43,7 +51,7 @@ export interface ExtHandlers {
   session_start: (info: SessionStartInfo) => void;
   context: (messages: Message[]) => Message[]; // rewrite the history before a provider call
   before_provider_request: (req: ProviderRequest) => void;
-  tool_call: (call: ToolCallEvent) => ToolCallBlock | void;
+  tool_call: (call: ToolCallEvent) => ToolCallDecision | void;
   tool_result: (result: ToolResultEvent) => void;
   turn_end: (message: Message) => void;
   compact: (info: CompactInfo) => void;
@@ -211,22 +219,28 @@ export class Extensions implements Kinoko {
     return current;
   }
 
-  /** tool_call: args may be mutated in place; the first block wins. */
-  beforeTool(call: ToolCallEvent): ToolCallBlock | undefined {
+  /** tool_call: args may be mutated in place; the first block wins, even over an earlier ask. */
+  beforeTool(call: ToolCallEvent): ToolCallDecision | undefined {
+    let ask: ToolCallAsk | undefined;
     for (const handler of this.#handlers.get("tool_call") ?? []) {
       try {
         const decision = (handler as (c: ToolCallEvent) => unknown)(call);
         if (isBlock(decision)) return decision;
+        if (ask === undefined && isAsk(decision)) ask = decision;
       } catch (e) {
         this.log(`tool_call handler threw, skipping: ${errText(e)}`);
       }
     }
-    return undefined;
+    return ask;
   }
 }
 
 function isBlock(value: unknown): value is ToolCallBlock {
   return typeof value === "object" && value !== null && (value as ToolCallBlock).block === true;
+}
+
+function isAsk(value: unknown): value is ToolCallAsk {
+  return typeof value === "object" && value !== null && (value as ToolCallAsk).ask === true && typeof (value as ToolCallAsk).reason === "string";
 }
 
 /**

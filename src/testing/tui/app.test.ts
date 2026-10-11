@@ -9,6 +9,7 @@ import type { ChangesSource } from "../../tui/side.ts";
 import type { SavedModel } from "../../config.ts";
 import type { Served } from "../../providers/openai-compat.ts";
 import { Agent } from "../../loop.ts";
+import { Extensions } from "../../ext.ts";
 import { Session } from "../../session.ts";
 import type { Image, ProviderRequest, StreamEvent, Tool } from "../../types.ts";
 
@@ -87,6 +88,8 @@ async function harness(
     newSession?: boolean;
     clipboard?: (signal: AbortSignal) => Promise<Image | string>;
     changes?: ChangesSource;
+    /** The loaded extensions (their tool_call hooks), not the /extensions catalog. */
+    ext?: Extensions;
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -104,6 +107,7 @@ async function harness(
     maxCost: 100,
     session: session,
     retryMs: 1,
+    extensions: opts.ext,
   });
   const app = new App({
     agent: agent,
@@ -1372,5 +1376,80 @@ describe("/clear and /new", () => {
     await new Promise((r) => setTimeout(r, 5));
     expect(busy.app.marker).toBe("a run is going: Esc it first, then /new");
     await settle(busy.agent);
+  });
+});
+
+const sudoCall = (id: string): StreamEvent[] => [{ type: "tool_call", call: { id, name: "bash", args: { command: "sudo ls" } } }, { type: "done", stop: "tool_use" }];
+const asking = (): Extensions => {
+  const ext = new Extensions(() => undefined);
+  ext.on("tool_call", () => ({ ask: true, reason: "sudo needs confirmation" }));
+  return ext;
+};
+/** Waits for a request other than `last` (the one just answered) to show. */
+const waiting = async (h: Harness, last?: string): Promise<string> => {
+  const shown = (): string | undefined => (h.app.approval?.id === last ? undefined : h.app.approval?.id);
+  // oxlint-disable-next-line no-await-in-loop -- polling is the point
+  for (let i = 0; i < 100 && shown() === undefined; i++) await new Promise((r) => setTimeout(r, 2));
+  return shown() ?? "";
+};
+
+
+describe("approvals", () => {
+  const ran: string[] = [];
+  const bash: Tool = {
+    name: "bash",
+    description: "",
+    schema: {},
+    readOnly: false,
+    run: async (args: unknown) => {
+      ran.push(String((args as { command: string }).command));
+      return "ran";
+    },
+  } as unknown as Tool;
+  test("the prompt shows the command and the keys; y allows, n denies", async () => {
+    ran.length = 0;
+    const h = await harness([sudoCall("c1"), sudoCall("c2")], { tools: [bash], ext: asking(), viewportRows: 30 });
+    h.press("go\r");
+    const first = await waiting(h);
+    await new Promise((r) => setTimeout(r, 40)); // past the paint throttle
+    h.app.render();
+    const rows = frame(h);
+    expect(rows).toContain("🔐 sudo needs confirmation");
+    expect(rows).toContain("$ sudo ls");
+    expect(rows).toContain("y allow · n deny · a allow for this session · esc deny");
+    h.press("y");
+    await tick();
+    expect(h.app.approval?.id).not.toBe(first);
+    await waiting(h, first);
+    h.press("n");
+    await settle(h.agent);
+    expect(ran).toEqual(["sudo ls"]);
+    expect(h.agent.messages.filter((m) => m.role === "tool").map((m) => m.content)).toEqual(["ran", "ERROR: denied by the user: it did not run"]);
+    expect(h.app.editorText).toBe(""); // the answers never reached the editor
+  });
+
+  test("a allows for the session; Esc denies without aborting the run", async () => {
+    ran.length = 0;
+    const h = await harness([sudoCall("c1"), sudoCall("c2"), [{ type: "tool_call", call: { id: "c3", name: "bash", args: { command: "sudo pwd" } } }, { type: "done", stop: "tool_use" }]], { tools: [bash], ext: asking() });
+    h.press("go\r");
+    const first = await waiting(h);
+    h.press("a");
+    await waiting(h, first); // c2 is the same command: not asked; c3 is
+    expect(ran).toEqual(["sudo ls", "sudo ls"]);
+    h.press("\x1b");
+    await settle(h.agent);
+    expect(h.agent.messages.at(-1)?.content).toBe("done"); // the run went on to its end
+    expect(h.agent.messages.findLast((m) => m.role === "tool")?.content).toBe("ERROR: denied by the user: it did not run");
+  });
+
+  test("answered elsewhere: the prompt goes and a note says who", async () => {
+    const h = await harness([sudoCall("c1")], { tools: [bash], ext: asking() });
+    h.press("go\r");
+    await waiting(h);
+    h.agent.approve(h.app.approval?.id ?? "", true, { by: "telegram" });
+    await tick();
+    expect(h.app.approval).toBeUndefined();
+    expect(h.app.marker).toBe("allowed from Telegram");
+    await settle(h.agent);
   });
 });

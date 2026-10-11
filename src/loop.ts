@@ -1,5 +1,7 @@
 /* oxlint-disable no-await-in-loop -- the agent loop is linear by design: one provider request at
    a time, tools and log appends in order. Parallelism here would be a bug, not a speed-up. */
+import { Approvals } from "./approvals.ts";
+import type { ApprovalBy } from "./approvals.ts";
 import { compactHistory, isContextOverflow, shouldCompact } from "./compact.ts";
 import type { Extensions } from "./ext.ts";
 import { CallGuard, MAX_NUDGES, NUDGE_EMPTY, NUDGE_LENGTH, NUDGE_REPEAT, RepeatGuard, STOP_CALLS, WARN_CALLS, repeatNote, sameErrorNote } from "./guard.ts";
@@ -32,6 +34,8 @@ export type AgentEvent =
   | { type: "delivered"; text: string } // a queued steer/follow-up just reached the model
   | { type: "compacting"; phase: "reading" | "writing"; done: number; total?: number } // a summary on its way
   | { type: "compacted"; keep: number } // head of the history replaced by a summary, tail kept
+  | { type: "approval_request"; id: string; call: ToolCall; reason: string } // an extension asks the user first
+  | { type: "approval_end"; id: string; allow: boolean; by: ApprovalBy } // answered (the first answer wins)
   | { type: "retry"; attempt: number; of: number; inMs: number; error: string } // a transient failure: the same request again
   | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[]; detail?: string };
 
@@ -69,6 +73,7 @@ export class Agent {
   // Set at runtime (the TUI's thinking menu); undefined keeps the provider's configured value.
   #effort: ProviderRequest["effort"];
   #budget: number | undefined;
+  #approvals: Approvals;
 
   constructor(opts: {
     provider: Provider;
@@ -83,6 +88,7 @@ export class Agent {
     extensions?: Extensions;
     retries?: number; // a transient provider failure is retried this many times in a row (default 3)
     retryMs?: number; // the first wait; each next one doubles (default 2s: 2s, 4s, 8s)
+    approvalTimeoutMs?: number; // an unanswered approval is a deny after this (default 10 min; 0: deny at once)
   }) {
     this.#provider = opts.provider;
     this.#model = opts.model;
@@ -96,6 +102,7 @@ export class Agent {
     this.#ext = opts.extensions;
     this.#retries = opts.retries ?? 3;
     this.#retryMs = opts.retryMs ?? 2000;
+    this.#approvals = new Approvals(opts.approvalTimeoutMs ?? 600_000);
     if (this.#session) this.#messages = [...this.#session.view()];
   }
 
@@ -120,6 +127,7 @@ export class Agent {
     this.#steerQueue = [];
     this.#followUpQueue = [];
     this.#notes = [];
+    this.#approvals.forget();
   }
 
   /** The tools from the next request on (an extension loaded or unloaded while kinoko runs). */
@@ -179,6 +187,12 @@ export class Agent {
   abort(): void {
     if (this.#state !== "running") return;
     this.#abortController?.abort();
+  }
+
+  /** Answers an approval request (`by` says who: the TUI, the phone, Telegram); false when it is not
+   *  waiting any more (another client answered first). `remember` allows the same call for the session. */
+  approve(id: string, allow: boolean, opts: { by?: ApprovalBy; remember?: boolean } = {}): boolean {
+    return this.#approvals.answer(id, { allow, by: opts.by ?? "tui", remember: opts.remember });
   }
 
   steer(text: string, images?: Image[]): void {
@@ -487,11 +501,12 @@ export class Agent {
     // Extensions get the last word: they may rewrite args, or block the call outright.
     if (this.#ext) {
       const event = { name: tc.name, args: tc.args as Record<string, unknown>, signal: signal };
-      const blocked = this.#ext.beforeTool(event);
-      if (blocked) {
-        this.#emit({ type: "tool_output", call: tc, output: blocked.reason });
+      const decision = this.#ext.beforeTool(event);
+      const refused = decision === undefined ? undefined : "block" in decision ? decision.reason : await this.#ask(tc, decision.reason, signal);
+      if (refused !== undefined) {
+        this.#emit({ type: "tool_output", call: tc, output: refused });
         this.#emit({ type: "tool_end", call: tc });
-        return { id: crypto.randomUUID(), role: "tool", content: blocked.reason, toolCallId: tc.id };
+        return { id: crypto.randomUUID(), role: "tool", content: refused, toolCallId: tc.id };
       }
     }
 
@@ -520,6 +535,18 @@ export class Agent {
       this.#emit({ type: "tool_end", call: tc });
       return { id: crypto.randomUUID(), role: "tool", content: isAborted ? "Aborted by user" : `ERROR: ${msg}`, toolCallId: tc.id };
     }
+  }
+
+  /** Asks the user about a call and waits; undefined when allowed, else the tool's result. */
+  async #ask(tc: ToolCall, reason: string, signal: AbortSignal): Promise<string | undefined> {
+    if (this.#approvals.remembered(tc)) return undefined;
+    const id = crypto.randomUUID();
+    this.#emit({ type: "approval_request", id, call: tc, reason });
+    const answer = await this.#approvals.wait(id, tc, signal);
+    this.#emit({ type: "approval_end", id, allow: answer.allow, by: answer.by });
+    if (answer.allow) return undefined;
+    if (answer.by === "abort") return "Aborted by user";
+    return answer.by === "timeout" ? "ERROR: denied: nobody answered the approval request, it did not run" : "ERROR: denied by the user: it did not run";
   }
 
   async #emitPartialAssistant(streamEvents: StreamEvent[]): Promise<void> {

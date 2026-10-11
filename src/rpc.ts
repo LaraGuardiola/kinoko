@@ -1,23 +1,28 @@
 // RPC mode: JSONL over stdio, one object per line, in both directions.
 //
 // Commands in: prompt, steer, follow_up, abort, get_state, get_messages, and (with a command host)
-// get_commands and command: the slash commands a phone runs. Events out: the AgentEvent stream.
+// get_commands and command: the slash commands a phone runs; approve answers an approval_request. Events out: the AgentEvent stream.
 // steer, follow_up and abort work while a run is in progress, because they go straight to the
 // Agent. One request at a time: a second prompt while busy is refused, never queued silently.
 
 import type { Agent, RunResult } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
+import type { ApprovalBy } from "./approvals.ts";
 import type { Image, Message } from "./types.ts";
 import { commandList, runCommand } from "./commands.ts";
 import type { CommandHost, CommandInfo, CommandResult } from "./commands.ts";
 
 export interface RpcCommand {
-  type: "prompt" | "steer" | "follow_up" | "abort" | "get_state" | "get_messages" | "get_commands" | "command";
+  type: "prompt" | "steer" | "follow_up" | "abort" | "get_state" | "get_messages" | "get_commands" | "command" | "approve";
   name?: string; // command: which (new, thinking, extensions…)
   arg?: string; // command: what to do with it ("off web", "high")
   text?: string;
   images?: Image[]; // prompt, steer, follow_up: pictures that go with the text
   id?: string; // optional, echoed back on the reply
+  request?: string; // approve: the approval_request's id
+  allow?: boolean; // approve: run it or not
+  remember?: boolean; // approve: allow the same call for the rest of the session
+  by?: ApprovalBy; // approve: who answered ("app" when not said)
 }
 
 export interface RpcReply {
@@ -124,6 +129,13 @@ export class Rpc {
       case "get_messages":
         this.#reply({ type: "ok", id: command.id, messages: this.#agent.messages });
         return;
+      case "approve": {
+        if (typeof command.request !== "string" || typeof command.allow !== "boolean") return this.#reply({ type: "error", id: command.id, detail: "approve needs request and allow" });
+        const by = command.by === "telegram" || command.by === "tui" ? command.by : "app";
+        const settled = this.#agent.approve(command.request, command.allow, { by, remember: command.remember === true });
+        this.#reply(settled ? { type: "ok", id: command.id, text: command.allow ? "allowed" : "denied" } : { type: "error", id: command.id, detail: "not waiting: already answered" });
+        return;
+      }
       case "get_commands":
         this.#reply({ type: "ok", id: command.id, commands: this.#commands ? commandList(this.#commands) : [] });
         return;

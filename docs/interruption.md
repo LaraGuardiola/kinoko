@@ -22,6 +22,11 @@ group), ripgrep, and compaction.
 7. Tools of one batch run one at a time, in the order the model called them (a read after a write sees the write).
 8. A thrown tool error becomes a tool message "ERROR: ...", never a crash.
 9. Aborting during compaction leaves the history unchanged.
+10. APPROVALS: a call an extension asks about (`tool_call` returns `{ask: true, reason}`) waits for
+    `approve(id, allow)` from any client (the first answer wins). The wait honors the run's signal:
+    an abort denies at once (the result is "Aborted by user"), and so does `approvalTimeoutMs`
+    (default 10 min; print mode has nobody to ask and denies at once). A deny is the tool result
+    "ERROR: denied by the user: it did not run", never a crash. Esc on the TUI's prompt denies the call, not the run.
 
 ## Key bindings
 - Enter while IDLE: send as prompt.
@@ -34,4 +39,4 @@ group), ripgrep, and compaction.
 - Alt+Up: pull the last queued message back into the editor.
 
 ## RPC
-Commands `abort`, `steer`, `follow_up` must work while a run is in progress.
+Commands `abort`, `steer`, `follow_up` and `approve` must work while a run is in progress.

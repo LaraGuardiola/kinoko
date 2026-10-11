@@ -188,6 +188,8 @@ const agent = new Agent({
   session,
   extensions: ext,
   retries: config.retries,
+  // Print mode has nobody to ask: an approval there is a deny at once.
+  approvalTimeoutMs: mode === "print" ? 0 : config.approvalTimeoutMs,
 });
 
 // A resumed session already read or wrote files: those still on disk exactly as it last saw them
