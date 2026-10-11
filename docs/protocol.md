@@ -82,9 +82,9 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `start` | `cwd`, `session?` (an id, or `"continue"`), `model?` | starts an agent there; the app is attached to it |
 | `attach` | `agent` | the conversation so far, then its events as they happen |
 | `detach` | `agent` | no more events from it |
-| `prompt` | `agent`, `text`, `images?` | a new run (refused while one runs: use steer) |
-| `steer` | `agent`, `text`, `images?` | said to the model at its next step, mid-run |
-| `follow_up` | `agent`, `text`, `images?` | queued for when the run ends |
+| `prompt` | `agent`, `text`, `images?`, `files?` | a new run (refused while one runs: use steer) |
+| `steer` | `agent`, `text`, `images?`, `files?` | said to the model at its next step, mid-run |
+| `follow_up` | `agent`, `text`, `images?`, `files?` | queued for when the run ends |
 | `abort` | `agent` | Esc: the run stops |
 | `stop` | `agent` | the agent's process ends (its session stays on disk, resumable); refused for a terminal's |
 | `commands` | `agent` | the slash commands it takes → `commands` |
@@ -93,6 +93,12 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `approve` | `agent`, `request`, `allow`, `remember?` | answers the call waiting (`AgentInfo.approval.id`): `allow` runs it, `remember` allows the same call for the rest of the session; refused when another client answered first |
 
 `images`: `[{"mime": "image/jpeg", "data": "<base64>"}]`. Messages up to 32 MB.
+
+`files`: `[{"name": "report.pdf", "mime": "application/pdf", "data": "<base64>"}]`: saved on the
+computer in `~/.kinoko/uploads/` (`<time>-<n>-<name>`, the name cut to its last part), and the
+message gets a line per file, `[sent from the phone: <path> (<size>)]` (a message of files alone is
+just those lines). A PNG, JPEG, GIF or WebP up to 3.75 MB also goes to the model as an image: send a
+photo downscaled.
 
 ### Attaching mid-run
 

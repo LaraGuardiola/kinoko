@@ -3,7 +3,7 @@
 // messages both ways: the agent list, agents started, attached to, prompted, aborted, stopped.
 
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { stat } from "node:fs/promises";
 import type { Server, ServerWebSocket } from "bun";
 import type { AgentEvent } from "../loop.ts";
@@ -12,6 +12,7 @@ import { Agents, lineQueue } from "./agents.ts";
 import type { Child, Hello, Spawn } from "./agents.ts";
 import type { Device, Devices } from "./devices.ts";
 import { projects } from "./projects.ts";
+import { saveUploads, uploadsOf, withUploads } from "./uploads.ts";
 
 export const PROTOCOL = 1;
 
@@ -29,6 +30,8 @@ export interface ServeOptions {
   /** How to run kinoko (the binary, or bun and main.ts). */
   command: string[];
   sessionsDir: string;
+  /** Where files sent from the phone are saved (default: beside the sessions, ~/.kinoko/uploads). */
+  uploadsDir?: string;
   version: string;
   /** The Unix socket kinoko TUIs link themselves through (link.ts); none, no links. */
   socket?: string;
@@ -53,6 +56,7 @@ type Incoming = {
   model?: string;
   text?: string;
   images?: Image[];
+  files?: unknown; // prompt, steer, follow_up: files to save here and name in the message
   name?: string;
   arg?: string;
   width?: number;
@@ -114,7 +118,13 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
       case "steer":
       case "follow_up":
       case "abort": {
-        const reply = await agents.send(agent, { type: msg.type, text: msg.text, images: msg.images });
+        // Files from the phone: saved on this computer first, the message says where.
+        const files = uploadsOf(msg.files);
+        const up = files.length > 0 ? await saveUploads(opts.uploadsDir ?? join(opts.sessionsDir, "..", "uploads"), files) : undefined;
+        if (up) log(`${ws.data.device.name} sent ${up.saved.map((f) => f.path).join(", ")}`);
+        const images = [...(msg.images ?? []), ...(up?.images ?? [])];
+        const text = up ? withUploads(msg.text ?? "", up.saved) : msg.text;
+        const reply = await agents.send(agent, { type: msg.type, text, images: images.length > 0 ? images : undefined });
         return reply.type === "ok" ? ok({ text: reply.text }) : fail(reply.detail ?? "refused");
       }
       case "approve": {

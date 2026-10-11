@@ -243,4 +243,55 @@ describe("serve: the hub", () => {
       hub.stop();
     }
   });
+
+  test("files from the phone: saved here, named in the message; a picture also goes as an image", async () => {
+    const got: Array<{ type: string; text?: string; images?: Array<{ mime: string }> }> = [];
+    const spawn: Spawn = (_cmd, cwd): Child => {
+      const out = pipe();
+      const exit = { done: (_code: number): void => undefined };
+      return {
+        write: (line) => {
+          const c = JSON.parse(line) as { id: string; type: string; text?: string; images?: Array<{ mime: string }> };
+          if (c.type === "get_state") return out.push(JSON.stringify({ type: "ok", id: c.id, state: { running: false, model: "m", messages: 0, cwd } }));
+          got.push(c);
+          out.push(JSON.stringify({ type: "ok", id: c.id, text: "started" }));
+        },
+        lines: out.iter,
+        errors: pipe().iter,
+        exited: new Promise((r) => (exit.done = r)),
+        kill: () => (out.end(), exit.done(0)),
+      };
+    };
+    const devices = new Devices(join(dir, "uploads.json"));
+    const uploads = join(dir, "uploads");
+    const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: dir, uploadsDir: uploads, version: "t", spawn });
+    try {
+      const { token } = (await (await fetch(`http://127.0.0.1:${hub.server.port}/v1/pair`, { method: "POST", body: JSON.stringify({ code: await devices.code(), name: "phone" }) })).json()) as { token: string };
+      const c = client(`ws://127.0.0.1:${hub.server.port}/v1/ws`, token);
+      await c.next("hello");
+      c.send({ id: "1", type: "start", cwd: dir });
+      const id = ((await c.next("ok")) as { agent: { id: string } }).agent.id;
+      const png = Buffer.from("fake png bytes").toString("base64");
+      const pdf = Buffer.from("%PDF-1.7 fake").toString("base64");
+      c.send({ id: "2", type: "prompt", agent: id, text: "summarize these", files: [{ name: "shot.png", mime: "image/png", data: png }, { name: "../../report.pdf", mime: "application/pdf", data: pdf }, { name: "broken" }] });
+      expect(await c.next("ok")).toMatchObject({ id: "2" });
+      const prompt = got.find((g) => g.type === "prompt")!;
+      const paths = [...(prompt.text ?? "").matchAll(/\[sent from the phone: (\S+) \((\d+) B\)\]/g)].map((m) => m[1]!);
+      expect(prompt.text).toStartWith("summarize these\n\n[sent from the phone: ");
+      expect(paths.length).toBe(2); // the broken one is left out
+      expect(paths[0]).toEndWith("-1-shot.png");
+      expect(paths[1]).toEndWith("-2-report.pdf"); // its own name only: no way out of the folder
+      expect(paths.every((p) => p.startsWith(uploads))).toBe(true);
+      expect(await Bun.file(paths[1]!).text()).toBe("%PDF-1.7 fake");
+      expect(prompt.images).toEqual([{ mime: "image/png", data: png }] as never);
+      // A file alone, with no text: the message is where it is.
+      c.send({ id: "3", type: "prompt", agent: id, files: [{ name: "notes.txt", mime: "text/plain", data: Buffer.from("hi").toString("base64") }] });
+      await c.next("ok");
+      expect(got.filter((g) => g.type === "prompt")[1]?.text).toMatch(/^\[sent from the phone: \S+-notes\.txt \(2 B\)\]$/);
+      c.close();
+    } finally {
+      hub.stop();
+    }
+  });
 });
+
