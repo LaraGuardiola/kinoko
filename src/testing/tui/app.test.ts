@@ -1,6 +1,7 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
+import { ANSI as STYLE } from "../../tui/style.ts";
 import type { ModelsHost } from "../../tui/app.ts";
 import type { Catalog, Change, Entry } from "../../catalog.ts";
 import { EXTENSIONS } from "../../catalog.ts";
@@ -1327,6 +1328,12 @@ describe("a click on a code block's mark", () => {
       for (let y = 1; y <= 30; y++) for (let x = 1; x <= 60; x++) click(x, y);
       // Each mark has three cells that take a click (it and one either side): both blocks, three times.
       expect(copied().toSorted()).toEqual([...Array(3).fill("const a = 1;"), ...Array(3).fill("ls -la")].toSorted());
+      // The note only informs: cream, no inverse background.
+      h.app.render();
+      await new Promise((resolve) => setTimeout(resolve, 40));
+      h.app.render();
+      expect(h.out.join("")).toContain(`${STYLE.cream}copied: 1 line${STYLE.reset}`);
+      expect(h.out.join("")).not.toContain(`${STYLE.inverse}copied`);
     } finally {
       if (saved.wayland !== undefined) process.env.WAYLAND_DISPLAY = saved.wayland;
       if (saved.display !== undefined) process.env.DISPLAY = saved.display;

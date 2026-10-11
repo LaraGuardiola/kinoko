@@ -958,7 +958,7 @@ export class App {
 
   #copy(text: string): void {
     const lines = text.split("\n").length;
-    this.#marker = `copied: ${lines} line${lines === 1 ? "" : "s"}`;
+    this.#marker = this.#quiet = `copied: ${lines} line${lines === 1 ? "" : "s"}`;
     void copyText(text, (data) => this.#write(data), AbortSignal.timeout(5000));
   }
 
