@@ -27,6 +27,9 @@ group), ripgrep, and compaction.
     an abort denies at once (the result is "Aborted by user"), and so does `approvalTimeoutMs`
     (default 10 min; print mode has nobody to ask and denies at once). A deny is the tool result
     "ERROR: denied by the user: it did not run", never a crash. Esc on the TUI's prompt denies the call, not the run.
+11. BACKGROUND JOBS (bash `background: true`) are not part of a run: Esc does not stop them (the
+    /jobs page does, Del twice; quitting kinoko or SIGTERM ends them all). When one ends, the agent
+    is told: a steer mid-run, a new run when idle (a job the user stopped: a note for later).
 
 ## Key bindings
 - Enter while IDLE: send as prompt.

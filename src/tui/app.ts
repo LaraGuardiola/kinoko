@@ -49,6 +49,8 @@ import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
 import { openIntegrations } from "./integrations-menu.ts";
+import { jobsLabel, openJobs } from "./jobs-view.ts";
+import type { Jobs } from "../jobs.ts";
 import type { FilesState, IntegrationsHost } from "./integrations-menu.ts";
 import { hubRunning } from "../serve/link.ts";
 
@@ -77,6 +79,8 @@ export interface AppOptions {
   /** The startup panel as it is now (extensions and skills switched on or off since): its
    *  [Capabilities] lines replace the ones printed at the top. */
   capabilities?: () => Promise<string>;
+  /** Background jobs (bash background: true): their label on the rule, /jobs and their windows. */
+  jobs?: Jobs;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
@@ -131,6 +135,7 @@ export class App {
   #catalogs: { extensions?: Catalog; skills?: Catalog };
   #apply: AppOptions["apply"];
   #capabilities: AppOptions["capabilities"];
+  #jobs: Jobs | undefined;
   /** The block with the [Capabilities] lines as printed (the startup panel, or a fresh copy). */
   #panel: { text: string; gap: boolean } | undefined;
   #panelStale = false; // changed while scrolled off screen: printed again when the menu closes
@@ -198,6 +203,8 @@ export class App {
       return done;
     });
     this.#capabilities = opts.capabilities;
+    this.#jobs = opts.jobs;
+    this.#jobs?.on(() => this.render()); // the label counts them
     this.#newSessionOf = opts.newSession;
     this.#endpoint = opts.models?.endpoint ?? "";
     this.#saved = opts.models?.saved ?? [];
@@ -351,7 +358,7 @@ export class App {
     }
     if (key.name === "mouse") {
       if (this.#mouse) this.#menuMouse(key);
-      else if (key.mouse?.press && key.mouse.button === 0 && key.mouse.wheel === undefined) this.#clickCopy(key.mouse.x, key.mouse.y);
+      else if (key.mouse?.press && key.mouse.button === 0 && key.mouse.wheel === undefined && !this.#clickJobs(key.mouse.x, key.mouse.y)) this.#clickCopy(key.mouse.x, key.mouse.y);
       return;
     }
     // An approval waiting takes its keys first (Esc denies it); ctrl-c still aborts the run.
@@ -736,7 +743,9 @@ export class App {
   #echoUser(text: string): void {
     // Closing first keeps the order true: what was already streamed stays above the message.
     this.#closeBlock();
-    this.#print("user", formatBlock("user", text));
+    // kinoko's own words to the model (a background job ended) are not the user's.
+    if (text.startsWith("[kinoko] ")) this.#print("system", formatBlock("system", `⚙ ${text.slice(9).split("\n")[0]}`, this.#width));
+    else this.#print("user", formatBlock("user", text));
     this.render();
   }
 
@@ -794,6 +803,7 @@ export class App {
       status: this.statusLine,
       place: this.#place,
       thinking: this.#thinking,
+      jobs: jobsLabel(this.#jobs?.running ?? 0),
       menu: this.#menuRows(),
       tailCols,
       viewportRows: this.#viewportRows,
@@ -1007,6 +1017,44 @@ export class App {
     this.#menuClosed();
   }
 
+  #openJobs(): void {
+    const jobs = this.#jobs;
+    if (jobs === undefined) {
+      this.#menu.open({ kind: "info", title: "Background jobs", lines: ["  not available in this mode"] });
+      return;
+    }
+    openJobs({
+      jobs,
+      open: (page) => {
+        this.#menu.open(page);
+        this.render();
+      },
+      swap: (from, to) => {
+        this.#menu.swap(from, to);
+        this.render();
+      },
+      note: (text) => {
+        this.#marker = this.#quiet = text;
+        this.render();
+      },
+      // The window fills what the menu may take: the screen less the input and its rules.
+      size: () => ({ cols: (this.#printCols ?? 80) - 2, rows: Math.min(18, Math.max(3, (this.#viewportRows ?? 24) - 12)) }),
+    });
+  }
+
+  /** A click on the rule's jobs label opens their list. */
+  #clickJobs(x: number, y: number): boolean {
+    const label = jobsLabel(this.#jobs?.running ?? 0);
+    const row = this.#renderer.rowAt(y);
+    if (label === undefined || row === undefined) return false;
+    const plain = [...cells(stripAnsi(row))].flatMap((c) => Array.from({ length: Math.max(1, c.width) }, () => c.text)).join("");
+    const at = plain.indexOf(label.slice(2)); // past the gear, whose width terminals disagree on
+    if (at < 0 || x < at - 1 || x > at + label.length + 1) return false;
+    this.#editor.clear();
+    this.#openJobs();
+    return true;
+  }
+
   #integrationsHost(): IntegrationsHost {
     const home = this.#integrations?.home ?? process.env.HOME ?? "";
     return {
@@ -1056,6 +1104,7 @@ export class App {
     else if (item.name === "models") this.#openModels();
     else if (item.name === "extensions" || item.name === "skills") this.#openCatalog(item.name);
     else if (item.name === "session") this.#menu.open(this.#sessionPage());
+    else if (item.name === "jobs") this.#openJobs();
     else if (item.name === "integrations") openIntegrations(this.#integrationsHost());
     else if (item.name === "copy") this.#menu.open(copyPage(snippets(this.#agent.messages), (s) => this.#copy(s.code)));
     else {

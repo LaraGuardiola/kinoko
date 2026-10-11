@@ -79,6 +79,8 @@ export interface ToolContext {
   signal: AbortSignal;
   cwd: string;
   onOutput?: (chunk: string) => void;
+  /** Starts a command as a background job (TUI and rpc modes): nothing waits for it. */
+  background?: (command: string) => { id: number; pid: number; log: string };
 }
 
 /** A tool's answer with images for the model to look at (a picture, a video's frames, a screenshot). */

@@ -34,6 +34,8 @@ export interface ListPage {
   stay?: boolean;
   /** A dim line under the list: what else the keys do here. */
   hint?: string;
+  /** Runs when the page is left (not when it is redrawn with `swap`): stops what keeps it live. */
+  leave?: () => void;
 }
 
 export interface InfoPage {
@@ -120,12 +122,16 @@ export class Menu {
     if (this.#page === from) this.open(to);
   }
 
-  /** Like `refresh`, for a page redrawn after an action on it (a switch, an install): the same
-   *  item stays selected (by key or name), or the same place when it is gone. */
+  /** Like `refresh`, for a page redrawn after an action on it (a switch, an install, new output):
+   *  the same item stays selected (by key or name), or the same place when it is gone, and the
+   *  page's `leave` is carried over instead of run. */
   swap(from: MenuPage, to: MenuPage): void {
     if (this.#page !== from) return;
     const was = from.kind === "list" ? from.items[this.#index] : undefined;
     const at = this.#index;
+    // The same screen redrawn: what it does when left goes with it, and is not done now.
+    if (to.kind !== "input" && from.kind !== "input" && to.leave === undefined) to.leave = from.leave;
+    this.#page = undefined;
     this.open(to);
     if (to.kind !== "list" || to.items.length === 0) return;
     const same = was === undefined ? -1 : to.items.findIndex((item) => (item.key ?? item.name) === (was.key ?? was.name) && !item.header);
@@ -150,7 +156,7 @@ export class Menu {
 
   #leave(): void {
     const page = this.#page;
-    if (page?.kind === "info") page.leave?.();
+    if (page?.kind !== "input") page?.leave?.();
   }
 
   /** Up/down through `count` items, wrapping at both ends and stepping over those `skip` names. */

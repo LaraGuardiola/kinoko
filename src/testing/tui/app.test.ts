@@ -13,6 +13,7 @@ import type { SavedModel } from "../../config.ts";
 import type { Served } from "../../providers/openai-compat.ts";
 import { Agent } from "../../loop.ts";
 import { Extensions } from "../../ext.ts";
+import { Jobs } from "../../jobs.ts";
 import { Session } from "../../session.ts";
 import type { Image, ProviderRequest, StreamEvent, Tool } from "../../types.ts";
 
@@ -95,6 +96,7 @@ async function harness(
     ext?: Extensions;
     integrations?: AppOptions["integrations"];
     capabilities?: AppOptions["capabilities"];
+    jobs?: Jobs;
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -143,6 +145,7 @@ async function harness(
     cwd: ROOT,
     integrations: opts.integrations ?? { home: ROOT, hubRunning: async () => false },
     capabilities: opts.capabilities,
+    jobs: opts.jobs,
   });
   return {
     app: app,
@@ -1626,5 +1629,74 @@ describe("the [Capabilities] lines follow what is installed", () => {
     h.press("\x1b");
     h.press("\x1b");
     expect(h.screen().split("[Capabilities]").length).toBe(before + 1); // nothing new: not again
+  });
+});
+
+describe("background jobs in the TUI", () => {
+  const jobsDir = `${ROOT}/jobs`;
+
+  test("the rule shows the shells running, left of the thinking level; a click on it opens the list", async () => {
+    const jobs = new Jobs({ dir: jobsDir, onEnd: () => undefined });
+    const h = await harness([], { jobs, viewportRows: 30, viewportCols: 100 });
+    const job = jobs.start("sleep 5", ROOT);
+    await paced();
+    h.app.render();
+    const rule = frame(h).find((row) => row.includes("⚙ 1 shell"));
+    expect(rule).toBeDefined();
+    expect(rule!.indexOf("⚙ 1 shell")).toBeLessThan(rule!.indexOf("LOW · 2048"));
+    // Where the terminal says the region is; then clicks down the label's column until one opens the list.
+    h.app.handleKey({ name: "cursor-report", at: { row: 20, col: 1 } });
+    h.app.render();
+    const x = rule!.indexOf("1 shell") + 2; // 1-based, past the margin
+    let opened: number | undefined;
+    for (let y = 1; y <= 30 && opened === undefined; y++) {
+      h.press(`\x1b[<0;${x};${y}M`);
+      if (h.app.menuPage === "Background jobs") opened = y;
+    }
+    expect(opened).toBeDefined();
+    h.press("\x1b");
+    h.press(`\x1b[<0;${x};${opened! + 1}M`); // a row below: nothing
+    expect(h.app.menuPage).toBeUndefined();
+    jobs.kill(job.id);
+    await jobs.ended(job.id);
+  });
+
+  test("/jobs: the list; Enter opens a framed window of its last lines that follows the output; Del twice stops it", async () => {
+    const jobs = new Jobs({ dir: jobsDir, onEnd: () => undefined });
+    const h = await harness([], { jobs, viewportRows: 40, viewportCols: 100 });
+    const job = jobs.start("echo first line; sleep 0.3; echo second line; sleep 30", ROOT);
+    await paced();
+    h.press("/jobs\r");
+    expect(h.app.menuPage).toBe("Background jobs");
+    await paced();
+    h.app.render();
+    expect(frame(h).join("\n")).toMatch(/#1\s+● running \d+s · echo first line/);
+    h.press("\r");
+    expect(h.app.menuPage).toStartWith("$ echo first line");
+    await paced();
+    h.app.render();
+    let shown = frame(h).join("\n");
+    expect(shown).toMatch(/╭─ #1 · running \d+s ─+╮/);
+    expect(shown).toContain("│ first line");
+    await new Promise((r) => setTimeout(r, 450)); // it writes again: the window follows
+    h.app.render();
+    shown = frame(h).join("\n");
+    expect(shown).toContain("│ second line");
+    h.press("\r"); // back to the list
+    expect(h.app.menuPage).toBe("Background jobs");
+    h.press("\x7f");
+    h.press("\x7f");
+    await jobs.ended(job.id);
+    expect(jobs.list()[0]?.state).toBe("killed");
+    expect(h.app.marker).toBe("job #1 stopped");
+    h.press("\x1b");
+  });
+
+  test("a job's end note is shown as kinoko's, not as the user's message", async () => {
+    const h = await harness([[{ type: "text", delta: "on it" }, { type: "done", stop: "end" }]], { viewportRows: 30 });
+    void h.agent.prompt("[kinoko] Background job #3 finished (exit 0) after 2s: `make`\nLast lines:\n```\nok\n```");
+    await settle(h.agent);
+    expect(h.screen()).toContain("⚙ Background job #3 finished (exit 0) after 2s: `make`");
+    expect(h.screen()).not.toContain("Last lines:");
   });
 });

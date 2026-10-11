@@ -27,6 +27,7 @@ import { restoreTracker } from "./tools/restore.ts";
 import { tracker } from "./tools/tracker.ts";
 import { Rpc, serveStdio } from "./rpc.ts";
 import { parseArgs } from "./args.ts";
+import { Jobs, endNote } from "./jobs.ts";
 
 /** Text to stdout, everything else (thinking, tool activity, timing) to stderr. */
 function print(agent: Agent): void {
@@ -177,6 +178,24 @@ const connect = (entry: SavedModel): Provider =>
 // A resumed session starts with the model it last switched to (endpoint and window too), not the default.
 const start = resumeModel(session.model, [configured, ...saved]) ?? configured;
 const startWindow = start.contextWindow ?? config.contextWindow;
+// Background jobs (bash background: true): when one ends the agent is told, woken when idle.
+// Print mode ends with its run, so it has none.
+const jobs =
+  mode === "print"
+    ? undefined
+    : new Jobs({
+        dir: join(process.env.HOME ?? "", ".kinoko", "jobs"),
+        onEnd: (job) => {
+          const note = endNote(job, jobs?.tail(job.id, 15) ?? []);
+          if (agent.state === "running") agent.steer(note);
+          // Stopped by the user: told with their next message, not worth waking the model for.
+          else if (job.state === "killed") agent.note(note.replace(/^\[kinoko\] /, ""));
+          else void agent.prompt(note).catch(() => agent.steer(note)); // one started meanwhile
+        },
+      });
+// A job never outlives kinoko: not on quit, and not when kinoko serve stops an agent (SIGTERM).
+process.on("exit", () => jobs?.killAll());
+if (jobs) process.on("SIGTERM", () => process.exit(143));
 const agent = new Agent({
   provider: connect(start),
   model: start.model,
@@ -190,6 +209,7 @@ const agent = new Agent({
   retries: config.retries,
   // Print mode has nobody to ask: an approval there is a deny at once.
   approvalTimeoutMs: mode === "print" ? 0 : config.approvalTimeoutMs,
+  ...(jobs ? { background: (command: string, at: string) => jobs.start(command, at) } : {}),
 });
 
 // A resumed session already read or wrote files: those still on disk exactly as it last saw them
@@ -226,6 +246,7 @@ if (tui) {
     skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
     apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
     // What is on now, for the panel's [Capabilities] lines (skills read again: one may be new).
+    jobs,
     capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION }),
     newSession: async () => {
       // A new conversation: a new session file, the skills read again (installed ones join the

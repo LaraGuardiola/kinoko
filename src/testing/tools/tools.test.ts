@@ -183,3 +183,15 @@ describe("kinoko core tools", () => {
 
 // afterAll, not a test: a failing run must still take its fixtures with it.
 afterAll(() => rmSync(ROOT, { recursive: true, force: true }));
+
+describe("bash background: true", () => {
+  test("starts a job through the context and returns at once, saying not to wait; without jobs, an error", async () => {
+    const started: string[] = [];
+    const background = (command: string): { id: number; pid: number; log: string } => (started.push(command), { id: 4, pid: 4242, log: "/l/4.log" });
+    const out = await pick("bash").run({ command: "make -j8", background: true }, { ...ctx(fresh("bg")), background } as never);
+    expect(started).toEqual(["make -j8"]);
+    expect(out).toStartWith("started background job #4 (pid 4242): make -j8\nDo not wait for it");
+    expect(out).toContain("kill -- -4242");
+    expect(await pick("bash").run({ command: "make", background: true }, ctx(fresh("bg2")))).toStartWith("ERROR: bash: background jobs only run");
+  });
+});
