@@ -117,7 +117,7 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 
 The extensions live in their own repository,
 [kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, cliamp,
-github, herdr, mermaid, notify, permission-gate, plan-mode, telegram, vision, web. `/` then **extensions** lists them (the repository is fetched with
+delegate, github, herdr, mermaid, notify, permission-gate, plan-mode, telegram, vision, web. `/` then **extensions** lists them (the repository is fetched with
 git into `~/.kinoko/registry/extensions/`); Enter installs one into `~/.kinoko/ext/<name>/`, running
 `bun install` there when it has dependencies; Del twice removes it. Both take effect at once: the
 extension is loaded (or taken back) while kinoko runs. One that adds or removes tools changes every
@@ -154,6 +154,10 @@ The rule above the input shows `⚙ 2 shells` while jobs run, left of the thinki
 `/jobs`) for the list; Enter opens a job's window, its last lines in a frame that follows the
 output; Del twice stops a job. Esc never stops jobs (it stops the model); quitting kinoko does. All
 output is kept in `~/.kinoko/jobs/`.
+
+The `delegate` extension uses them for other coding agents: "ask opencode to write the tests, then
+run them" starts opencode (or pi, Claude Code, Codex, another kinoko: whichever are installed) on
+the task in the background; you watch it under ⚙ shells, and kinoko is woken with its answer.
 
 ## Integrations
 
