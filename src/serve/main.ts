@@ -9,6 +9,8 @@
 import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { Extensions, loadExtensions } from "../ext.ts";
+import { renderMarkdown, setFenceRenderers } from "../tui/markdown.ts";
 import { Devices } from "./devices.ts";
 import { qrText } from "./qr.ts";
 import { serve } from "./server.ts";
@@ -26,6 +28,8 @@ interface State {
   funnel: boolean;
 }
 
+/** Markdown as the TUI draws it, `width` columns wide: what the phone shows for a block. */
+const render = (text: string, width: number): string[] => renderMarkdown(text, { width }).split("\n");
 const time = (): string => new Date().toTimeString().slice(0, 8);
 const out = (line = ""): void => void process.stdout.write(`${line}\n`);
 const dim = (text: string): string => `\x1b[2m${text}\x1b[0m`;
@@ -102,7 +106,12 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const publicPort = Number(flag(argv, "public-port") ?? 8443);
   const funnel = argv.includes("--funnel");
   const local = argv.includes("--local");
-  const hub = serve({ port, devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, log: (line) => out(dim(`${time()} ${line}`)) });
+  // The extensions, loaded only for their renderers (```mermaid…): the phone gets blocks drawn as
+  // the TUI draws them.
+  const ext = new Extensions(() => undefined);
+  await loadExtensions(ext, { cwd: process.env.HOME ?? homedir() });
+  setFenceRenderers((lang) => ext.renderer(lang));
+  const hub = serve({ port, devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
 
   let url = `http://127.0.0.1:${port}`;
   let shared = false;

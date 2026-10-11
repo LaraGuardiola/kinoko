@@ -68,6 +68,7 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `history` | for `attach` | `agent`, `info: AgentInfo`, `messages: [Message]`, `live: [AgentEvent]` |
 | `event` | an attached agent did something | `agent`, `event: AgentEvent` |
 | `ok` | a command was taken | `id`, and per command: `agent` (start), `text` (prompt: "started") |
+| `rendered` | for `render` | `lines`: the rows, each `width` columns, with ANSI colours (24-bit and 256) |
 | `commands` | for `commands` | `agent`, `commands: [{name, description, kind: "list" \| "run"}]` |
 | `command_result` | for `command` | `agent`, `result: {title?, text?, items?, hint?, reset?}` |
 | `error` | a command was refused | `id`, `detail` (a sentence for the user) |
@@ -87,6 +88,7 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `abort` | `agent` | Esc: the run stops |
 | `stop` | `agent` | the agent's process ends (its session stays on disk, resumable); refused for a terminal's |
 | `commands` | `agent` | the slash commands it takes → `commands` |
+| `render` | `text`, `width` | a fenced block or a table drawn as the TUI draws it → `rendered` |
 | `command` | `agent`, `name`, `arg?` | runs one → `command_result` |
 
 `images`: `[{"mime": "image/jpeg", "data": "<base64>"}]`. Messages up to 32 MB.
