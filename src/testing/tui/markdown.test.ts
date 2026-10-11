@@ -84,9 +84,9 @@ describe("markdown: code blocks", () => {
     expect(out.at(-1)).toBe("after");
     const pane = out.slice(1, -1);
     for (const row of pane) expect(visibleLength(row)).toBe(40);
-    // A padding row, then the full language name top right, two columns in from the edge.
+    // A padding row, then the full language name top right and the copy mark, two columns in from the edge.
     expect(strip(pane[0] ?? "").trim()).toBe("");
-    expect(strip(pane[1] ?? "")).toMatch(/ {20,}TypeScript {3}$/);
+    expect(strip(pane[1] ?? "")).toMatch(/ {20,}TypeScript ⧉ $/);
     expect(strip(pane[2] ?? "")).toStartWith("  const a = 1;");
     expect(strip(pane[3] ?? "")).toStartWith("  function f()");
     // The panel background is never cut mid-row by a full reset.

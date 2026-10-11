@@ -13,6 +13,9 @@ const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
 const PANEL = `${ESC}48;2;36;38;52m`;
 const LABEL = `${ESC}3m${ESC}38;2;150;156;182m`;
+/** The copy mark after the language: the phone app makes it a button. */
+export const COPY = "⧉";
+const MARK = `${ESC}38;2;150;156;182m`;
 
 export interface CodeOptions {
   lang: string;
@@ -61,11 +64,12 @@ export function drawnBlock(drawn: string[], opts: { lang: string; width: number 
   return [row("", inner), row(label(opts.lang, inner), inner), ...drawn.map((line) => row(` ${line}`, inner)), row("", inner)];
 }
 
-/** The language's name in the top-right corner, a couple of columns in from the edge. A padding row
- *  above it keeps it off the pane's top edge. */
+/** The language's name in the top-right corner, then ⧉: /copy copies the block. A padding row above
+ *  it keeps it off the pane's top edge. */
 function label(lang: string, inner: number): string {
   const name = languageName(lang);
-  return name === "" ? "" : `${" ".repeat(Math.max(0, inner - name.length - 2))}${LABEL}${name}${RESET}`;
+  const named = name === "" ? " " : `${LABEL}${name}${RESET} `;
+  return `${" ".repeat(Math.max(0, inner - name.length - 2))}${named}${MARK}${COPY}${RESET}`;
 }
 
 /**

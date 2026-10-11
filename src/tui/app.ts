@@ -20,7 +20,9 @@ import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
 import { MENU_ROWS, Menu, filterRoot, listRows, listWindow, pageRows } from "./menu.ts";
 import type { InfoPage, ListPage, MenuItem } from "./menu.ts";
-import { ROOT, THINKING, catalogPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { copyText } from "./clipboard.ts";
+import { ROOT, THINKING, catalogPage, copyPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { snippets } from "./snippets.ts";
 import type { ThinkingProfile } from "./menu-pages.ts";
 import type { CommandHost } from "../commands.ts";
 import type { Catalog, Entry, Outcome, Change } from "../catalog.ts";
@@ -928,10 +930,17 @@ export class App {
     else if (item.name === "models") this.#openModels();
     else if (item.name === "extensions" || item.name === "skills") this.#openCatalog(item.name);
     else if (item.name === "session") this.#menu.open(this.#sessionPage());
+    else if (item.name === "copy") this.#menu.open(copyPage(snippets(this.#agent.messages), (s) => this.#copy(s.code)));
     else {
       this.#closeMenu();
       void this.command(`/${item.name}`).then(() => this.render());
     }
+  }
+
+  #copy(text: string): void {
+    const lines = text.split("\n").length;
+    this.#marker = `copied: ${lines} line${lines === 1 ? "" : "s"}`;
+    void copyText(text, (data) => this.#write(data), AbortSignal.timeout(5000));
   }
 
   #thinkingPage(): ListPage {
