@@ -196,6 +196,13 @@ const jobs =
       });
 // A job never outlives kinoko: not on quit, and not when kinoko serve stops an agent (SIGTERM).
 process.on("exit", () => jobs?.killAll());
+// How many run, told to the clients when it changes (the phone shows ⚙ N on the agent).
+let jobsRunning = 0;
+jobs?.on(() => {
+  if (jobs.running === jobsRunning) return;
+  jobsRunning = jobs.running;
+  agent.announce({ type: "jobs", running: jobsRunning });
+});
 if (jobs) process.on("SIGTERM", () => process.exit(143));
 const agent = new Agent({
   provider: connect(start),
