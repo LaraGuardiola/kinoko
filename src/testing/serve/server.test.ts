@@ -90,7 +90,7 @@ function client(url: string, token: string): { next: (type: string) => Promise<R
 describe("serve: the hub", () => {
   test("pairing, then a device starts an agent, prompts it, sees it stream, attaches again, stops it", async () => {
     const devices = new Devices(join(dir, "serve.json"));
-    const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: join(dir, "sessions"), version: "t", spawn: fakeSpawn });
+    const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: join(dir, "sessions"), version: "t", spawn: fakeSpawn, render: (text, width) => [`${width}:${text}`] });
     const base = `http://127.0.0.1:${hub.server.port}`;
     try {
       expect(await (await fetch(`${base}/v1/health`)).json()).toEqual({ name: "kinoko", version: "t", protocol: 1 });
@@ -135,6 +135,9 @@ describe("serve: the hub", () => {
       expect(((await c.next("commands")) as { commands: Array<{ name: string }> }).commands.map((x) => x.name)).toEqual(["thinking"]);
       c.send({ id: "r", type: "command", agent: id, name: "thinking", arg: "high" });
       expect(await c.next("command_result")).toMatchObject({ id: "r", agent: id, result: { text: "ran thinking high" } });
+
+      c.send({ id: "w", type: "render", text: "```ts\nx\n```", width: 7 });
+      expect(await c.next("rendered")).toEqual({ type: "rendered", id: "w", lines: ["20:```ts\nx\n```"] }); // at least 20 columns
 
       c.send({ id: "4", type: "stop", agent: id });
       await c.next("ok");

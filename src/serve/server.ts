@@ -29,6 +29,8 @@ export interface ServeOptions {
   version: string;
   /** The Unix socket kinoko TUIs link themselves through (link.ts); none, no links. */
   socket?: string;
+  /** Draws markdown (a fenced block, a table) as the TUI would, `width` columns wide: ANSI rows. */
+  render?: (text: string, width: number) => string[];
   host?: string;
   spawn?: Spawn;
   log?: (line: string) => void;
@@ -50,6 +52,7 @@ type Incoming = {
   images?: Image[];
   name?: string;
   arg?: string;
+  width?: number;
 };
 
 export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Agents; stop: () => void } {
@@ -112,6 +115,12 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
       case "command": {
         const reply = await agents.send(agent, { type: "command", name: msg.name, arg: msg.arg });
         return reply.type === "ok" ? send(ws, { type: "command_result", id: msg.id, agent, result: reply.result ?? {} }) : fail(reply.detail ?? "refused");
+      }
+      case "render": {
+        // A code block, a diff, a tree, a diagram, a table: drawn here exactly as in the terminal.
+        if (opts.render === undefined || typeof msg.text !== "string") return fail("nothing renders here");
+        const width = Math.max(20, Math.min(200, Math.trunc(Number(msg.width) || 80)));
+        return send(ws, { type: "rendered", id: msg.id, lines: opts.render(msg.text.slice(0, 200_000), width) });
       }
       case "stop": {
         const result = agents.stop(agent);
