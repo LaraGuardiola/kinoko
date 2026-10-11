@@ -2,11 +2,40 @@
 
 A small, fast, hackable coding-agent harness. Bun + TypeScript, **zero runtime dependencies**.
 
+**Contents:** [Quick start](#quick-start) · [Modes](#modes) · [Keys](#interruption-is-the-feature) ·
+[Config](#config) · [Tools](#the-six-tools) · [Sessions](#sessions-context-and-compaction) ·
+[Extensions](#extensions) · [Skills](#skills) · [Background jobs](#background-jobs) ·
+[Telegram & phone](#integrations) · [Development](#development)
+
+## Quick start
+
+Needs [Bun](https://bun.sh) and `git`.
+
 ```
-bun run src/main.ts --tui          # interactive
-bun run src/main.ts -p "fix the flaky test"
-bun run src/main.ts --mode rpc     # JSONL over stdio, for editors and scripts
+git clone https://github.com/LaraGuardiola/kinoko && cd kinoko
+bun run build
+install -m 755 kinoko-out/kinoko ~/.local/bin/kinoko   # anywhere on PATH
+mkdir -p ~/.kinoko
 ```
+
+Pick a model. With no config, kinoko talks to OpenAI (`gpt-4o-mini`, its key from `$KINOKO_API_KEY`).
+
+```
+# Anthropic
+echo '{ "provider": "anthropic", "model": "claude-opus-5-5" }' > ~/.kinoko/config.json
+export ANTHROPIC_API_KEY=sk-ant-...
+
+# or a local llama.cpp / Strata engine
+cp examples/config.strata.json ~/.kinoko/config.json
+```
+
+```
+kinoko                         # interactive
+kinoko -p "fix the flaky test" # one shot: the answer on stdout
+kinoko --mode rpc              # JSONL over stdio, for editors and scripts
+```
+
+From source, without building: `bun run start`.
 
 ## What it is
 
@@ -52,6 +81,85 @@ Images: `Ctrl-V` reads the clipboard (`wl-paste` on Wayland, `xclip` on X11), an
 dropping a PNG, JPEG, GIF or WebP file path attaches that file. Each shows in the input as
 `[Image #N]`; on Enter, the images whose placeholders are still in the text go with the message
 (up to 3.75 MB each). The model must take images: a text-only engine answers with an error.
+
+## Modes
+
+- **`kinoko`** (no arguments) — the interactive one. Raw ANSI, no alternate screen, so your terminal scrollback
+  keeps the history and only a live region at the bottom is repainted (at ~30fps).
+- **`-p "prompt"`** — non-interactive: the full agent loop, the final answer on stdout, tool
+  activity on stderr, non-zero exit if the run was aborted or failed.
+- **`--mode rpc`** — JSONL on stdin, JSONL on stdout. Commands: `prompt`, `steer`, `follow_up`,
+  `abort`, `get_state`, `get_messages`, `approve` (`request`, `allow`, `remember?`: answers an
+  `approval_request`). Out: the AgentEvent stream. `steer`/`follow_up`/`abort`/`approve` work mid-run.
+- **`kinoko serve`** — the hub for the phone app ([kinoko-android](https://github.com/LaraGuardiola/kinoko-android)):
+  runs agents (an rpc child each, in its project) and streams their events to paired devices over a
+  WebSocket ([docs/protocol.md](docs/protocol.md)). It listens on localhost and shares itself with
+  your tailnet through Tailscale (`--funnel`: with the internet; `--local`: not at all), taking the
+  share down when it stops. Pair a device by scanning `kinoko serve pair`'s QR code; `kinoko serve
+  devices` and `revoke <id>` manage them. A kinoko open in a terminal links itself to the hub too
+  (a local socket): the phone follows it and talks to it, and the terminal shows what came from the
+  phone as if typed there (`KINOKO_LINK=0` keeps a terminal out).
+
+## Config
+
+Defaults → `~/.kinoko/config.json` → `./.kinoko/config.json` → CLI flags. Kebab-case or camelCase,
+both work (`--max-turns` / `--maxTurns`).
+
+`/models` lists the models grouped by provider (one per endpoint, in name order), each provider
+asked for what it serves. `+ add provider` takes its name (strata, llama.cpp...), endpoint, API key,
+then one of the models it serves; it is kept in `~/.kinoko/models.json` (mode 0600: it holds the
+keys). Picking a model switches endpoint and model from the next request. Del twice on a saved model
+removes it (the configured one stays). `"label"` names the configured provider in that list.
+
+`"thinkingReplay"`: which of the model's old thinking goes back with each request. `"turn"` (the
+default) sends the thinking of every step since your last message, so the model keeps its plan
+between tool calls instead of re-reading your last message as if it were new; older thinking stays
+out. `"none"` sends only a reply cut by the output limit, for models that copy old thinking verbatim.
+
+`"retries"` (default 3): a dropped connection, no answer, or a 429/5xx is retried that many times in
+a row, after 2s, 4s, 8s...; the partial reply is dropped and the note above the input says so. Esc
+during the wait stops the run. `0` never retries.
+
+`"approvalTimeoutMs"` (default 600000, 10 min): a call an extension asks about (permission-gate's
+`sudo`, `rm -rf`...) waits this long for an answer (y, n or a in the TUI, or from the phone), then
+counts as denied.
+
+```json
+{ "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any",
+  "model": "qwen3.8-flash-next-coder-iq1_m-120k", "contextWindow": 122880,
+  "reasoningEffort": "low", "maxOutputTokens": 8192, "label": "strata" }
+```
+
+`examples/config.strata.json` is exactly that, for a local Strata/llama.cpp engine.
+
+Unknown keys, values of the wrong type and a file that is not valid JSON are skipped without a
+warning: when a setting seems to do nothing, check its spelling and type first.
+
+| key | default | what it does |
+| --- | --- | --- |
+| `provider` | `"openai-compat"` | `"openai-compat"` or `"anthropic"` |
+| `baseUrl` | `https://api.openai.com/v1` | the engine's endpoint |
+| `apiKey` | `$KINOKO_API_KEY` | (`$ANTHROPIC_API_KEY` for Anthropic) |
+| `model` | `"gpt-4o-mini"` | |
+| `contextWindow` | `128000` | compaction fires at `contextWindow - 16384` |
+| `maxOutputTokens` | `8192` | |
+| `reasoningEffort` | the engine's | `off` · `low` · `medium` · `high` |
+| `thinkingBudget` | the engine's | hard cap on thinking tokens per reply |
+| `thinkingReplay` | `"turn"` | `"turn"` or `"none"`, see above |
+| `maxTurns` | `500` | tool rounds per run |
+| `maxCost` | `5` | USD per run |
+| `retries` | `3` | `0` never retries |
+| `approvalTimeoutMs` | `600000` | an unanswered approval counts as denied |
+| `label` | the endpoint's host | the provider's name in `/models` |
+| `extensionsRepo` / `skillsRepo` | kinoko-extensions / kinoko-skills | where `/extensions` and `/skills` install from |
+
+Anthropic: `"provider": "anthropic"` with a Console API key (`apiKey`, or `$ANTHROPIC_API_KEY`).
+`baseUrl`, `contextWindow` and `maxOutputTokens` left at their defaults come from
+`src/providers/models.json`; `reasoningEffort` maps to the model's effort.
+
+```json
+{ "provider": "anthropic", "model": "claude-opus-5-5", "reasoningEffort": "high" }
+```
 
 ## The six tools
 
@@ -191,77 +299,6 @@ column is erased before anything scrolls, so the scrollback keeps only the trans
 keeping the terminal's own scrollback: when the window gets narrower while the column is on, the
 terminal re-wraps the screen before kinoko hears of it; kinoko redraws the screen, but rows the
 re-wrap pushed into the scrollback keep pieces of the column.
-
-## Config layers
-
-Defaults → `~/.kinoko/config.json` → `./.kinoko/config.json` → CLI flags. Kebab-case or camelCase,
-both work (`--max-turns` / `--maxTurns`).
-
-`/models` lists the models grouped by provider (one per endpoint, in name order), each provider
-asked for what it serves. `+ add provider` takes its name (strata, llama.cpp...), endpoint, API key,
-then one of the models it serves; it is kept in `~/.kinoko/models.json` (mode 0600: it holds the
-keys). Picking a model switches endpoint and model from the next request. Del twice on a saved model
-removes it (the configured one stays). `"label"` names the configured provider in that list.
-
-`"thinkingReplay"`: which of the model's old thinking goes back with each request. `"turn"` (the
-default) sends the thinking of every step since your last message, so the model keeps its plan
-between tool calls instead of re-reading your last message as if it were new; older thinking stays
-out. `"none"` sends only a reply cut by the output limit, for models that copy old thinking verbatim.
-
-`"retries"` (default 3): a dropped connection, no answer, or a 429/5xx is retried that many times in
-a row, after 2s, 4s, 8s...; the partial reply is dropped and the note above the input says so. Esc
-during the wait stops the run. `0` never retries.
-
-`"approvalTimeoutMs"` (default 600000, 10 min): a call an extension asks about (permission-gate's
-`sudo`, `rm -rf`...) waits this long for an answer (y, n or a in the TUI, or from the phone), then
-counts as denied.
-
-```json
-{ "baseUrl": "http://127.0.0.1:8081/v1", "apiKey": "any",
-  "model": "qwen3.8-flash-next-coder-iq1_m-120k", "contextWindow": 122880,
-  "reasoningEffort": "low", "maxOutputTokens": 8192, "label": "strata" }
-```
-
-`examples/config.strata.json` is exactly that, for a local Strata/llama.cpp engine. `apiKey` falls
-back to `$KINOKO_API_KEY`. Unknown keys are dropped rather than silently ignored.
-
-Anthropic: `"provider": "anthropic"` with a Console API key (`apiKey`, or `$ANTHROPIC_API_KEY`).
-`baseUrl`, `contextWindow` and `maxOutputTokens` left at their defaults come from
-`src/providers/models.json`; `reasoningEffort` maps to the model's effort.
-
-```json
-{ "provider": "anthropic", "model": "claude-opus-5-5", "reasoningEffort": "high" }
-```
-
-## Modes
-
-- **`--tui`** — the interactive one. Raw ANSI, no alternate screen, so your terminal scrollback
-  keeps the history and only a live region at the bottom is repainted (at ~30fps).
-- **`-p "prompt"`** — non-interactive: the full agent loop, the final answer on stdout, tool
-  activity on stderr, non-zero exit if the run was aborted or failed.
-- **`--mode rpc`** — JSONL on stdin, JSONL on stdout. Commands: `prompt`, `steer`, `follow_up`,
-  `abort`, `get_state`, `get_messages`, `approve` (`request`, `allow`, `remember?`: answers an
-  `approval_request`). Out: the AgentEvent stream. `steer`/`follow_up`/`abort`/`approve` work mid-run.
-- **`kinoko serve`** — the hub for the phone app ([kinoko-android](https://github.com/LaraGuardiola/kinoko-android)):
-  runs agents (an rpc child each, in its project) and streams their events to paired devices over a
-  WebSocket ([docs/protocol.md](docs/protocol.md)). It listens on localhost and shares itself with
-  your tailnet through Tailscale (`--funnel`: with the internet; `--local`: not at all), taking the
-  share down when it stops. Pair a device by scanning `kinoko serve pair`'s QR code; `kinoko serve
-  devices` and `revoke <id>` manage them. A kinoko open in a terminal links itself to the hub too
-  (a local socket): the phone follows it and talks to it, and the terminal shows what came from the
-  phone as if typed there (`KINOKO_LINK=0` keeps a terminal out).
-
-## Install
-
-```
-bun run build
-install -m 755 kinoko-out/kinoko ~/.local/bin/kinoko   # anywhere on PATH
-cp examples/config.strata.json ~/.kinoko/config.json    # or write your own
-```
-
-Then just type `kinoko`. Bare `kinoko` opens the interactive mode, `-p` prints,
-`--mode rpc` speaks JSONL. `bun run start -- --tui` runs it from source without
-building.
 
 ## Development
 
