@@ -8,7 +8,7 @@ const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]
 describe("directory trees", () => {
   test("tree lines: guides then a connector, box-drawn or ASCII", () => {
     for (const line of ["├── a", "│   └── b", "|-- c", "`-- d", "    \\-- e"]) expect(isTreeLine(line)).toBe(true);
-    for (const line of ["a ├── b", "- item", "x--y"]) expect(isTreeLine(line)).toBe(false);
+    for (const line of ["a ├── b", "- item", "x--y", "├──────────┤", "│ ├── x  │", "└──────┘"]) expect(isTreeLine(line)).toBe(false);
     expect(isTree(["src/", "├── a.ts"])).toBe(false);
   });
 

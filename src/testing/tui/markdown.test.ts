@@ -218,3 +218,23 @@ describe("markdown: fences an extension draws", () => {
     }
   });
 });
+
+describe("markdown: markup and boxes", () => {
+  test("Vue, Svelte, HTML: tags and attributes coloured, the script as JavaScript, comments dim", () => {
+    const tag = highlightLine('<button @click="go" :disabled="busy">', "vue").text;
+    expect(tag).toContain(`${SYNTAX.keyword}button`);
+    expect(tag).toContain(`${SYNTAX.property}@click`);
+    expect(tag).toContain(`${SYNTAX.property}:disabled`);
+    expect(tag).toContain(`${SYNTAX.string}"go"`); // a value, not a key, even before :disabled
+    expect(highlightLine("const a = useCounter()", "svelte").text).toContain(`${SYNTAX.keyword}const`);
+    expect(highlightLine("<!-- note -->", "html").text).toContain(SYNTAX.comment);
+    expect(languageName("vue")).toBe("Vue");
+  });
+
+  test("a box drawn in text is not a directory tree: no tree label, no comment italics", () => {
+    const box = ["```", "┌────────────┐", "│  TITLE     │", "├────────────┤", "│ <script>   │", "├────────────┤", "└────────────┘", "```"].join("\n");
+    const out = strip(renderMarkdown(box, { width: 40 }));
+    expect(out).not.toContain("Tree");
+    expect(renderMarkdown(box, { width: 40 })).not.toContain(`${ESC}[3m`);
+  });
+});

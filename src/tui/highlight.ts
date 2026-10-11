@@ -37,6 +37,7 @@ interface Spec {
   caseless?: boolean; // SQL
   hashComment?: "start-or-space"; // shell: `#` only starts a comment at a word boundary
   interpolate?: boolean; // `${expr}` inside backtick strings is code
+  tags?: boolean; // markup: <tag> and </tag> names, attribute names (@click, :prop, v-if)
 }
 
 const words = (text: string): Set<string> => new Set(text.split(" "));
@@ -89,6 +90,19 @@ const SPECS: Record<string, Spec> = {
     constants: words("null true false"),
     caseless: true,
   },
+  // HTML and the single-file components built on it (Vue, Svelte, Astro): tags and attributes, and
+  // the script inside them coloured as JavaScript.
+  markup: {
+    line: ["//"],
+    block: ["<!--", "-->"],
+    quotes: ['"', "'", "`"],
+    multiline: ["`"],
+    keywords: C_LIKE.keywords,
+    constants: C_LIKE.constants,
+    types: true,
+    tags: true,
+    interpolate: true,
+  },
   data: {
     line: ["#"],
     quotes: ['"', "'"],
@@ -106,6 +120,7 @@ const ALIASES: Record<string, string> = {
   sh: "shell", bash: "shell", zsh: "shell", shell: "shell", console: "shell", fish: "shell",
   sql: "sql",
   yaml: "data", yml: "data", toml: "data", ini: "data", conf: "data", dockerfile: "data",
+  html: "markup", htm: "markup", xml: "markup", svg: "markup", vue: "markup", svelte: "markup", astro: "markup",
 };
 
 /** What a highlighter carries from one line to the next: an open block comment or string. */
@@ -173,10 +188,25 @@ function tokenize(line: string, spec: Spec, start: HighlightState): { text: stri
       const run = stringRun(line, i + quote.length, quote, spec, quote);
       if (!run.closed && spec.multiline?.includes(quote)) state.inString = quote;
       // A plain string followed by a colon is a key ({"name": ...}).
-      const isKey = quote !== "`" && /^\s*:/.test(line.slice(run.stop)) && spec !== SPECS.shell;
+      const isKey = quote !== "`" && /^\s*:/.test(line.slice(run.stop)) && spec !== SPECS.shell && !spec.tags;
       out += isKey ? paint(SYNTAX.property, line.slice(i, run.stop)) : run.text;
       i = run.stop;
       continue;
+    }
+    if (spec.tags) {
+      // <tag, </tag: the bracket as punctuation, the name as a keyword; an attribute before its "=".
+      const tag = /^(<\/?)([A-Za-z][\w.:-]*)/.exec(rest());
+      if (tag) {
+        out += paint(SYNTAX.punct, tag[1] ?? "") + paint(SYNTAX.keyword, tag[2] ?? "");
+        i += tag[0].length;
+        continue;
+      }
+      const attr = /^[@:#]?[A-Za-z_][\w.:-]*(?==)/.exec(rest());
+      if (attr && /[\s"'{]/.test(line[i - 1] ?? " ")) {
+        out += paint(SYNTAX.property, attr[0]);
+        i += attr[0].length;
+        continue;
+      }
     }
     const prev = line[i - 1] ?? "";
     const number = /^(0[xob][\da-f_]+|\d[\d_]*(\.\d+)?(e[+-]?\d+)?n?)/i.exec(rest());
