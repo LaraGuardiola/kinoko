@@ -130,7 +130,7 @@ describe("tui renderer", () => {
     expect(out[1]).toBe("\x1b[2B\r\n\x1b[?25h");
   });
 
-  test("8. after the window got narrower, the way up counts the rows the terminal re-wrapped", () => {
+  test("8. the way up after a re-wrap counts its rows; any other width redraws the screen from what was printed", () => {
     // Rows of 40 columns (plus the margin) in a terminal now 20 wide: 3 rows each.
     const wide = "x".repeat(40);
     expect(reflowedUp([wide, wide, "short"], 2, 0, 20)).toBe(6);
@@ -140,14 +140,17 @@ describe("tui renderer", () => {
     const renderer = new Renderer({ write: (text) => out.push(text), columns: () => cols, now: () => 1000 });
     renderer.update({ lines: [wide, wide, "> "], row: 2, col: 2 });
     renderer.flush();
-    cols = 20; // the user tiled the window to a quarter
+    cols = 20; // the user tiled the window to a quarter: the screen is drawn again, from the top
     renderer.update({ lines: ["> "], row: 0, col: 2 });
     renderer.flush();
-    expect(out[1]).toStartWith(`${SYNC_ON}\x1b[6A\r\x1b[J`); // not just the 2 rows that were drawn
-    cols = 80; // wider again: nothing was re-wrapped, the plain way up
+    expect(out[1]).toStartWith(`${SYNC_ON}\x1b[0m\x1b[H\x1b[2J`);
+    cols = 80; // wider again: drawn again too
     renderer.update({ lines: ["a", "> "], row: 1, col: 2 });
     renderer.flush();
-    expect(out[2]).toStartWith(`${SYNC_ON}\r\x1b[J`);
+    expect(out[2]).toStartWith(`${SYNC_ON}\x1b[0m\x1b[H\x1b[2J`);
+    renderer.update({ lines: ["b", "> "], row: 1, col: 2 });
+    renderer.flush();
+    expect(out[3]).toStartWith(`${SYNC_ON}\x1b[1A\r\x1b[J`); // the same width: the plain way up
   });
 
   test("9. the side column: from the screen's top row down beside the upper rows, once the position is known", () => {
@@ -255,5 +258,35 @@ describe("rewriting a printed block (the capabilities lines)", () => {
     expect(renderer.rewrite("nothing", "x")).toBe(false);
     renderer.clear();
     expect(renderer.rewrite("capabilities", "panel\nExtensions: d")).toBe(false);
+  });
+});
+
+/** A tool band: it fills the text width it is drawn at. */
+const band = (w: number): string => "█".repeat(w);
+
+describe("a new width redraws the screen from what was printed", () => {
+  test("a piece with a source is drawn again at the new width; one without is rewrapped; a key still rewrites in place", () => {
+    let cols = 42;
+    const out: string[] = [];
+    const renderer = new Renderer({ write: (text) => out.push(text), columns: () => cols, rows: () => 20, now: () => 1000 });
+    renderer.update({ lines: ["> "], row: 0, col: 2 });
+    renderer.flush();
+    renderer.printAbove(band(40), undefined, band);
+    renderer.printAbove("plain words that wrap");
+    renderer.printAbove("Extensions: a", "capabilities");
+    cols = 22; // narrower: the band is 20 wide now, not 40 split in two
+    renderer.update({ lines: ["> "], row: 0, col: 2 });
+    renderer.flush();
+    const narrow = out.at(-1) ?? "";
+    expect(narrow).toContain(` ${"█".repeat(20)}\r\n plain words that wra\r\n p\r\n Extensions: a\r\n`); // no source: cut at the width
+    expect(narrow).not.toContain("█".repeat(21));
+    cols = 62; // wider again: the band is 60, the words on one row
+    renderer.update({ lines: ["> "], row: 0, col: 2 });
+    renderer.flush();
+    const wide = out.at(-1) ?? "";
+    expect(wide).toContain(` ${"█".repeat(60)}\r\n plain words that wrap\r\n`);
+    // The keyed piece knows where it is after the redraw: rewritten in place.
+    expect(renderer.rewrite("capabilities", "Extensions: a, b")).toBe(true);
+    expect(renderer.rowAt(renderer.top! - 1)).toBe(" Extensions: a, b");
   });
 });

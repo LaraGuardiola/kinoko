@@ -316,10 +316,11 @@ While the column is on, `todo` calls get no block in the transcript: the column 
 Tile the window narrower and the column goes; widen it and it comes back. The window's share of the
 screen comes from the terminal itself (XTWINOPS `14;2t` and `15t`: foot, xterm, kitty...; 140 columns
 when it does not answer), and where the input sits on the screen from a cursor position request. The
-column is erased before anything scrolls, so the scrollback keeps only the transcript. One caveat of
-keeping the terminal's own scrollback: when the window gets narrower while the column is on, the
-terminal re-wraps the screen before kinoko hears of it; kinoko redraws the screen, but rows the
-re-wrap pushed into the scrollback keep pieces of the column.
+column is erased before anything scrolls, so the scrollback keeps only the transcript. Whenever the
+width changes (the window resized, the column coming or going), kinoko draws the screen again from
+what it printed, each reply rewrapped and each tool's band refilled at the new width. One caveat of
+keeping the terminal's own scrollback: rows the terminal re-wrapped into the scrollback before
+kinoko heard of the resize stay as the terminal left them.
 
 ## Development
 

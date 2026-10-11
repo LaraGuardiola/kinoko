@@ -86,15 +86,17 @@ export class Renderer {
   #paintedRows: number | undefined;
   /** A position asked for and not answered yet: the cursor row and top at the time. */
   #asked: { row: number; top: number | undefined } | undefined;
-  /** What was printed, for redrawing the screen after a resize the side column was on. */
-  #history: string[] = [];
+  /** What was printed, for redrawing the screen at a new width: each piece's lines as printed and,
+   *  when the caller gave one, how to draw it again at another width (a reply, a tool's band). */
+  #history: Printed[] = [];
   /** The last rows printed above the region, as written (margin included): what a click lands on. */
   #printed: string[] = [];
   #lastSideErased = false;
-  /** Rows and history lines ever printed (absolute counts), and the blocks kept by key, to rewrite. */
+  /** Rows ever printed (an absolute count), and the pieces kept by key, to rewrite in place. */
   #rowsOut = 0;
-  #linesOut = 0;
-  #blocks = new Map<string, { row: number; rows: number; line: number; lines: number }>();
+  #blocks = new Map<string, Printed>();
+  /** The text width the screen was last drawn at: another one redraws it. */
+  #paintedText: number | undefined;
 
   /** The screen row (1-based) the region starts on, once the terminal has said. */
   get top(): number | undefined {
@@ -147,7 +149,10 @@ export class Renderer {
   flush(): void {
     // The window changed size under the side column: the terminal re-wrapped the screen, column
     // and all. Start the screen again from what was printed.
-    if (this.#sideDrawn && (this.#columns() !== this.#paintedCols || this.#rows() !== this.#paintedRows)) {
+    // Any other width (the window's, or the text's when the side column comes or goes): the screen
+    // is drawn again from what was printed, each piece at the new width.
+    const width = this.#columns() !== this.#paintedCols || (this.#paintedText !== undefined && this.#textWidth() !== this.#paintedText);
+    if (this.#paintedCols !== undefined && (width || (this.#sideDrawn && this.#rows() !== this.#paintedRows))) {
       this.#redraw();
       return;
     }
@@ -159,18 +164,14 @@ export class Renderer {
    * where the region used to start (the terminal scrolls by itself when it reaches the bottom)
    * and the region is repainted below it. History is never rewritten, so it stays in scrollback.
    */
-  printAbove(text: string, key?: string): void {
+  printAbove(text: string, key?: string, source?: (width: number) => string): void {
     if (text === "") return;
     const lines = text.split("\n");
-    if (key !== undefined) this.#blocks.set(key, { row: this.#rowsOut, rows: 0, line: this.#linesOut, lines: lines.length });
-    this.#linesOut += lines.length;
-    this.#history.push(...lines);
-    if (this.#history.length > HISTORY) this.#history.splice(0, this.#history.length - HISTORY);
     const rows = lines.flatMap((line) => wrapAnsi(line, this.#textWidth()));
+    const entry: Printed = { lines, source, row: this.#rowsOut, rows: rows.length };
+    this.#remember(entry, key);
     const body = rows.map((line) => ` ${line}`).join("\r\n");
     this.#keepPrinted(rows);
-    const block = key === undefined ? undefined : this.#blocks.get(key);
-    if (block) block.rows = rows.length;
     // The side column goes first: the rows about to scroll into the scrollback leave it behind.
     const out = `${SYNC_START}${this.#eraseSide()}${this.#moveToTop()}${CLEAR_BELOW}${body}\r\n`;
     if (this.#top !== undefined) this.#top += rows.length;
@@ -182,6 +183,7 @@ export class Renderer {
   /** Wipes the screen and the terminal's scrollback (/clear): the region starts again on the top row. */
   clear(): void {
     this.#blocks.clear();
+    this.#paintedText = undefined;
     this.#history = [];
     this.#printed = [];
     this.#sideDrawn = undefined;
@@ -222,17 +224,13 @@ export class Renderer {
    * follows; the screen only while the block is still on it. False when its first row is not on
    * screen any more (scrolled into the scrollback, or wiped): the caller prints it anew.
    */
-  rewrite(key: string, text: string): boolean {
+  rewrite(key: string, text: string, source?: (width: number) => string): boolean {
     const block = this.#blocks.get(key);
     const lines = text.split("\n");
     if (block === undefined) return false;
-    const first = this.#history.length - (this.#linesOut - block.line);
-    if (first >= 0) this.#history.splice(first, block.lines, ...lines);
-    // Its lines may be more or fewer now (wrapped at another width): the counts after it follow.
-    const delta = lines.length - block.lines;
-    this.#linesOut += delta;
-    for (const other of this.#blocks.values()) if (other.line > block.line) other.line += delta;
-    block.lines = lines.length;
+    // What a redraw prints follows (its lines may be more or fewer: the rows on screen stay).
+    block.lines = lines;
+    block.source = source;
     const width = this.#textWidth();
     let rows = lines.flatMap((line) => wrapAnsi(line, width));
     if (rows.length > block.rows) rows = lines.map((line) => cut(line, width));
@@ -251,6 +249,18 @@ export class Renderer {
     }
     this.#write(`${SYNC_START}${out}\x1b8${SYNC_END}`);
     return true;
+  }
+
+  /** Keeps a printed piece (and its key) in the history, the oldest going past HISTORY lines. */
+  #remember(entry: Printed, key?: string): void {
+    if (key !== undefined) this.#blocks.set(key, entry);
+    this.#history.push(entry);
+    let lines = this.#history.reduce((n, e) => n + e.lines.length, 0);
+    while (lines > HISTORY && this.#history.length > 1) {
+      const gone = this.#history.shift()!;
+      lines -= gone.lines.length;
+      for (const [k, e] of this.#blocks) if (e === gone) this.#blocks.delete(k);
+    }
   }
 
   #keepPrinted(rows: string[]): void {
@@ -283,19 +293,21 @@ export class Renderer {
   #redraw(): void {
     this.#sideDrawn = undefined;
     const room = Math.max(0, this.#rows() - this.#state.lines.length);
-    const wrapped = this.#history.map((line) => wrapAnsi(line, this.#textWidth()));
+    const width = this.#textWidth();
+    // Each piece drawn again at this width when it can be (a reply rewraps, a band refills), else
+    // its lines as printed, rewrapped.
+    const wrapped = this.#history.map((entry) => {
+      if (entry.source) entry.lines = entry.source(width).split("\n");
+      return entry.lines.flatMap((line) => wrapAnsi(line, width));
+    });
     const all = wrapped.flat();
     const rows = all.slice(-room);
-    // The kept blocks, rewrapped: where their rows are now (above the screen when cut off).
-    const count = (from: number, to: number): number => wrapped.slice(from, to).reduce((n, w) => n + w.length, 0);
-    for (const [key, block] of this.#blocks) {
-      const first = this.#history.length - (this.#linesOut - block.line);
-      if (first < 0) {
-        this.#blocks.delete(key);
-        continue;
-      }
-      block.row = this.#rowsOut + count(0, first) - (all.length - rows.length);
-      block.rows = count(first, first + block.lines);
+    // Where each piece's rows are now (above the screen when cut off), for a rewrite in place.
+    let before = this.#rowsOut - (all.length - rows.length);
+    for (const [i, entry] of this.#history.entries()) {
+      entry.row = before;
+      entry.rows = wrapped[i]?.length ?? 0;
+      before += entry.rows;
     }
     const body = rows.map((line) => ` ${line}\r\n`).join("");
     this.#printed = [];
@@ -338,6 +350,7 @@ export class Renderer {
     this.#cursorRow = 0;
     this.#cursorCol = 0;
     this.#paintedCols = this.#columns();
+    this.#paintedText = this.#textWidth();
     this.#paintedRows = this.#rows();
     if (lines.length === 0) return "";
     let out = lines.map((line) => ` ${line}`).join("\r\n");
@@ -401,4 +414,13 @@ export const ansi = {
 function cut(line: string, width: number): string {
   if (visibleLength(line) <= width) return line;
   return `${wrapAnsi(line, Math.max(1, width - 1))[0] ?? ""}…`;
+}
+
+/** A piece printed above the region: its lines, how to draw it at another width, its rows. */
+interface Printed {
+  lines: string[];
+  source?: (width: number) => string;
+  /** Its first row's absolute index, and how many rows it took. */
+  row: number;
+  rows: number;
 }

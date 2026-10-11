@@ -250,7 +250,7 @@ export class App {
   /** A resumed session: its conversation goes to the scrollback, and the context counter is back. */
   replay(messages: Message[], note: string): void {
     this.#print("system", note);
-    for (const block of replayBlocks(messages, this.#printCols)) this.#print(block.kind, block.text);
+    for (const block of replayBlocks(messages, this.#printCols)) this.#print(block.kind, block.text, undefined, undefined, block.render && ((w) => block.render!(w + 2)));
     this.#images.startAfter(messages.reduce((n, m) => n + (m.images?.length ?? 0), 0));
     this.#side.history(messages);
     const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
@@ -268,7 +268,7 @@ export class App {
   intro(text: string, gap = false): void {
     this.#panel = { text, gap };
     this.#panelStale = false;
-    this.#print("system", formatBlock("system", text, this.#width), gap, "capabilities");
+    this.#print("system", formatBlock("system", text, this.#width), gap, "capabilities", (w) => formatBlock("system", text, w));
   }
 
   /** The [Capabilities] lines as they are now: rewritten in place while on screen, else marked
@@ -281,7 +281,8 @@ export class App {
     if (text === panel.text) return;
     panel.text = text;
     const printed = formatBlock("system", text, this.#width);
-    if (!this.#renderer.rewrite("capabilities", panel.gap ? `\n${printed}` : printed)) this.#panelStale = true;
+    const source = (w: number): string => `${panel.gap ? "\n" : ""}${formatBlock("system", text, w)}`;
+    if (!this.#renderer.rewrite("capabilities", panel.gap ? `\n${printed}` : printed, source)) this.#panelStale = true;
     this.render();
   }
 
@@ -652,7 +653,8 @@ export class App {
     this.#tool = undefined;
     // With the side column on, the plan is there: its todo calls need no block in the transcript.
     if (tool.name === TODO_TOOL && !tool.aborted && !toolFailed(tool.output) && this.#sideOn) return;
-    this.#print("tool", toolBlock(tool, this.#toolBlocksFull, this.#printCols));
+    const full = this.#toolBlocksFull;
+    this.#print("tool", toolBlock(tool, full, this.#printCols), undefined, undefined, (w) => toolBlock(tool, full, w + 2));
   }
 
   #refreshPlace(): void {
@@ -682,7 +684,8 @@ export class App {
       this.#marker = "Interrupted";
     } else if (reason === "error") {
       // A failed run says why where it happened, on a band like a failed tool's; the marker points at it.
-      this.#print("tool", errorBlock(detail ?? "unknown error", this.#width));
+      const why = detail ?? "unknown error";
+      this.#print("tool", errorBlock(why, this.#width), undefined, undefined, (w) => errorBlock(why, w));
       this.#marker = "Stopped — error";
     } else if (reason === "limit") {
       // A run that stops on its own must say why, or it looks like the model gave up.
@@ -712,7 +715,7 @@ export class App {
     const chunk = formatBlock(open.kind, split.commit, this.#width);
     const gap = open.gap;
     this.#open = { kind: open.kind, text: split.rest, gap: split.gap };
-    if (chunk !== "") this.#print(open.kind, chunk, gap);
+    if (chunk !== "") this.#print(open.kind, chunk, gap, undefined, (w) => formatBlock(open.kind, split.commit, w));
   }
 
   /** Prints what is left of the open block and forgets it. */
@@ -721,15 +724,17 @@ export class App {
     if (open === undefined) return;
     this.#open = undefined;
     const text = formatBlock(open.kind, open.text, this.#width);
-    if (text !== "") this.#print(open.kind, text, open.gap);
+    if (text !== "") this.#print(open.kind, text, open.gap, undefined, (w) => formatBlock(open.kind, open.text, w));
   }
 
   /** Sends one finished piece to the scrollback. `gap` defaults to the usual blank row between blocks. */
-  #print(kind: BlockKind, text: string, gap = this.#printedAny, key?: string): void {
+  #print(kind: BlockKind, text: string, gap = this.#printedAny, key?: string, render?: (width: number) => string): void {
     if (text === "") return;
     // The renderer repaints the region right after the text: it has to know the current state.
     this.#renderer.update(this.#state());
-    this.#renderer.printAbove(gap ? `\n${text}` : text, key);
+    // `render` draws it again at another text width (a resize): a reply rewraps, a band refills.
+    const source = render && ((w: number): string => (gap ? `\n${render(w)}` : render(w)));
+    this.#renderer.printAbove(gap ? `\n${text}` : text, key, source);
     this.#printedAny = true;
   }
 
@@ -745,7 +750,8 @@ export class App {
     // Closing first keeps the order true: what was already streamed stays above the message.
     this.#closeBlock();
     // kinoko's own words to the model (a background job ended) are not the user's.
-    if (text.startsWith("[kinoko] ")) this.#print("system", formatBlock("system", `⚙ ${text.slice(9).split("\n")[0]}`, this.#width));
+    const note = `⚙ ${text.slice(9).split("\n")[0]}`;
+    if (text.startsWith("[kinoko] ")) this.#print("system", formatBlock("system", note, this.#width), undefined, undefined, (w) => formatBlock("system", note, w));
     else this.#print("user", formatBlock("user", text));
     this.render();
   }
@@ -819,7 +825,7 @@ export class App {
     const [name = ""] = input.replace(/^\//, "").split(" ");
     switch (name) {
       case "help":
-        this.#print("system", helpText(this.#width));
+        this.#print("system", helpText(this.#width), undefined, undefined, (w) => helpText(w));
         this.render();
         return true;
       case "model":
