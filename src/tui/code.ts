@@ -3,9 +3,11 @@
 // with a hanging indent, so the background never breaks. No line numbers: a terminal cannot make
 // them unselectable, and a mouse copy should come out as the code (plus the two-column margin).
 
+import { diffLines, isDiff } from "./diff.ts";
 import { highlightLine } from "./highlight.ts";
 import type { HighlightState } from "./highlight.ts";
 import { cells, visibleLength, wrapAnsi } from "./style.ts";
+import { isTree, treeRows } from "./tree.ts";
 
 const ESC = "\x1b[";
 const RESET = `${ESC}0m`;
@@ -19,31 +21,51 @@ export interface CodeOptions {
   color?: boolean;
 }
 
-/** The panel's rows for a code block's lines (fences excluded). */
+/** The panel's rows for a code block's lines (fences excluded). A diff gets its review colours
+ *  (diff.ts), a directory tree its guides (tree.ts). */
 export function codeBlock(lines: string[], opts: CodeOptions): string[] {
   const color = opts.color ?? true;
-  if (!color) return lines.map((line) => `  ${line}`);
+  const tree = isTree(lines) && /^(|text|txt|plain|plaintext|tree|sh|bash|shell|console)$/i.test(opts.lang);
+  if (!color) return tree ? treeRows(lines, Math.max(4, opts.width - 2), false).map((line) => `  ${line}`) : lines.map((line) => `  ${line}`);
   const width = Math.max(12, opts.width);
   // A column of padding each side, and one more before the code: a two-column margin.
   const inner = width - 2;
   const codeWidth = Math.max(4, inner - 1);
-  const name = languageName(opts.lang);
-  // The language sits in the top-right corner, a couple of columns in from the edge.
-  const label = name === "" ? "" : `${" ".repeat(Math.max(0, inner - name.length - 2))}${LABEL}${name}${RESET}`;
-  // A padding row above the label keeps it off the pane's top edge.
-  const rows: string[] = [row("", inner), row(label, inner)];
-  let state: HighlightState = {};
-  for (const line of lines) {
-    const lit = highlightLine(line, opts.lang, state);
-    state = lit.state;
-    // A continuation row hangs two columns deeper than the line's own indentation, like an editor's
-    // soft wrap, so it reads as the same line and not as the next one.
-    const indent = /^ */.exec(line)?.[0].length ?? 0;
-    const pieces = wrapCode(lit.text, codeWidth, Math.min(indent + 2, Math.floor(codeWidth / 2)));
-    for (const piece of pieces) rows.push(row(` ${piece}`, inner));
+  const diff = isDiff(opts.lang, lines);
+  const rows: string[] = [row("", inner), row(label(diff ? "diff" : tree ? "tree" : opts.lang, inner), inner)];
+  if (tree) {
+    for (const line of treeRows(lines, codeWidth)) rows.push(row(` ${line}`, inner));
+  } else if (diff) {
+    for (const line of diffLines(lines)) {
+      for (const piece of wrapCode(line.text, codeWidth, 2)) rows.push(row(` ${piece}`, inner, line.bg));
+    }
+  } else {
+    let state: HighlightState = {};
+    for (const line of lines) {
+      const lit = highlightLine(line, opts.lang, state);
+      state = lit.state;
+      // A continuation row hangs two columns deeper than the line's own indentation, like an editor's
+      // soft wrap, so it reads as the same line and not as the next one.
+      const indent = /^ */.exec(line)?.[0].length ?? 0;
+      const pieces = wrapCode(lit.text, codeWidth, Math.min(indent + 2, Math.floor(codeWidth / 2)));
+      for (const piece of pieces) rows.push(row(` ${piece}`, inner));
+    }
   }
   rows.push(row("", inner));
   return rows;
+}
+
+/** Rows an extension drew for the fence (a diagram), in the same panel, uncoloured by us. */
+export function drawnBlock(drawn: string[], opts: { lang: string; width: number }): string[] {
+  const inner = Math.max(12, opts.width) - 2;
+  return [row("", inner), row(label(opts.lang, inner), inner), ...drawn.map((line) => row(` ${line}`, inner)), row("", inner)];
+}
+
+/** The language's name in the top-right corner, a couple of columns in from the edge. A padding row
+ *  above it keeps it off the pane's top edge. */
+function label(lang: string, inner: number): string {
+  const name = languageName(lang);
+  return name === "" ? "" : `${" ".repeat(Math.max(0, inner - name.length - 2))}${LABEL}${name}${RESET}`;
 }
 
 /**
@@ -115,7 +137,7 @@ const NAMES: Record<string, string> = {
   rb: "Ruby", ruby: "Ruby", scala: "Scala", dart: "Dart", zig: "Zig", sql: "SQL", html: "HTML",
   xml: "XML", css: "CSS", scss: "SCSS", md: "Markdown", markdown: "Markdown", yml: "YAML", yaml: "YAML",
   toml: "TOML", ini: "INI", conf: "Config", dockerfile: "Dockerfile", diff: "Diff", patch: "Diff",
-  text: "Text", txt: "Text",
+  text: "Text", txt: "Text", tree: "Tree", mermaid: "Mermaid",
 };
 
 /** The language's full name for the label: "ts" reads "TypeScript". */
@@ -125,9 +147,9 @@ export function languageName(lang: string): string {
 }
 
 /** One panel row: the background, a padding column each side, the content padded to `inner`. */
-function row(content: string, inner: number): string {
+function row(content: string, inner: number, bg = PANEL): string {
   // A reset inside the content (from wrapping) must not end the background mid-row.
-  const body = content.replaceAll(RESET, `${RESET}${PANEL}`);
+  const body = content.replaceAll(RESET, `${RESET}${bg}`);
   const pad = " ".repeat(Math.max(0, inner - visibleLength(content)));
-  return `${PANEL} ${body}${pad} ${RESET}`;
+  return `${bg} ${body}${pad} ${RESET}`;
 }

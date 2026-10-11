@@ -51,12 +51,16 @@ export interface ExtHandlers {
 
 export type ExtEvent = keyof ExtHandlers;
 export type CommandHandler = (args: string) => string | Promise<string>;
+/** Draws a fenced block of its language (```mermaid) in the transcript: the rows, each at most
+ *  `width` columns, or undefined to show the source as code. Called with whole blocks only. */
+export type FenceRenderer = (source: string, width: number) => string[] | undefined;
 export type ExtensionFactory = (k: Kinoko) => void | Promise<void>;
 
 export interface Kinoko {
   on<E extends ExtEvent>(event: E, handler: ExtHandlers[E]): void;
   registerTool(tool: Tool): void;
   registerCommand(name: string, handler: CommandHandler): void;
+  registerRenderer(lang: string, render: FenceRenderer): void;
   log(message: string): void;
 }
 
@@ -75,6 +79,7 @@ export class Extensions implements Kinoko {
   #handlers = new Map<ExtEvent, AnyHandler[]>();
   #tools: Tool[] = [];
   #commands = new Map<string, CommandHandler>();
+  #renderers = new Map<string, FenceRenderer>();
   #log: (line: string) => void;
   // Who registered what, so one extension can be taken back (unload) while kinoko runs.
   #owner = "";
@@ -100,6 +105,16 @@ export class Extensions implements Kinoko {
   registerCommand(name: string, handler: CommandHandler): void {
     this.#commands.set(name, handler);
     this.#ownerOf.set(handler, this.#owner);
+  }
+
+  registerRenderer(lang: string, render: FenceRenderer): void {
+    this.#renderers.set(lang.toLowerCase(), render);
+    this.#ownerOf.set(render, this.#owner);
+  }
+
+  /** The renderer for a fence's language, if an extension draws it. */
+  renderer(lang: string): FenceRenderer | undefined {
+    return this.#renderers.get(lang.toLowerCase());
   }
 
   /** Runs an extension's factory as `name`: what it registers is its own. A session already
@@ -131,7 +146,7 @@ export class Extensions implements Kinoko {
     }
   }
 
-  /** Takes back everything `name` registered (handlers, tools, commands); false when it had nothing.
+  /** Takes back everything `name` registered (handlers, tools, commands, renderers); false when it had nothing.
    *  What it already did outside kinoko (a timer, a socket) is its own business. */
   unload(name: string): boolean {
     const mine = (item: unknown): boolean => this.#ownerOf.get(item) === name;
@@ -144,10 +159,12 @@ export class Extensions implements Kinoko {
     const tools = this.#tools.filter((t) => !mine(t));
     found ||= tools.length !== this.#tools.length;
     this.#tools = tools;
-    for (const [cmd, handler] of this.#commands) {
-      if (!mine(handler)) continue;
-      this.#commands.delete(cmd);
-      found = true;
+    for (const map of [this.#commands, this.#renderers] as Map<string, unknown>[]) {
+      for (const [key, item] of map) {
+        if (!mine(item)) continue;
+        map.delete(key);
+        found = true;
+      }
     }
     for (const [item, owner] of this.#ownerOf) if (owner === name) this.#ownerOf.delete(item);
     return found;
