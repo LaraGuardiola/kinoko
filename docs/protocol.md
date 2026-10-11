@@ -1,8 +1,9 @@
 # kinoko serve: the app protocol (version 1)
 
 `kinoko serve` is the hub a phone app talks to. It runs agents (one `kinoko --mode rpc` child per
-agent, in its project's directory), and relays what they do to paired devices as it happens: not a
-picture of a terminal, but the events themselves, for the app to draw natively.
+agent, in its project's directory), lists the kinoko TUIs open in terminals too (they link
+themselves to it), and relays what they do to paired devices as it happens: not a picture of a
+terminal, but the events themselves, for the app to draw natively.
 
 ```
 phone app ──HTTPS/WSS──▶ Tailscale (serve or funnel) ──▶ 127.0.0.1:7878 kinoko serve ──stdio──▶ kinoko --mode rpc (per agent)
@@ -82,7 +83,7 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `steer` | `agent`, `text`, `images?` | said to the model at its next step, mid-run |
 | `follow_up` | `agent`, `text`, `images?` | queued for when the run ends |
 | `abort` | `agent` | Esc: the run stops |
-| `stop` | `agent` | the agent's process ends (its session stays on disk, resumable) |
+| `stop` | `agent` | the agent's process ends (its session stays on disk, resumable); refused for a terminal's |
 
 `images`: `[{"mime": "image/jpeg", "data": "<base64>"}]`. Messages up to 32 MB.
 
@@ -92,11 +93,21 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 the run in progress since then (the reply streaming now, a tool running). Draw the messages, replay
 `live` as if it were arriving, then keep going with `event`s. The same after a reconnect.
 
+## Terminals
+
+A kinoko TUI started while the hub runs (or one that finds it within ~3 s of it starting) links
+itself through the hub's Unix socket `~/.kinoko/serve.sock` (mode 600: this user's processes only),
+speaking the rpc mode's JSONL after a first `{"type": "hello", "origin": "terminal", "cwd", "pid",
+"model", "session", "running"}` line. It is listed with `origin: "terminal"` while it stays open; the
+phone attaches to it, prompts it (the terminal shows the prompt with a 📱), steers and aborts it like
+any agent, but cannot `stop` it: it ends in its terminal. `KINOKO_LINK=0` keeps a terminal out.
+
 ## Shapes
 
 ```ts
 AgentInfo {
   id: string; cwd: string; project: string; model: string;
+  origin: "app" | "terminal";   // started by the hub, or a kinoko TUI linked to it
   state: "starting" | "idle" | "running" | "exited";
   session?: string;      // its session id: resumable with start {session}
   title?: string;        // the first prompt, as a name

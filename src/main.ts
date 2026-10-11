@@ -254,6 +254,11 @@ if (tui) {
   app.intro(startup);
   if (previous) app.replay(agent.messages, `resumed session ${session.meta.id}`);
   app.locate(); // where the region sits on the screen: the side column is drawn from its top row
+  // While `kinoko serve` runs, this terminal shows up in the phone app (KINOKO_LINK=0: it does not).
+  if (process.env.KINOKO_LINK !== "0") {
+    const { linkToHub } = await import("./serve/link.ts");
+    linkToHub({ agent, socket: join(process.env.HOME ?? "", ".kinoko", "serve.sock"), cwd, model: () => agent.model, session: () => session.meta.id });
+  }
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
   clearInterval(loop);

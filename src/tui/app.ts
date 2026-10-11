@@ -434,6 +434,14 @@ export class App {
 
   #onAgentEvent(e: AgentEvent): void {
     switch (e.type) {
+      case "run_start":
+        // A run this terminal did not start: a prompt from the phone, through kinoko serve.
+        if (!this.#running) {
+          this.#running = true;
+          this.#marker = "";
+          this.#echoUser(`📱 ${e.prompt}`);
+        }
+        return;
       case "message_delta":
         this.#append("assistant", e.delta);
         return;
