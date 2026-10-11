@@ -295,11 +295,11 @@ describe("serve: the hub", () => {
   });
 
   test("background jobs: the agent says how many run, the list carries it (none: no field), never replayed", async () => {
-    let emit = (_e: object): void => undefined;
+    const child = { emit: (_e: object): void => undefined }; // what the fake agent says, once it runs
     const spawn: Spawn = (_cmd, cwd): Child => {
       const out = pipe();
       const exit = { done: (_code: number): void => undefined };
-      emit = (event) => out.push(JSON.stringify({ type: "event", event }));
+      child.emit = (event) => out.push(JSON.stringify({ type: "event", event }));
       return {
         write: (line) => {
           const c = JSON.parse(line) as { id: string; type: string };
@@ -317,10 +317,10 @@ describe("serve: the hub", () => {
     try {
       const info = hub.agents.start({ cwd: dir });
       await Bun.sleep(20);
-      emit({ type: "jobs", running: 2 });
+      child.emit({ type: "jobs", running: 2 });
       await Bun.sleep(20);
       changes.push(hub.agents.info(info.id)?.jobs ?? 0);
-      emit({ type: "jobs", running: 0 });
+      child.emit({ type: "jobs", running: 0 });
       await Bun.sleep(20);
       expect(changes).toEqual([2]);
       expect(hub.agents.info(info.id)?.jobs).toBeUndefined();
