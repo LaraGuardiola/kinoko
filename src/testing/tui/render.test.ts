@@ -213,3 +213,47 @@ describe("what a click lands on", () => {
     expect(renderer.rowAt(9)).toBeUndefined();
   });
 });
+
+describe("rewriting a printed block (the capabilities lines)", () => {
+  test("on screen: its rows are written in place, the cursor put back; what a click lands on follows", () => {
+    const { renderer, out } = harness();
+    renderer.update({ lines: ["editor"], row: 0, col: 0 });
+    renderer.flush();
+    renderer.printAbove("panel\nExtensions: a", "capabilities");
+    renderer.printAbove("later");
+    renderer.position(10); // rows 7, 8: the panel; 9: later; 10: the editor
+    out.length = 0;
+    expect(renderer.rewrite("capabilities", "panel\nExtensions: a, b")).toBe(true);
+    expect(out[0]).toContain("\x1b7");
+    expect(out[0]).toContain("\x1b[8;1H\x1b[0m Extensions: a, b");
+    expect(out[0]).toContain("\x1b8");
+    expect(renderer.rowAt(8)).toBe(" Extensions: a, b");
+    expect(renderer.rowAt(9)).toBe(" later");
+  });
+
+  test("its row count stays: a line that would wrap further is cut", () => {
+    const out: string[] = [];
+    const renderer = new Renderer({ write: (t) => out.push(t), columns: () => 22 });
+    renderer.update({ lines: ["editor"], row: 0, col: 0 });
+    renderer.printAbove("Extensions: a", "capabilities");
+    renderer.position(5);
+    expect(renderer.rewrite("capabilities", "Extensions: alpha, beta, gamma")).toBe(true);
+    expect(renderer.rowAt(4)).toBe(" Extensions: alpha, …"); // cut at a word, as it would wrap
+    // More lines than it had (wrapped at another width): each cut, the rows it had kept.
+    expect(renderer.rewrite("capabilities", "Extensions: a\nmore")).toBe(true);
+    expect(renderer.rowAt(4)).toBe(" Extensions: a");
+    expect(renderer.rowAt(5)).toBe(" editor");
+  });
+
+  test("scrolled off the screen, unknown, a different line count, or wiped: false", () => {
+    const { renderer } = harness();
+    renderer.update({ lines: ["editor"], row: 0, col: 0 });
+    renderer.printAbove("panel\nExtensions: a", "capabilities");
+    expect(renderer.rewrite("capabilities", "panel\nExtensions: b")).toBe(false); // where is it? not said yet
+    renderer.position(2); // the panel's first row would be row 0: off the top
+    expect(renderer.rewrite("capabilities", "panel\nExtensions: c")).toBe(false);
+    expect(renderer.rewrite("nothing", "x")).toBe(false);
+    renderer.clear();
+    expect(renderer.rewrite("capabilities", "panel\nExtensions: d")).toBe(false);
+  });
+});

@@ -94,6 +94,7 @@ async function harness(
     /** The loaded extensions (their tool_call hooks), not the /extensions catalog. */
     ext?: Extensions;
     integrations?: AppOptions["integrations"];
+    capabilities?: AppOptions["capabilities"];
   } = {},
 ): Promise<Harness> {
   const out: string[] = [];
@@ -141,6 +142,7 @@ async function harness(
     changes: opts.changes ?? (async () => ({ files: [] })), // never the real git
     cwd: ROOT,
     integrations: opts.integrations ?? { home: ROOT, hubRunning: async () => false },
+    capabilities: opts.capabilities,
   });
   return {
     app: app,
@@ -1231,6 +1233,23 @@ describe("the extensions and skills pages", () => {
     expect(h.app.marker).toBe("web installed: restart kinoko to apply it"); // no apply: at the next start
   });
 
+  test("the selection stays on the entry switched, so Enter twice switches it off and back on", async () => {
+    const fake = store([
+      { name: "alpha", description: "a", installed: true, enabled: true },
+      { name: "beta", description: "b", installed: true, enabled: true },
+      { name: "gamma", description: "c", installed: true, enabled: true },
+    ]);
+    const h = await harness([], { extensions: fake.store, apply: async () => "done", viewportRows: 30 });
+    h.press("/extensions\r");
+    await paced();
+    h.press("\x1b[B\x1b[B"); // gamma
+    h.press("\r");
+    await paced();
+    h.press("\r");
+    await paced();
+    expect(fake.toggled).toEqual(["gamma off", "gamma on"]);
+  });
+
   test("Enter switches an installed one off and on, at once and with the page open; U updates it", async () => {
     const fake = store([
       { name: "herdr", description: "herdr agent", installed: true, enabled: true },
@@ -1557,5 +1576,55 @@ describe("/integrations: Telegram's setup", () => {
     expect(installs).toBe(1);
     expect(h.app.marker).toBe("telegram installed: loaded");
     expect(h.app.menuPage).toBe("Telegram · @kinoko_test_bot · Lara");
+  });
+});
+
+/** A startup panel with these extensions. */
+const panel = (extensions: string): string => `kinoko vTEST\n\n[Capabilities]\n  Skills: none\n  Extensions: ${extensions}\n\nAsk it to work.`;
+
+describe("the [Capabilities] lines follow what is installed", () => {
+
+  test("on screen: rewritten in place when an extension is installed, nothing printed again", async () => {
+    const fake = store([{ name: "web", description: "web tools", installed: false }]);
+    let on = "none";
+    const apply = async (): Promise<string> => ((on = "web"), "loaded");
+    const h = await harness([], { extensions: fake.store, apply, capabilities: async () => panel(on), viewportRows: 30 });
+    h.app.intro(panel("none"));
+    h.app.handleKey({ name: "cursor-report", at: { row: 20, col: 1 } }); // the terminal says where the region is
+    h.out.length = 0;
+    h.press("/extensions\r");
+    await paced();
+    h.press("\r");
+    await paced();
+    const written = h.out.join("");
+    expect(written).toContain("\x1b7");
+    expect(written).toContain(" Extensions: web");
+    const count = (): number => h.out.join("").split("[Capabilities]").length;
+    const rewritten = count();
+    h.press("\x1b");
+    h.press("\x1b");
+    expect(count()).toBe(rewritten); // closing the menu prints nothing again
+  });
+
+  test("scrolled away: printed again, once, when the menu closes", async () => {
+    const fake = store([{ name: "web", description: "web tools", installed: false }]);
+    let on = "none";
+    const apply = async (): Promise<string> => ((on = "web"), "loaded");
+    const h = await harness([], { extensions: fake.store, apply, capabilities: async () => panel(on), viewportRows: 30 });
+    h.app.intro(panel("none")); // the terminal never said where: as good as off screen
+    h.press("/extensions\r");
+    await paced();
+    h.press("\r");
+    await paced();
+    const before = h.screen().split("[Capabilities]").length;
+    h.press("\x1b");
+    h.press("\x1b");
+    const after = h.screen();
+    expect(after.split("[Capabilities]").length).toBe(before + 1);
+    expect(after.slice(after.lastIndexOf("[Capabilities]"))).toContain("Extensions: web");
+    h.press("/extensions\r");
+    h.press("\x1b");
+    h.press("\x1b");
+    expect(h.screen().split("[Capabilities]").length).toBe(before + 1); // nothing new: not again
   });
 });

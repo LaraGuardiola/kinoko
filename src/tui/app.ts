@@ -74,6 +74,9 @@ export interface AppOptions {
   /** Puts an install or a removal into effect now (loads the extension, tells the model of the
    *  skill); says how. Without it, they take effect when kinoko starts again. */
   apply?: (kind: "extensions" | "skills", name: string, change: Change) => Promise<string>;
+  /** The startup panel as it is now (extensions and skills switched on or off since): its
+   *  [Capabilities] lines replace the ones printed at the top. */
+  capabilities?: () => Promise<string>;
   viewportRows?: number;
   viewportCols?: number;
   /** The line under the editor (cwd and git branch). Re-read after every tool call: tools can
@@ -127,6 +130,10 @@ export class App {
   #host: ModelsHost | undefined;
   #catalogs: { extensions?: Catalog; skills?: Catalog };
   #apply: AppOptions["apply"];
+  #capabilities: AppOptions["capabilities"];
+  /** The block with the [Capabilities] lines as printed (the startup panel, or a fresh copy). */
+  #panel: { text: string; gap: boolean } | undefined;
+  #panelStale = false; // changed while scrolled off screen: printed again when the menu closes
   #newSessionOf: AppOptions["newSession"];
   #endpoint: string;
   #saved: SavedModel[];
@@ -183,7 +190,14 @@ export class App {
     this.#budgets = opts.budgets ?? false;
     this.#host = opts.models;
     this.#catalogs = { extensions: opts.extensions, skills: opts.skills };
-    this.#apply = opts.apply;
+    // Every install, removal or switch also brings the [Capabilities] lines up to date.
+    const apply = opts.apply;
+    this.#apply = apply && (async (kind, name, change) => {
+      const done = await apply(kind, name, change);
+      await this.#refreshCapabilities();
+      return done;
+    });
+    this.#capabilities = opts.capabilities;
     this.#newSessionOf = opts.newSession;
     this.#endpoint = opts.models?.endpoint ?? "";
     this.#saved = opts.models?.saved ?? [];
@@ -243,8 +257,32 @@ export class App {
   }
 
   /** Prints the startup panel above the region; what follows it is spaced like any other block. */
-  intro(text: string): void {
-    this.#print("system", formatBlock("system", text, this.#width), false);
+  intro(text: string, gap = false): void {
+    this.#panel = { text, gap };
+    this.#panelStale = false;
+    this.#print("system", formatBlock("system", text, this.#width), gap, "capabilities");
+  }
+
+  /** The [Capabilities] lines as they are now: rewritten in place while on screen, else marked
+   *  to be printed again once the menu closes. */
+  async #refreshCapabilities(): Promise<void> {
+    const panel = this.#panel;
+    const fresh = await this.#capabilities?.().catch(() => undefined);
+    if (panel === undefined || fresh === undefined) return;
+    const text = withCapabilities(panel.text, fresh);
+    if (text === panel.text) return;
+    panel.text = text;
+    const printed = formatBlock("system", text, this.#width);
+    if (!this.#renderer.rewrite("capabilities", panel.gap ? `\n${printed}` : printed)) this.#panelStale = true;
+    this.render();
+  }
+
+  /** The menu closed: capabilities that changed off screen are printed again, here. */
+  #menuClosed(): void {
+    if (!this.#panelStale || this.#panel === undefined) return;
+    const { lines, at, end } = capabilitiesSection(this.#panel.text);
+    if (at < 0) return;
+    this.intro(lines.slice(at, end).join("\n"), true);
   }
 
   /** Updates the available terminal height after a resize. */
@@ -679,11 +717,11 @@ export class App {
   }
 
   /** Sends one finished piece to the scrollback. `gap` defaults to the usual blank row between blocks. */
-  #print(kind: BlockKind, text: string, gap = this.#printedAny): void {
+  #print(kind: BlockKind, text: string, gap = this.#printedAny, key?: string): void {
     if (text === "") return;
     // The renderer repaints the region right after the text: it has to know the current state.
     this.#renderer.update(this.#state());
-    this.#renderer.printAbove(gap ? `\n${text}` : text);
+    this.#renderer.printAbove(gap ? `\n${text}` : text, key);
     this.#printedAny = true;
   }
 
@@ -895,7 +933,10 @@ export class App {
       this.#menu.move(key.name === "up" ? -1 : 1, count, (i) => page?.kind === "list" && page.items[i]?.header === true);
     } else if (key.name === "escape") {
       // A page goes back to the root; the root closes, back to an empty input.
-      if (!this.#menu.back()) this.#editor.clear();
+      if (!this.#menu.back()) {
+        this.#editor.clear();
+        this.#menuClosed();
+      }
     } else if (key.name === "enter" && !key.alt) {
       if (page?.kind === "list") {
         const item = page.items[this.#menu.index];
@@ -963,6 +1004,7 @@ export class App {
   #closeMenu(): void {
     this.#menu.close();
     this.#editor.clear();
+    this.#menuClosed();
   }
 
   #integrationsHost(): IntegrationsHost {
@@ -975,9 +1017,7 @@ export class App {
         this.render();
       },
       swap: (from, to) => {
-        const at = this.#menu.index;
-        this.#menu.refresh(from, to);
-        if (this.#menu.page === to && to.kind === "list") this.#menu.select(Math.min(at, to.items.length - 1));
+        this.#menu.swap(from, to);
         this.render();
       },
       note: (text) => {
@@ -1216,7 +1256,7 @@ export class App {
     let page = catalogPage(title, state, actions);
     const redraw = (): void => {
       const next = catalogPage(title, state, actions);
-      this.#menu.refresh(page, next);
+      this.#menu.swap(page, next); // the selection stays on the entry just acted on
       page = next;
       this.render();
     };
@@ -1405,4 +1445,20 @@ function planLines(todos: Todo[]): string {
 
 function errorText(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
+}
+
+/** The [Capabilities] lines of a panel: the header to the next blank line (at -1: none). */
+function capabilitiesSection(text: string): { lines: string[]; at: number; end: number } {
+  const lines = text.split("\n");
+  const at = lines.findIndex((line) => line.includes("[Capabilities]"));
+  const end = lines.indexOf("", at + 1);
+  return { lines, at, end: end < 0 ? lines.length : end };
+}
+
+/** `panel` with its [Capabilities] lines taken from `fresh`. */
+export function withCapabilities(panel: string, fresh: string): string {
+  const old = capabilitiesSection(panel);
+  const now = capabilitiesSection(fresh);
+  if (old.at < 0 || now.at < 0) return panel;
+  return [...old.lines.slice(0, old.at), ...now.lines.slice(now.at, now.end), ...old.lines.slice(old.end)].join("\n");
 }
