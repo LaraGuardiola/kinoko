@@ -166,7 +166,8 @@ export class Agents {
     if (event.type === "run_start") {
       agent.live = [];
       info.state = "running";
-      info.title ??= event.prompt.split("\n")[0]?.slice(0, 80);
+      const first = event.prompt.split("\n")[0] ?? "";
+      info.title ??= first.length > 80 ? `${first.slice(0, 79).trimEnd()}…` : first;
     }
     agent.live.push(event);
     if (agent.live.length > LIVE_MAX) agent.live.splice(0, agent.live.length - LIVE_MAX);
