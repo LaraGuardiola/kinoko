@@ -42,9 +42,9 @@ export const PROFILES: Profile[] = [
   {
     name: "psilocybe",
     title: "Psilocybe",
-    description: "Media and the desktop: pictures, music, video tools, files to the phone",
+    description: "Media and the desktop: pictures, music on the speaker, video tools, files to the phone",
     extensions: ["vision", "cliamp", "telegram", "web", "notify", "permission-gate", "herdr"],
-    skills: ["ffmpeg", "torrente", "flux-send", "omarchy"],
+    skills: ["ffmpeg", "torrente", "flux-send", "omarchy", "bluetooth"],
     thinking: "low",
   },
   {

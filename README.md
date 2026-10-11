@@ -260,7 +260,7 @@ which profile is in use, and it stays chosen for the next kinoko.
 | --- | --- | --- | --- |
 | **Amanita Muscaria** | everything on (but plan-mode): goes all in | high | never (the hardline still blocks) |
 | **Shiitake** | coding: check-early, github, delegate, mermaid, web, notify | medium | yes |
-| **Psilocybe** | media and the desktop: vision, cliamp, telegram; ffmpeg, torrente, flux-send, omarchy | low | yes |
+| **Psilocybe** | media and the desktop: vision, cliamp, telegram; ffmpeg, torrente, flux-send, omarchy, bluetooth | low | yes |
 | **Morchella** | reviewing and planning: plan-mode (writes nothing), github, web, mermaid, vision | high | yes |
 | **Cordyceps** | orchestrating other agents: delegate, telegram, notify, github, web | medium | yes |
 | **Mycena** | a local model at its fastest: few tools, a short prompt | low | yes |
