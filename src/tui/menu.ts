@@ -11,8 +11,10 @@ export interface MenuItem {
   key?: string;
   /** Del (twice) removes it: the page has a `remove` for it. */
   removable?: boolean;
-  /** The value in effect now (the current model, the current thinking profile). */
+  /** The value in effect now (the current model, the current thinking profile, an extension on). */
   current?: boolean;
+  /** There but switched off (an installed extension disabled): a hollow mark. */
+  off?: boolean;
   /** A group's title (a provider): shown, never selected; the arrows step over it. */
   header?: boolean;
 }
@@ -26,6 +28,10 @@ export interface ListPage {
   pick: (item: MenuItem) => void;
   /** Removes a `removable` item, after Del was pressed on it twice. */
   remove?: (item: MenuItem) => void;
+  /** U: updates the item (a catalog's entry, fetched again from its repository). */
+  update?: (item: MenuItem) => void;
+  /** Enter leaves the page open (switching several things on and off in a row). */
+  stay?: boolean;
   /** A dim line under the list: what else the keys do here. */
   hint?: string;
 }
@@ -136,6 +142,17 @@ export class Menu {
   clamp(count: number): void {
     this.#index = Math.max(0, Math.min(this.#index, count - 1));
   }
+
+  /** A click on an item: it becomes the selection. */
+  select(index: number): void {
+    this.#index = index;
+    this.#armed = undefined;
+  }
+}
+
+/** The first item a list of `count` shows with `selected` chosen: the window scrolls with it. */
+export function listWindow(count: number, selected: number): number {
+  return Math.min(Math.max(0, selected - Math.floor(MENU_ROWS / 2)), Math.max(0, count - MENU_ROWS));
 }
 
 /** The root's items whose name starts with what was typed after the slash. */
@@ -148,7 +165,7 @@ export function filterRoot(items: MenuItem[], typed: string): MenuItem[] {
 export function listRows(items: MenuItem[], selected: number, title?: string, empty = "", armed?: string, hint?: string): string[] {
   const rows = title ? [`${ANSI.bold}${ORANGE}${title}${ANSI.reset}`] : [];
   if (items.length === 0) return [...rows, `  ${ANSI.dim}${empty}${ANSI.reset}`];
-  const start = Math.min(Math.max(0, selected - Math.floor(MENU_ROWS / 2)), Math.max(0, items.length - MENU_ROWS));
+  const start = listWindow(items.length, selected);
   const width = Math.max(...items.filter((item) => !item.header).map((item) => item.name.length)) + 4;
   for (const [i, item] of items.slice(start, start + MENU_ROWS).entries()) {
     if (item.header) {
@@ -157,7 +174,7 @@ export function listRows(items: MenuItem[], selected: number, title?: string, em
     }
     const chosen = start + i === selected;
     const name = `${chosen ? ANSI.bold : ""}${ORANGE}${item.name.padEnd(width)}${ANSI.reset}`;
-    const mark = item.current ? `${ORANGE}● ${ANSI.reset}` : "";
+    const mark = item.current ? `${ORANGE}● ${ANSI.reset}` : item.off ? `${ANSI.dim}○ ${ANSI.reset}` : "";
     const about = item.key !== undefined && item.key === armed
       ? `${ANSI.amanita}Del again to remove${ANSI.reset}`
       : `${ANSI.dim}${item.description}${ANSI.reset}`;

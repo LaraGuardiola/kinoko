@@ -3,6 +3,7 @@
 
 import { readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, parse, resolve } from "node:path";
+import { readDisabled } from "./disabled.ts";
 
 export interface ContextFile {
   path: string;
@@ -48,7 +49,8 @@ export async function discoverSkills(cwd: string, home?: string): Promise<SkillE
   const paths = uniqueDirs(roots).flatMap(skillPathsOf);
   const found = (await Promise.all(paths.map(skillOf))).filter((s) => s !== undefined);
   const seen = new Set<string>();
-  return found.filter((s) => !seen.has(s.name) && seen.add(s.name)); // a project skill shadows a home one
+  const off = new Set(base ? (await readDisabled(base)).skills : []); // switched off in /skills
+  return found.filter((s) => !off.has(s.name) && !seen.has(s.name) && seen.add(s.name)); // a project skill shadows a home one
 }
 
 /** Directories deduped by real path, first wins: run from $HOME, project and user dirs are one. */

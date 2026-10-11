@@ -210,7 +210,7 @@ Anthropic: `"provider": "anthropic"` with a Console API key (`apiKey`, or `$ANTH
   share down when it stops. Pair a device by scanning `kinoko serve pair`'s QR code; `kinoko serve
   devices` and `revoke <id>` manage them. A kinoko open in a terminal links itself to the hub too
   (a local socket): the phone follows it and talks to it, and the terminal shows what came from the
-  phone with a 📱 (`KINOKO_LINK=0` keeps a terminal out).
+  phone as if typed there (`KINOKO_LINK=0` keeps a terminal out).
 
 ## Install
 

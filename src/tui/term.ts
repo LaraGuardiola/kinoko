@@ -5,6 +5,7 @@
 
 export type KeyName =
   | "char"
+  | "mouse"
   | "paste"
   | "enter"
   | "shift-enter"
@@ -42,6 +43,7 @@ export interface Key {
   char?: string; // for "char" and "paste"
   size?: { of: "window" | "screen"; width: number; height: number }; // for "size-report"
   at?: { row: number; col: number }; // for "cursor-report", 1-based
+  mouse?: { x: number; y: number; button: number; press: boolean; wheel?: "up" | "down" }; // for "mouse", 1-based
   alt?: boolean;
   ctrl?: boolean;
 }
@@ -232,6 +234,12 @@ function csi(s: string): null | { key: Key; length: number } {
   const final = body[finalAt] ?? "";
   const length = 2 + finalAt + 1;
   if (final === "u") return { key: kittyKey(params), length: length };
+  // A mouse event, SGR form (only while the menu has the mouse on): `CSI < button;x;y M` (press) or `m`.
+  if (params.startsWith("<") && (final === "M" || final === "m")) {
+    const [button = 0, x = 0, y = 0] = params.slice(1).split(";").map(Number);
+    const wheel = button & 64 ? ((button & 1) === 0 ? "up" : "down") : undefined;
+    return { key: { name: "mouse", mouse: { x, y, button: button & 3, press: final === "M", ...(wheel ? { wheel } : {}) } }, length: length };
+  }
   if (final === "t") return { key: sizeReport(params), length: length };
   // A position answer, `CSI row;col R` (kinoko never reads F3, whose modified form looks the same).
   if (final === "R") {
@@ -349,7 +357,7 @@ export class Term {
   }
 
   stop(): void {
-    this.write("\x1b[<u\x1b[?2004l\x1b[?25h"); // keyboard protocol popped, paste off, cursor back
+    this.write("\x1b[<u\x1b[?2004l\x1b[?1000l\x1b[?1006l\x1b[?25h"); // keyboard protocol popped, paste and mouse off, cursor back
     process.stdout.off("resize", this.#onResize);
     process.stdin.off("data", this.#onData);
     process.stdin.setRawMode?.(false);

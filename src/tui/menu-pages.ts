@@ -8,8 +8,8 @@ import { renderTable } from "./table.ts";
 export const ROOT: MenuItem[] = [
   { name: "thinking", description: "How much the model thinks: off, low, medium, high, extreme" },
   { name: "models", description: "Pick the model for the next requests" },
-  { name: "extensions", description: "Install, update or remove extensions from kinoko-extensions" },
-  { name: "skills", description: "Install, update or remove skills from kinoko-skills" },
+  { name: "extensions", description: "Install, switch on or off, update or remove extensions" },
+  { name: "skills", description: "Install, switch on or off, update or remove skills" },
   { name: "session", description: "This session: file, id, messages, tokens" },
   { name: "new", description: "Start a new session: empty context, same model" },
   { name: "clear", description: "Clear the screen (the context stays)" },
@@ -55,12 +55,12 @@ export function thinkingPage(current: string | undefined, choose: (profile: Thin
   };
 }
 
-/** A catalog's page (extensions, skills): the repository's entries, the installed ones marked and removable. */
+/** A catalog's page (extensions, skills): the repository's entries; the installed ones switched on
+ *  (●) or off (○) with Enter, updated with U, removed with Del twice. */
 export function catalogPage(
   title: string,
   state: { repo: string; entries?: Entry[]; error?: string },
-  install: (name: string) => void,
-  remove: (name: string) => void,
+  actions: { install: (name: string) => void; toggle: (name: string, on: boolean) => void; update: (name: string) => void; remove: (name: string) => void },
 ): ListPage {
   const where = state.repo.replace(/^https?:\/\/|^git@|\.git$/g, "").replace(":", "/");
   return {
@@ -69,15 +69,25 @@ export function catalogPage(
     items: (state.entries ?? []).map((e) => ({
       name: e.name,
       key: e.name,
-      description: e.shared ? `shared · ${e.description}` : e.description,
-      current: e.installed,
+      description: `${e.installed && !e.enabled ? "off · " : ""}${e.shared ? "shared · " : ""}${e.description}`,
+      current: e.installed && e.enabled !== false,
+      off: e.installed && e.enabled === false,
       removable: e.installed && !e.shared,
     })),
     empty: state.error ?? (state.entries === undefined ? `fetching ${where}…` : `nothing in ${where}`),
-    pick: (item) => install(item.name),
-    remove: (item) => remove(item.name),
+    pick: (item) => {
+      const entry = state.entries?.find((e) => e.name === item.name);
+      if (entry?.installed) actions.toggle(item.name, entry.enabled === false);
+      else actions.install(item.name);
+    },
+    update: (item) => {
+      const entry = state.entries?.find((e) => e.name === item.name);
+      if (entry && !entry.shared) actions.update(item.name);
+    },
+    remove: (item) => actions.remove(item.name),
+    stay: true,
     // Offline, the list is the last fetched copy and what is installed: say so, and why.
-    hint: state.error && state.entries?.length ? `${state.error} · showing what is on this computer` : "Enter installs or updates · Del twice removes · in effect at once",
+    hint: state.error && state.entries?.length ? `${state.error} · showing what is on this computer` : "Enter installs, or switches on/off · U updates · Del twice removes · in effect at once",
   };
 }
 

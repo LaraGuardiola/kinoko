@@ -99,7 +99,7 @@ A kinoko TUI started while the hub runs (or one that finds it within ~3 s of it 
 itself through the hub's Unix socket `~/.kinoko/serve.sock` (mode 600: this user's processes only),
 speaking the rpc mode's JSONL after a first `{"type": "hello", "origin": "terminal", "cwd", "pid",
 "model", "session", "running"}` line. It is listed with `origin: "terminal"` while it stays open; the
-phone attaches to it, prompts it (the terminal shows the prompt with a 📱), steers and aborts it like
+phone attaches to it, prompts it (the terminal shows the prompt as the user's), steers and aborts it like
 any agent, but cannot `stop` it: it ends in its terminal. `KINOKO_LINK=0` keeps a terminal out.
 
 ## Shapes

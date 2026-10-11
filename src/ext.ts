@@ -7,6 +7,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { uniqueDirs } from "./context.ts";
+import { readDisabled } from "./disabled.ts";
 import type { Message, ProviderRequest, Tool } from "./types.ts";
 import type { RunResult } from "./loop.ts";
 
@@ -236,9 +237,10 @@ function isBlock(value: unknown): value is ToolCallBlock {
 export async function loadExtensions(k: Extensions, opts: LoadOptions): Promise<string[]> {
   const home = opts.home ?? process.env.HOME ?? "";
   const dirs = uniqueDirs([join(home, ".kinoko", "ext"), join(opts.cwd, ".kinoko", "ext")]);
+  const off = new Set((await readDisabled(home)).extensions); // switched off in /extensions
   const paths: string[] = [];
   for (const dir of dirs) {
-    for (const name of listEntries(dir)) paths.push(join(dir, name));
+    for (const name of listEntries(dir)) if (!off.has(extensionName(join(dir, name)))) paths.push(join(dir, name));
   }
   const mods = await Promise.all(paths.map((path) => importDefault(path, k)));
   const loaded: string[] = [];
