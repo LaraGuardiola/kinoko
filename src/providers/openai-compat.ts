@@ -345,7 +345,18 @@ function merge(pending: Map<number, Pending>, tc: NonNullable<Delta["tool_calls"
 }
 
 function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
-  const wired = req.messages.map((m, i) => wire(m, replaysThinking(req.messages, opts.thinkingReplay ?? "turn")(i)));
+  const thinking = replaysThinking(req.messages, opts.thinkingReplay ?? "turn");
+  const wired = req.messages.flatMap((m, i) => {
+    const one = wire(m, thinking(i));
+    if (m.role !== "tool" || req.messages[i + 1]?.role === "tool") return [one];
+    // The wire has no images in tool results: those of a run of results follow it as a user message.
+    let first = i;
+    while (req.messages[first - 1]?.role === "tool") first--;
+    const images = req.messages.slice(first, i + 1).flatMap((t) => t.images ?? []);
+    if (images.length === 0) return [one];
+    const parts = images.map((img) => ({ type: "image_url", image_url: { url: `data:${img.mime};base64,${img.data}` } }));
+    return [one, { role: "user", content: [{ type: "text", text: `[the image${images.length > 1 ? "s" : ""} from the tool result above]` }, ...parts] }];
+  });
   const messages = req.system ? [{ role: "system", content: req.system }, ...wired] : wired;
   return {
     model: req.model,

@@ -1,7 +1,10 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { searchTool } from "../../tools/search";
+import { searchTool as tool } from "../../tools/search";
 import { estimateTokens } from "../../tools/budget";
+
+/** search answers in text, never with images. */
+const searchTool = { ...tool, run: async (args: unknown, c: { signal: AbortSignal; cwd: string }): Promise<string> => String(await tool.run(args, c)) };
 
 const ROOT = `${process.cwd()}/.tmp-search-test-${process.pid}`;
 

@@ -218,6 +218,27 @@ describe("anthropic wire format", () => {
     ]);
   });
 
+  test("a tool result with images: its text, then the image blocks, inside the tool_result", () => {
+    const messages: Message[] = [
+      { id: "1", role: "user", content: "look" },
+      { id: "2", role: "assistant", content: "", toolCalls: [{ id: "c", name: "view", args: {} }] },
+      { id: "3", role: "tool", content: "shot.png 800×600", toolCallId: "c", images: [{ mime: "image/png", data: "QUJD" }] },
+    ];
+    expect(wire(messages).at(-1)).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "tool_result",
+          tool_use_id: "c",
+          content: [
+            { type: "text", text: "shot.png 800×600" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
+          ],
+        },
+      ],
+    });
+  });
+
   test("a user message with images: base64 image blocks, then its text", () => {
     const messages: Message[] = [{ id: "1", role: "user", content: "what is [Image #1]?", images: [{ mime: "image/png", data: "QUJD" }] }];
     expect(wire(messages)).toEqual([

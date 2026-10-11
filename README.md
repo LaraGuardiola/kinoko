@@ -103,6 +103,10 @@ export default function (k: Kinoko): void {
 }
 ```
 
+A tool may answer `{ text, images }` instead of a string: the images (`{ mime, data }`, base64) go to
+the model with the result (Anthropic inside the tool_result; OpenAI-compatible engines, which take no
+images there, in a user message right after the results).
+
 `registerRenderer(lang, render)` draws a fence of that language (```` ```mermaid ````) in the
 transcript: rows at most `width` wide, or undefined to show the source. It is called once the fence
 is closed, its drawing kept while the reply streams; one that throws or draws too wide shows the source.
@@ -113,7 +117,7 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 
 The extensions live in their own repository,
 [kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, herdr,
-mermaid, permission-gate, plan-mode, web. `/` then **extensions** lists them (the repository is fetched with
+mermaid, permission-gate, plan-mode, vision, web. `/` then **extensions** lists them (the repository is fetched with
 git into `~/.kinoko/registry/extensions/`); Enter installs or updates one into `~/.kinoko/ext/<name>/`, running
 `bun install` there when it has dependencies; Del twice removes it. Both take effect at once: the
 extension is loaded (or taken back) while kinoko runs. One that adds or removes tools changes every

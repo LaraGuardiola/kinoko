@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { isLocal, listModels, openaiCompat, transient } from "../../providers/openai-compat.ts";
-import type { ProviderRequest, StreamEvent } from "../../types.ts";
+import type { Message, ProviderRequest, StreamEvent } from "../../types.ts";
 
 let server: ReturnType<typeof Bun.serve>;
 let mode: "text" | "split-tool" | "length-tool" | "hang" | "progress" = "text";
@@ -195,6 +195,31 @@ describe("openai-compat: truncation, thinking and effort", () => {
         { type: "image_url", image_url: { url: "data:image/jpeg;base64,QUJD" } },
       ],
     });
+  });
+
+  test("tool results with images: the results as text, then one user message with their images", async () => {
+    setMode("text");
+    const provider = openaiCompat({ baseUrl, apiKey: "k" });
+    const messages: Message[] = [
+      { id: "1", role: "user", content: "compare" },
+      { id: "2", role: "assistant", content: "", toolCalls: [{ id: "a", name: "view", args: {} }, { id: "b", name: "view", args: {} }] },
+      { id: "3", role: "tool", content: "one", toolCallId: "a", images: [{ mime: "image/png", data: "QQ" }] },
+      { id: "4", role: "tool", content: "two", toolCallId: "b", images: [{ mime: "image/png", data: "Qg" }] },
+    ];
+    for await (const _ of provider.stream({ ...mkReq(new AbortController().signal), messages })) void _;
+    const sent = lastBody.messages as unknown[];
+    expect(sent.slice(-3)).toEqual([
+      { role: "tool", content: "one", tool_call_id: "a" },
+      { role: "tool", content: "two", tool_call_id: "b" },
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "[the images from the tool result above]" },
+          { type: "image_url", image_url: { url: "data:image/png;base64,QQ" } },
+          { type: "image_url", image_url: { url: "data:image/png;base64,Qg" } },
+        ],
+      },
+    ]);
   });
 
   test("replay turn (the default): the steps since the user's last message keep their thinking, older ones do not", async () => {

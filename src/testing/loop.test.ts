@@ -267,6 +267,28 @@ describe("Agent loop with abort, steer and follow-up", () => {
     expect(users.map((m) => m.images)).toEqual([[a], [b], undefined]);
   });
 
+  test("a tool that answers with images: they ride on its tool message, its text is the content", async () => {
+    const shot = { mime: "image/png", data: "SU1H" };
+    const view = { name: "view", description: "", schema: {}, run: async () => ({ text: "a cat, 640×480", images: [shot] }) };
+    let turn = 0;
+    const provider = {
+      stream: async function* (): AsyncIterable<StreamEvent> {
+        if (turn++ === 0) {
+          yield { type: "tool_call", call: { id: "v1", name: "view", args: {} } };
+          yield { type: "done", stop: "tool_use" };
+        } else {
+          yield { type: "text", delta: "a cat" };
+          yield { type: "done", stop: "end" };
+        }
+      },
+    } as unknown as RealProvider;
+    const agent = new Agent({ provider, model: "t", system: "", tools: [view], maxTurns: 10, maxCost: 100 });
+    await agent.prompt("what is it?");
+    const result = agent.messages.find((m: Message) => m.role === "tool");
+    expect(result?.content).toBe("a cat, 640×480");
+    expect(result?.images).toEqual([shot]);
+  });
+
   test("a system prompt per model: after setModel the next request carries the new model's prompt", async () => {
     const systems: string[] = [];
     const provider = {

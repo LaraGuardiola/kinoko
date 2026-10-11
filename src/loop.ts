@@ -500,15 +500,19 @@ export class Agent {
         throw new Error("Aborted by user");
       }
       // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
-      const output = await tool.run(tc.args, ctx);
+      const answer = await tool.run(tc.args, ctx);
       if (signal.aborted) {
         throw new Error("Aborted by user");
       }
+      const output = typeof answer === "string" ? answer : answer.text;
       const result = { name: tc.name, output: output, signal: signal };
       this.#ext?.emit("tool_result", result);
       this.#emit({ type: "tool_output", call: tc, output: result.output });
       this.#emit({ type: "tool_end", call: tc });
-      return { id: crypto.randomUUID(), role: "tool", content: result.output, toolCallId: tc.id };
+      const message: Message = { id: crypto.randomUUID(), role: "tool", content: result.output, toolCallId: tc.id };
+      // Images (a vision tool's) go with the result: each provider carries them its own way.
+      if (typeof answer !== "string" && answer.images !== undefined && answer.images.length > 0) message.images = answer.images;
+      return message;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const isAborted = msg === "Aborted by user" || this.#abortController!.signal.aborted;
