@@ -647,3 +647,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - In the background: a notification "<project> · wants to run" with the command; tapping it opens the chat. Cancelled when the request is answered anywhere (even with the app on screen).
 - Checked on the emulator against a sandbox hub on 7979 and a linked TUI with the new permission-gate: the card showed `sudo -n true`, Deny from the phone → the TUI said "denied from the phone"; a deny in the TUI took the card away; with the app in the background the notification came and went when the TUI allowed it. Emulator, sandbox and TUI cleaned up.
 - NOT done: answering from the notification itself (Allow/Deny actions, would need a receiver); the APK is not on the user's phone (flux-cli when they want it).
+
+## kinoko-android feat/approval-actions: answering from the notification (logged here; branch docs/approval-actions)
+- The approval notification has Allow · Deny · This session actions (`ApprovalReceiver`, not exported): the answer goes through the connection HubService keeps open, and the notification goes. When the connection is down the send fails and the notification stays, so the chat's card can still answer it.
+- Checked on the emulator (sandbox hub on 7979, a linked TUI, the new permission-gate): Deny on the notification → the TUI said "denied from the phone", the hub logged it, the notification went; tapping the body opened the chat on its card.
+- NOT done: "This session" was not tapped on the notification itself (my tap opened the chat instead; the card's For this session went through), it is the same receiver path with `remember`.
+- Telegram, decided with the user: no 30 s threshold (every run that ends is told, except the ones the user aborted).
