@@ -967,6 +967,30 @@ export class App {
           return note;
         },
       },
+      models: {
+        // The saved models (any endpoint) and what the engine in use serves, once each.
+        list: async (signal) => {
+          const items = new Map(this.#saved.map((e) => [e.model, { name: e.model, description: e.label ?? hostOf(e.baseUrl) }]));
+          for (const m of await this.#agent.models(signal).catch(() => [] as string[])) if (!items.has(m)) items.set(m, { name: m, description: `served by ${hostOf(this.#endpoint)}` });
+          return [...items.values()];
+        },
+        set: (name) => {
+          const current = this.#saved.find((e) => e.baseUrl === this.#endpoint);
+          this.#useModel(this.#saved.find((e) => e.model === name) ?? { model: name, baseUrl: this.#endpoint, apiKey: current?.apiKey ?? "" });
+          this.render();
+          return this.#marker;
+        },
+      },
+      clear: () => {
+        this.#clearScreen();
+        this.render();
+      },
+      fork: async () => {
+        const moved = await this.#forkHead();
+        this.#print("system", moved);
+        this.render();
+        return moved;
+      },
       session: () => {
         const s = this.#session;
         if (s === undefined) return "no session";

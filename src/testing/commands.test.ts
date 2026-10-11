@@ -41,9 +41,11 @@ function fakeCatalog(entries: Entry[], offline = false): { store: Catalog; log: 
 
 describe("slash commands for the phone", () => {
   test("only those the host can do are listed", () => {
-    expect(commandList({ agent: agent() }).map((c) => c.name)).toEqual(["compact"]);
-    const full: CommandHost = { agent: agent(), newSession: async () => undefined, thinking: { current: () => "low", set: () => "" }, catalogs: { extensions: fakeCatalog([]).store }, session: () => "" };
-    expect(commandList(full).map((c) => [c.name, c.kind])).toEqual([["new", "run"], ["compact", "run"], ["thinking", "list"], ["extensions", "list"], ["session", "run"]]);
+    expect(commandList({ agent: agent() }).map((c) => c.name)).toEqual(["compact", "models", "clear", "help"]);
+    const full: CommandHost = { agent: agent(), newSession: async () => undefined, thinking: { current: () => "low", set: () => "" }, catalogs: { extensions: fakeCatalog([]).store }, session: () => "", fork: async () => "" };
+    expect(commandList(full).map((c) => [c.name, c.kind])).toEqual([
+      ["new", "run"], ["compact", "run"], ["thinking", "list"], ["models", "list"], ["extensions", "list"], ["session", "run"], ["clear", "run"], ["fork", "run"], ["help", "run"],
+    ]);
   });
 
   test("thinking: the profiles with the one in use; choosing one says so, and the terminal hears it", async () => {
@@ -95,12 +97,31 @@ describe("slash commands for the phone", () => {
     expect((await runCommand(host, "compact", "", signal)).text).toBe("nothing to compact yet");
   });
 
+  test("models: the provider's, the one in use marked and always there; picking one switches", async () => {
+    const a = new Agent({ provider: { stream: async function* () {}, models: async () => ["qwen", "gemma"] } as never, model: "llama", system: "", tools: [], maxTurns: 2, maxCost: 1 });
+    const listed = await runCommand({ agent: a }, "models", "", signal);
+    expect(listed.items?.map((i) => [i.name, i.current])).toEqual([["llama", true], ["qwen", false], ["gemma", false]]);
+    const picked = await runCommand({ agent: a }, "models", "gemma", signal);
+    expect(a.model).toBe("gemma");
+    expect(picked.text).toBe("model: gemma from the next request");
+    expect(picked.items?.find((i) => i.current)?.name).toBe("gemma");
+  });
+
+  test("clear wipes the view (and the TUI's screen); help lists the commands; fork replaces the conversation", async () => {
+    let cleared = false;
+    const host: CommandHost = { agent: agent(), clear: () => void (cleared = true), fork: async () => "fork: head moved" };
+    expect(await runCommand(host, "clear", "", signal)).toEqual({ text: "cleared: the context stays", clear: true });
+    expect(cleared).toBe(true);
+    expect((await runCommand(host, "help", "", signal)).text).toContain("/fork  Move the session head back one message");
+    expect(await runCommand(host, "fork", "", signal)).toEqual({ text: "fork: head moved", reset: true });
+  });
+
   test("through the rpc mode: get_commands and command", async () => {
     const lines: RpcReply[] = [];
     let current = "low";
     const rpc = new Rpc({ agent: agent(), model: "m", commands: { agent: agent(), thinking: { current: () => current, set: (n) => ((current = n), `thinking: ${n}`) } }, write: (t) => lines.push(JSON.parse(t) as RpcReply) });
     rpc.handle(JSON.stringify({ type: "get_commands", id: "c" }));
-    expect(lines[0]?.commands?.map((c) => c.name)).toEqual(["compact", "thinking"]);
+    expect(lines[0]?.commands?.map((c) => c.name)).toEqual(["compact", "thinking", "models", "clear", "help"]);
     rpc.handle(JSON.stringify({ type: "command", id: "t", name: "thinking", arg: "medium" }));
     await new Promise((r) => setTimeout(r, 10));
     expect(lines[1]).toMatchObject({ type: "ok", id: "t", result: { text: "thinking: medium" } });
