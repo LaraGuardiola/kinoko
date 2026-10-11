@@ -1,16 +1,18 @@
 // RPC mode: JSONL over stdio, one object per line, in both directions.
 //
-// Commands in: prompt, steer, follow_up, abort, get_state. Events out: the AgentEvent stream.
+// Commands in: prompt, steer, follow_up, abort, get_state, get_messages. Events out: the
+// AgentEvent stream.
 // steer, follow_up and abort work while a run is in progress, because they go straight to the
 // Agent. One request at a time: a second prompt while busy is refused, never queued silently.
 
 import type { Agent, RunResult } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
-import type { Message } from "./types.ts";
+import type { Image, Message } from "./types.ts";
 
 export interface RpcCommand {
-  type: "prompt" | "steer" | "follow_up" | "abort" | "get_state";
+  type: "prompt" | "steer" | "follow_up" | "abort" | "get_state" | "get_messages";
   text?: string;
+  images?: Image[]; // prompt, steer, follow_up: pictures that go with the text
   id?: string; // optional, echoed back on the reply
 }
 
@@ -20,17 +22,23 @@ export interface RpcReply {
   text?: string;
   detail?: string;
   state?: RpcState;
+  messages?: Message[]; // get_messages: the conversation so far
 }
 
 export interface RpcState {
   running: boolean;
   model: string;
   messages: number;
+  session?: string;
+  cwd?: string;
 }
 
 export interface RpcDeps {
   agent: Agent;
   model: string;
+  /** The session's id and the working directory, reported in get_state. */
+  session?: string;
+  cwd?: string;
   /** Where replies and events go. Injectable so tests can read them without stdio. */
   write: (text: string) => void;
   /** Runs when the caller closes stdin. */
@@ -40,6 +48,8 @@ export interface RpcDeps {
 export class Rpc {
   #agent: Agent;
   #model: string;
+  #session: string | undefined;
+  #cwd: string | undefined;
   #write: (text: string) => void;
   #onClose: (() => void) | undefined;
   #active: Promise<RunResult> | undefined;
@@ -48,6 +58,8 @@ export class Rpc {
   constructor(deps: RpcDeps) {
     this.#agent = deps.agent;
     this.#model = deps.model;
+    this.#session = deps.session;
+    this.#cwd = deps.cwd;
     this.#write = deps.write;
     this.#onClose = deps.onClose;
     this.#agent.on((e) => this.#event(e));
@@ -91,6 +103,9 @@ export class Rpc {
       case "get_state":
         this.#reply({ type: "ok", id: command.id, state: this.#state() });
         return;
+      case "get_messages":
+        this.#reply({ type: "ok", id: command.id, messages: this.#agent.messages });
+        return;
       default:
         this.#reply({ type: "error", id: command.id, detail: `unknown command: ${command.type}` });
         return;
@@ -111,7 +126,7 @@ export class Rpc {
       this.#reply({ type: "error", id: command.id, detail: "prompt needs text" });
       return;
     }
-    this.#active = this.#agent.prompt(text);
+    this.#active = this.#agent.prompt(text, images(command));
     this.#reply({ type: "ok", id: command.id, text: "started" });
     const result = await this.#active;
     this.#active = undefined;
@@ -129,7 +144,7 @@ export class Rpc {
       this.#reply({ type: "error", id: command.id, detail: "no run in progress" });
       return;
     }
-    this.#agent.steer(text);
+    this.#agent.steer(text, images(command));
     this.#reply({ type: "ok", id: command.id, text: "steering" });
   }
 
@@ -143,7 +158,7 @@ export class Rpc {
       this.#reply({ type: "error", id: command.id, detail: "no run in progress" });
       return;
     }
-    this.#agent.followUp(text);
+    this.#agent.followUp(text, images(command));
     this.#reply({ type: "ok", id: command.id, text: "follow up queued" });
   }
 
@@ -152,6 +167,8 @@ export class Rpc {
       running: this.running,
       model: this.#model,
       messages: this.#agent.messages.length,
+      ...(this.#session ? { session: this.#session } : {}),
+      ...(this.#cwd ? { cwd: this.#cwd } : {}),
     };
   }
 
@@ -163,6 +180,12 @@ export class Rpc {
   #reply(reply: RpcReply): void {
     this.#write(`${JSON.stringify(reply)}\n`);
   }
+}
+
+/** A command's images, only well-formed ones. */
+function images(command: RpcCommand): Image[] | undefined {
+  const list = Array.isArray(command.images) ? command.images.filter((i) => typeof i?.mime === "string" && typeof i.data === "string") : [];
+  return list.length > 0 ? list : undefined;
 }
 
 /** Wires stdin to an Rpc. Returns a function that detaches the listeners. */

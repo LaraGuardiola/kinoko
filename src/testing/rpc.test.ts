@@ -155,6 +155,24 @@ describe("rpc mode", () => {
     expect(r.replies().find((l) => l.id === "s3")?.state?.running).toBe(false);
   });
 
+  test("5b. get_messages returns the conversation; a prompt's images reach its message; get_state names the session", async () => {
+    const lines: Parsed[] = [];
+    const { stream } = scripted([[{ type: "text", delta: "a cat" }, { type: "done", stop: "end" }]]);
+    const agent = new Agent({ provider: { stream }, model: "m", system: "", tools: [], maxTurns: 8, maxCost: 10 });
+    const rpc = new Rpc({ agent, model: "m", session: "s-9", cwd: "/p", write: (text) => lines.push(...parse(text)) });
+    const img = { mime: "image/png", data: "QUJD" };
+    rpc.handle(JSON.stringify({ type: "prompt", text: "what is this?", images: [img, { bad: 1 }] }));
+    // oxlint-disable-next-line no-await-in-loop -- polling is the point
+    for (let i = 0; i < 60 && agent.state === "running"; i++) await new Promise((r) => setTimeout(r, 5));
+    rpc.handle(JSON.stringify({ type: "get_messages", id: "m" }));
+    rpc.handle(JSON.stringify({ type: "get_state", id: "s" }));
+    const replies = lines.filter((l) => l.type !== "event") as RpcReply[];
+    const messages = replies.find((r) => r.id === "m")?.messages ?? [];
+    expect(messages.map((m) => [m.role, m.content])).toEqual([["user", "what is this?"], ["assistant", "a cat"]]);
+    expect(messages[0]?.images).toEqual([img]);
+    expect(replies.find((r) => r.id === "s")?.state).toMatchObject({ session: "s-9", cwd: "/p" });
+  });
+
   test("6. bad input is answered, never thrown at the caller", () => {
     const r = rig([[{ type: "text", delta: "x" }]]);
     r.rpc.handle("not json at all");
