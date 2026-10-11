@@ -41,7 +41,8 @@ import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
 import { compactingNote } from "./sprout.ts";
-import { ANSI, stripAnsi } from "./style.ts";
+import { ANSI, cells, stripAnsi } from "./style.ts";
+import { COPY, copyFor } from "./code.ts";
 import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
@@ -150,9 +151,10 @@ export class App {
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
-  // The mouse is the terminal's (selecting, copying) except while the menu is open: then clicks
-  // pick and the wheel moves through it.
-  #mouse = false;
+  // The mouse is kinoko's: a click on a code block's ⧉ copies it, and while the menu is open clicks
+  // pick, hovering selects and the wheel moves through it. With Shift held the terminal has it
+  // (scrolling the history, selecting text). undefined: not told to the terminal yet.
+  #mouse: boolean | undefined;
   #write: (text: string) => void;
 
   constructor(opts: AppOptions) {
@@ -206,8 +208,9 @@ export class App {
     const menuOpen = this.#menu.page !== undefined || (this.#rootItems()?.length ?? 0) > 0;
     if (menuOpen !== this.#mouse) {
       this.#mouse = menuOpen;
-      // 1003: every motion too, so hovering an item selects it.
-      this.#write(menuOpen ? "\x1b[?1003h\x1b[?1006h" : "\x1b[?1003l\x1b[?1006l");
+      // 1003: every motion too, so hovering an item selects it; 1000: clicks only. Turning 1003 off
+      // turns tracking off altogether, so 1000 comes after it.
+      this.#write(menuOpen ? "\x1b[?1003h\x1b[?1006h" : "\x1b[?1003l\x1b[?1000h\x1b[?1006h");
     }
   }
 
@@ -293,7 +296,8 @@ export class App {
       return;
     }
     if (key.name === "mouse") {
-      this.#menuMouse(key);
+      if (this.#mouse) this.#menuMouse(key);
+      else if (key.mouse?.press && key.mouse.button === 0 && key.mouse.wheel === undefined) this.#clickCopy(key.mouse.x, key.mouse.y);
       return;
     }
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
@@ -935,6 +939,21 @@ export class App {
       this.#closeMenu();
       void this.command(`/${item.name}`).then(() => this.render());
     }
+  }
+
+  /** A click on a code block's ⧉ (or the cell either side of it) copies the block. */
+  #clickCopy(x: number, y: number): void {
+    const row = this.#renderer.rowAt(y);
+    if (row === undefined) return;
+    const chars: string[] = [];
+    for (const cell of cells(stripAnsi(row))) for (let i = 0; i < Math.max(1, cell.width); i++) chars.push(cell.text);
+    if (![x - 2, x - 1, x].some((i) => chars[i] === COPY)) return;
+    const below: string[] = [];
+    for (let next = this.#renderer.rowAt(y + 1), i = 2; next !== undefined && below.length < 8; next = this.#renderer.rowAt(y + i++)) below.push(next);
+    const code = copyFor(below);
+    if (code === undefined) return;
+    this.#copy(code);
+    this.render();
   }
 
   #copy(text: string): void {

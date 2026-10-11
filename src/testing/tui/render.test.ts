@@ -198,3 +198,18 @@ test("clear: screen and scrollback wiped, the region painted from the top, nothi
   expect(written).toContain("> input");
   expect(written).not.toContain("an old line");
 });
+
+describe("what a click lands on", () => {
+  test("rowAt: the printed rows above the region, the region's rows, margin included; nothing before the terminal says where", () => {
+    const { renderer } = harness();
+    renderer.update({ lines: ["editor", "status"], row: 0, col: 0 });
+    renderer.flush();
+    renderer.printAbove("one\ntwo");
+    expect(renderer.rowAt(1)).toBeUndefined();
+    renderer.position(10); // the cursor (on the editor row) is on screen row 10: the region starts there
+    expect([renderer.rowAt(8), renderer.rowAt(9), renderer.rowAt(10), renderer.rowAt(11)]).toEqual([" one", " two", " editor", " status"]);
+    expect(renderer.rowAt(12)).toBeUndefined();
+    renderer.clear();
+    expect(renderer.rowAt(9)).toBeUndefined();
+  });
+});

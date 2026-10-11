@@ -13,7 +13,7 @@ export const ROOT: MenuItem[] = [
   { name: "extensions", description: "Install, switch on or off, update or remove extensions" },
   { name: "skills", description: "Install, switch on or off, update or remove skills" },
   { name: "session", description: "This session: file, id, messages, tokens" },
-  { name: "copy", description: "Copy a code block from the replies (⧉)" },
+  { name: "copy", description: "Copy a code block from the replies (or click its ⧉)" },
   { name: "new", description: "Start a new session: empty context, same model" },
   { name: "clear", description: "Clear the screen (the context stays)" },
   { name: "compact", description: "Summarize the history now" },
@@ -142,6 +142,8 @@ const KEYS: Array<[string, string]> = [
   ["Ctrl-P / Ctrl-N", "Previous / next history entry"],
   ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],
   ["@", "Reference a file: lists the directory as you type; arrows, Tab or Enter to complete"],
+  ["Click ⧉", "Copy the code block (the mouse is kinoko's)"],
+  ["Shift + wheel / drag", "The terminal's: scroll the history, select text"],
 ];
 
 /** /help: one table for the keys, one for the menu (built from ROOT, so it cannot fall behind). */
