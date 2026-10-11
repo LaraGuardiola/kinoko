@@ -1,21 +1,6 @@
-import { spawn } from "node:child_process";
-import { accessSync, chmodSync, mkdirSync, readFileSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import type { ChildProcess } from "node:child_process";
-
 const HARD_MS = 10_000;
 const CHUNK_BYTES = 65536;
 const HEAD_BYTES = 4096;
-
-const PIN_URL: Record<string, string> = {
-  x64: "https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-x86_64-unknown-linux-musl.tar.gz",
-  arm64: "https://github.com/BurntSushi/ripgrep/releases/download/14.1.1/ripgrep-14.1.1-aarch64-unknown-linux-gnu.tar.gz",
-};
-
-const PIN_SHA: Record<string, string> = {
-  x64: "f401154e2393f9002ac77e419f9ee5521c18f4f8cd3e32293972f493ba06fce7",
-  arm64: "e07d5c85fa9ca740ff4ab8bbac60a1e11c7a5ce242435f7820a03f7c20ef6276",
-};
 
 export interface SearchQuery {
   pattern: string;
@@ -64,29 +49,6 @@ interface IgnoreRule {
   negate: boolean;
 }
 
-function isExec(file: string): boolean {
-  try {
-    accessSync(file, 1);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function rgOnPath(): null | string {
-  const env = process.env.PATH;
-  if (env === undefined) {
-    return null;
-  }
-  for (const entry of env.split(":")) {
-    const candidate = entry === "" ? `${process.cwd()}/rg` : `${entry}/rg`;
-    if (isExec(candidate)) {
-      return candidate;
-    }
-  }
-  return null;
-}
-
 function splitLines(text: string): string[] {
   if (text.endsWith("\n")) {
     return text.slice(0, -1).split("\n");
@@ -111,12 +73,17 @@ function trimLine(raw: string): string {
   return raw.endsWith("\n") ? raw.slice(0, -1) : raw;
 }
 
-function mtimeMs(file: string): number {
-  try {
-    return statSync(file).mtimeMs;
-  } catch {
-    return 0;
-  }
+/** Each file with when it last changed (0 when it is gone), read in parallel: nothing blocks. */
+function withMtimes(root: string, rels: string[]): Promise<FileRow[]> {
+  return Promise.all(
+    rels.map(async (rel) => ({
+      path: rel,
+      mtimeMs: await Bun.file(`${root}/${rel}`)
+        .stat()
+        .then((st) => st.mtimeMs)
+        .catch(() => 0),
+    })),
+  );
 }
 
 function sortRows(rows: FileRow[]): void {
@@ -176,195 +143,43 @@ function eventHit(line: string): null | Hit {
   return { path: normPath(path), line: lineNo, text: trimLine(text), kind: kind };
 }
 
-function octalField(bytes: Uint8Array): number {
-  const digits = new TextDecoder().decode(bytes).replace(/[^0-7]/g, "");
-  return parseInt(digits === "" ? "0" : digits, 8);
-}
-
-function untar(bytes: Uint8Array, want: string): null | Uint8Array {
-  let offset = 0;
-  while (offset + 512 <= bytes.length) {
-    const decoded = new TextDecoder().decode(bytes.subarray(offset, offset + 100));
-    const nul = decoded.indexOf("\u0000");
-    const name = nul === -1 ? decoded : decoded.slice(0, nul);
-    const size = octalField(bytes.subarray(offset + 124, offset + 136));
-    const body = offset + 512;
-    if (name === want || name.endsWith(`/${want}`)) {
-      return bytes.subarray(body, body + size);
-    }
-    offset = body + Math.ceil(size / 512) * 512;
-  }
-  return null;
-}
-
-function exitOk(code: null | number): boolean {
-  return code === null ? false : code === 0;
-}
-
-function runsRg(exe: string): Promise<boolean> {
-  const child = spawn(exe, ["--version"], { stdio: ["pipe", "pipe", "pipe"] });
-  return new Promise<boolean>((done) => {
-    child.on("close", (code: null | number) => {
-      done(exitOk(code));
-    });
-  });
-}
-
-/** A pinned ripgrep, downloaded at most once into ~/.kinoko/bin. Any failure -> null (fall through). */
-async function pinnedRg(): Promise<null | string> {
-  const exe = `${homedir()}/.kinoko/bin/rg`;
-  if (isExec(exe)) {
-    return exe;
-  }
-  const url = process.env.KINOKO_RG_URL ?? PIN_URL[process.arch];
-  const want = PIN_SHA[process.arch];
-  if (url === undefined || want === undefined) {
-    return null;
-  }
-  try {
-    const res = await fetch(url);
-    if (!res.ok) {
-      return null;
-    }
-    const packed = new Uint8Array(await res.arrayBuffer());
-    const tar = Bun.gunzipSync(packed);
-    const rg = untar(tar, "rg");
-    if (rg === null) {
-      return null;
-    }
-    const hasher = new Bun.CryptoHasher("sha256");
-    hasher.update(rg);
-    if (hasher.digest("hex") !== want) {
-      return null;
-    }
-    mkdirSync(`${homedir()}/.kinoko/bin`, { recursive: true });
-    await Bun.write(exe, rg);
-    chmodSync(exe, 0o755);
-    if (!await runsRg(exe)) {
-      return null;
-    }
-    return exe;
-  } catch {
-    return null;
-  }
-}
-
+// ripgrep from PATH, else the pure-Bun scan: nothing is ever downloaded behind the user's back.
 let rgCache: undefined | null | string;
 
-async function rgExe(): Promise<null | string> {
-  if (rgCache !== undefined) {
-    return rgCache;
-  }
-  const found = rgOnPath();
-  if (found !== null) {
-    rgCache = found;
-    return rgCache;
-  }
-  rgCache = await pinnedRg();
+function rgExe(): null | string {
+  rgCache ??= Bun.which("rg");
   return rgCache;
 }
 
-/** Event-driven stdout pump: yields stdout chunks as they arrive, kills the child on early exit. */
-async function* pump(
-  child: ChildProcess,
-  signal: AbortSignal,
-  note: ScanNote,
-  timeoutMs: number,
-): AsyncGenerator<string, void> {
-  const parts: string[] = [];
-  let wake: null | (() => void) = null;
-  let ended = false;
-  let timer: null | ReturnType<typeof setTimeout> = null;
+type Child = Bun.Subprocess<"ignore", "pipe", "pipe">;
 
-  const wakeUp = (): void => {
-    const waiting = wake;
-    wake = null;
-    if (waiting !== null) {
-      waiting();
-    }
-  };
-
-  const wait = (): Promise<void> =>
-    new Promise<void>((done) => {
-      wake = (): void => {
-        wake = null;
-        done();
-      };
-    });
-
-  const kill = (): void => {
-    child.kill("SIGKILL");
-  };
-
-  const out = child.stdout;
-  if (out !== null) {
-    out.on("data", (chunk: Buffer) => {
-      parts.push(chunk.toString());
-      wakeUp();
-    });
-  }
-  const err = child.stderr;
-  if (err !== null) {
-    err.on("data", (chunk: Buffer) => {
-      if (note.error === undefined && chunk.length > 0) {
-        note.error = chunk.toString().trim().split("\n")[0] ?? "backend failed";
-      }
-    });
-  }
-  child.on("close", () => {
-    ended = true;
-    wakeUp();
+/** Yields stdout as it arrives; kills the child on a timeout, an abort, or when the reader stops early. */
+async function* pump(child: Child, signal: AbortSignal, note: ScanNote, timeoutMs: number): AsyncGenerator<string, void> {
+  const kill = (): void => child.kill("SIGKILL");
+  // Its first stderr line is the error to report (a bad glob, a path that is not there).
+  const errors = new Response(child.stderr).text().then((text) => {
+    if (note.error === undefined && text.trim() !== "") note.error = text.trim().split("\n")[0] ?? "backend failed";
   });
-  child.on("error", () => {
-    ended = true;
-    wakeUp();
-  });
-
-  if (timeoutMs > 0) {
-    timer = setTimeout(
-      () => {
-        note.timedOut = true;
-        kill();
-      },
-      timeoutMs,
-    );
-  }
-
-  const onAbort = (): void => {
-    kill();
-  };
-  if (signal.aborted) {
-    kill();
-  } else {
-    signal.addEventListener("abort", onAbort);
-  }
-
-  const drain = async function* (): AsyncGenerator<string, void> {
-    if (parts.length > 0) {
-      const chunk = parts.shift();
-      if (chunk !== undefined) {
-        yield chunk;
-      }
-      yield* drain();
-      return;
-    }
-    if (ended) {
-      return;
-    }
-    await wait();
-    yield* drain();
-  };
-
+  const timer =
+    timeoutMs > 0
+      ? setTimeout(() => {
+          note.timedOut = true;
+          kill();
+        }, timeoutMs)
+      : null;
+  if (signal.aborted) kill();
+  else signal.addEventListener("abort", kill, { once: true });
+  const decoder = new TextDecoder();
   try {
-    yield* drain();
+    for await (const bytes of child.stdout) {
+      const text = decoder.decode(bytes, { stream: true });
+      if (text !== "") yield text;
+    }
+    await errors;
   } finally {
-    if (timer !== null) {
-      clearTimeout(timer);
-    }
-    signal.removeEventListener("abort", onAbort);
-    if (!ended) {
-      kill();
-    }
+    if (timer !== null) clearTimeout(timer);
+    signal.removeEventListener("abort", kill);
+    if (child.exitCode === null) kill();
   }
 }
 
@@ -389,9 +204,9 @@ function rgArgs(query: SearchQuery): string[] {
 }
 
 /** A spawn that cannot even start is a scan error, not a crash of the whole tool. */
-function start(exe: string, args: string[], query: SearchQuery, note: ScanNote): null | ChildProcess {
+function start(exe: string, args: string[], query: SearchQuery, note: ScanNote): null | Child {
   try {
-    return spawn(exe, args, { cwd: query.path, stdio: ["pipe", "pipe", "pipe"] });
+    return Bun.spawn([exe, ...args], { cwd: query.path, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   } catch (e) {
     note.error = e instanceof Error ? e.message.split("\n")[0] ?? e.message : String(e);
     return null;
@@ -455,7 +270,7 @@ async function* rgFiles(
   if (child === null) {
     return;
   }
-  const rows: FileRow[] = [];
+  const rels: string[] = [];
   let pending = "";
   for await (const chunk of pump(child, query.signal, note, HARD_MS)) {
     if (query.signal.aborted) {
@@ -465,22 +280,20 @@ async function* rgFiles(
     const tail = lines.pop();
     pending = tail === undefined ? "" : tail;
     for (const line of lines) {
-      if (line !== "") {
-        const rel = normPath(line);
-        rows.push({ path: rel, mtimeMs: mtimeMs(`${query.path}/${rel}`) });
-      }
+      if (line !== "") rels.push(normPath(line));
     }
   }
+  const rows = await withMtimes(query.path, rels);
   sortRows(rows);
   for (const row of rows) {
     yield row;
   }
 }
 
-function readIgnores(root: string): IgnoreRule[] {
+async function readIgnores(root: string): Promise<IgnoreRule[]> {
   let raw: string;
   try {
-    raw = readFileSync(`${root}/.gitignore`, "utf8");
+    raw = await Bun.file(`${root}/.gitignore`).text();
   } catch {
     return [];
   }
@@ -626,7 +439,7 @@ async function* bunContent(query: SearchQuery, note: ScanNote): AsyncGenerator<H
     note.error = `invalid regex pattern: ${query.pattern}`;
     return;
   }
-  const rules = readIgnores(query.path);
+  const rules = await readIgnores(query.path);
   const globber = new Bun.Glob(query.glob === "" ? "**/*" : query.glob);
   try {
     for await (const found of globber.scan({ cwd: query.path })) {
@@ -672,8 +485,8 @@ async function* bunContent(query: SearchQuery, note: ScanNote): AsyncGenerator<H
 }
 
 async function* bunFiles(query: SearchQuery, note: ScanNote): AsyncGenerator<FileRow, void> {
-  const rows: FileRow[] = [];
-  const rules = readIgnores(query.path);
+  const rels: string[] = [];
+  const rules = await readIgnores(query.path);
   const globber = new Bun.Glob(query.glob === "" ? "**/*" : query.glob);
   try {
     for await (const found of globber.scan({ cwd: query.path })) {
@@ -684,11 +497,12 @@ async function* bunFiles(query: SearchQuery, note: ScanNote): AsyncGenerator<Fil
       if (ignored(rel, rules) || (!query.hidden && hiddenPath(rel))) {
         continue;
       }
-      rows.push({ path: rel, mtimeMs: mtimeMs(`${query.path}/${rel}`) });
+      rels.push(rel);
     }
   } catch (e) {
     note.error = `scan stopped early: ${e instanceof Error ? e.message.split("\n")[0] ?? e.message : String(e)}`;
   }
+  const rows = await withMtimes(query.path, rels);
   sortRows(rows);
   for (const row of rows) {
     yield row;
@@ -699,7 +513,7 @@ export async function makeBackend(): Promise<Backend> {
   if (process.env.KINOKO_RG_BACKEND === "bun") {
     return { kind: "bun", content: bunContent, files: bunFiles };
   }
-  const exe = await rgExe();
+  const exe = rgExe();
   if (exe === null) {
     return { kind: "bun", content: bunContent, files: bunFiles };
   }
