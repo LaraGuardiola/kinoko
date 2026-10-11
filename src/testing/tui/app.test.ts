@@ -3,7 +3,8 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { App } from "../../tui/app.ts";
 import { ANSI as STYLE, visibleLength } from "../../tui/style.ts";
 import type { AppOptions, ModelsHost } from "../../tui/app.ts";
-import { readIntegrations, setTelegram } from "../../integrations.ts";
+import { integrationsSummary, readIntegrations, setTelegram } from "../../integrations.ts";
+import { ROOT as ROOT_MENU } from "../../tui/menu-pages.ts";
 import type { FilesState } from "../../tui/integrations-menu.ts";
 import { GOOD_TOKEN, fakeTelegram, said as tgSaid } from "../serve/fake-telegram.ts";
 import type { Catalog, Change, Entry } from "../../catalog.ts";
@@ -1629,6 +1630,31 @@ describe("the [Capabilities] lines follow what is installed", () => {
     h.press("\x1b");
     h.press("\x1b");
     expect(h.screen().split("[Capabilities]").length).toBe(before + 1); // nothing new: not again
+  });
+});
+
+describe("the [Capabilities] lines follow /integrations", () => {
+  test("switching the bot off in /integrations rewrites the Integrations line", async () => {
+    const home = `${ROOT}/integrations-capabilities`;
+    await setTelegram(home, () => ({ token: GOOD_TOKEN, bot: "kinoko_test_bot", chat: 1, name: "Lara", notify: true, prompts: true, approvals: true, on: true }));
+    const line = async (): Promise<string> => `kinoko vTEST\n\n[Capabilities]\n  Skills: none\n  Integrations: ${integrationsSummary(await readIntegrations(home))}\n\nAsk it to work.`;
+    const h = await harness([], { integrations: { home, hubRunning: async () => false }, capabilities: line, viewportRows: 30 });
+    h.app.intro(await line());
+    h.app.handleKey({ name: "cursor-report", at: { row: 20, col: 1 } });
+    h.press("/integrations\r");
+    await until(h, () => h.screen().includes("@kinoko_test_bot with Lara"));
+    h.press("\r");
+    await until(h, () => frame(h).join("\n").includes("The bot runs"));
+    h.out.length = 0;
+    h.press("\r"); // the first switch: on
+    await until(h, () => h.out.join("").includes("Integrations: telegram (off)"));
+    expect((await readIntegrations(home)).telegram?.on).toBe(false);
+  });
+
+  test("the menu keeps the panel's order: skills, extensions, integrations", () => {
+    const names = ROOT_MENU.map((item) => item.name);
+    const at = names.indexOf("skills");
+    expect(names.slice(at, at + 3)).toEqual(["skills", "extensions", "integrations"]);
   });
 });
 

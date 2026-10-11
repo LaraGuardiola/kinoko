@@ -15,6 +15,7 @@ import type { Change } from "./catalog.ts";
 import { App } from "./tui/app.ts";
 import { THINKING, profileLabel } from "./tui/menu-pages.ts";
 import { activeProfile } from "./profiles.ts";
+import { integrationsSummary, readIntegrations } from "./integrations.ts";
 import type { CommandHost } from "./commands.ts";
 import { setFenceRenderers } from "./tui/markdown.ts";
 import { Term } from "./tui/term.ts";
@@ -241,10 +242,13 @@ const profileLine = async (): Promise<string | undefined> => {
   return p ? `${p.title}${p.approvals === "auto" ? " · nothing asked" : ""}` : undefined;
 };
 
+/** The panel's integrations line: Telegram set up, and whether it runs. */
+const integrationsLine = async (): Promise<string> => integrationsSummary(await readIntegrations(process.env.HOME ?? ""));
+
 if (tui) {
   // The interactive mode: raw terminal in, live region out. Everything else is the same Agent.
   const term = new Term();
-  const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine() });
+  const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() });
   const app = new App({
     agent: agent,
     write: (text) => term.write(text),
@@ -270,7 +274,7 @@ if (tui) {
     apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
     // What is on now, for the panel's [Capabilities] lines (skills read again: one may be new).
     jobs,
-    capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION, profile: await profileLine() }),
+    capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() }),
     newSession: async () => {
       // A new conversation: a new session file, the skills read again (installed ones join the
       // prompt), and no file counts as read until the model reads it in this conversation.
@@ -282,7 +286,7 @@ if (tui) {
       // The last one: deleted when nothing was said in it (as on quit), else how to come back to it.
       if (last.empty) await rm(last.path, { force: true });
       const back = last.empty ? "" : `\n\n${ANSI.dim}the last session:${ANSI.reset} ${ANSI.cream}kinoko --session ${last.meta.id}${ANSI.reset}`;
-      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine() }) + back };
+      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() }) + back };
     },
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
@@ -407,7 +411,7 @@ async function applySkill(name: string, change: Change): Promise<string> {
   return "the model hears of it with your next message";
 }
 
-function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string; profile?: string }): string {
+function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string; profile?: string; integrations?: string }): string {
   return [
     `${ANSI.amanita}kinoko${ANSI.reset} ${ANSI.cream}v${parts.version}${ANSI.reset}`,
     "",
@@ -416,6 +420,7 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
     `  Context: ${names(parts.context.map((file) => file.path.split("/").at(-1) ?? file.path), "none")}`,
     `  Skills: ${names(parts.skills.map((skill) => skill.name), "none")}`,
     `  Extensions: ${names(parts.extensions, "none")}`,
+    `  Integrations: ${parts.integrations || "none (/integrations)"}`,
     "",
     "Kinoko can inspect and change this project. Ask it to work on a coding task.",
   ].join("\n");

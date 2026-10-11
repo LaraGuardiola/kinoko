@@ -1108,6 +1108,7 @@ export class App {
         this.#marker = this.#quiet = text;
         this.render();
       },
+      changed: () => void this.#refreshCapabilities(),
       hubRunning: this.#integrations?.hubRunning ?? (() => hubRunning(`${home}/.kinoko/serve.sock`)),
       filesExtension: this.#integrations?.filesExtension ?? this.#telegramExtension(),
     };
