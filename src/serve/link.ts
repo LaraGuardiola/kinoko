@@ -83,3 +83,14 @@ export function linkToHub(opts: LinkOptions): () => void {
     conn?.end();
   };
 }
+
+/** Whether a hub listens on `socket` (a connection opened and closed at once, never a hello). */
+export async function hubRunning(socket: string): Promise<boolean> {
+  try {
+    const conn = await Bun.connect({ unix: socket, socket: { data: () => undefined } });
+    conn.end();
+    return true;
+  } catch {
+    return false;
+  }
+}

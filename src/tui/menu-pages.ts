@@ -13,6 +13,7 @@ export const ROOT: MenuItem[] = [
   { name: "extensions", description: "Install, switch on or off, update or remove extensions" },
   { name: "skills", description: "Install, switch on or off, update or remove skills" },
   { name: "session", description: "This session: file, id, messages, tokens" },
+  { name: "integrations", description: "Telegram (and more later): notifications, prompts, approvals" },
   { name: "copy", description: "Copy a code block from the replies (or click its ⧉)" },
   { name: "new", description: "Start a new session: empty context, same model" },
   { name: "clear", description: "Clear the screen (the context stays)" },
