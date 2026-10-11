@@ -26,6 +26,10 @@ export interface AgentInfo {
   activity: number;
   /** Why it exited, from its last stderr lines. */
   error?: string;
+  /** How its last run ended (for the phone's notification); cleared when a run starts. */
+  ended?: "done" | "aborted" | "error" | "limit";
+  /** The start of its last reply, one line: what a notification says. */
+  last?: string;
 }
 
 export interface Child {
@@ -93,6 +97,12 @@ export const spawnChild: Spawn = (cmd, cwd) => {
     kill: () => proc.kill(),
   };
 };
+
+/** A reply as one short line: code and markup out, at most 160 characters. */
+export function gist(text: string): string {
+  const flat = text.replace(/```[\s\S]*?```/g, " ").replace(/[#*_`>|]/g, "").replace(/\s+/g, " ").trim();
+  return flat.length <= 160 ? flat : `${flat.slice(0, 159).trimEnd()}…`;
+}
 
 /** Events kept per agent for a late attach: the run in progress, never more than this. */
 const LIVE_MAX = 4000;
@@ -229,12 +239,17 @@ export class Agents {
     if (event.type === "run_start") {
       agent.live = [];
       info.state = "running";
+      info.ended = undefined;
       const first = event.prompt.split("\n")[0] ?? "";
       info.title ??= first.length > 80 ? `${first.slice(0, 79).trimEnd()}…` : first;
     }
     agent.live.push(event);
     if (agent.live.length > LIVE_MAX) agent.live.splice(0, agent.live.length - LIVE_MAX);
-    if (event.type === "run_end") info.state = "idle";
+    if (event.type === "run_end") {
+      info.state = "idle";
+      info.ended = event.reason;
+    }
+    if (event.type === "message_end" && event.message.role === "assistant" && event.message.content.trim() !== "") info.last = gist(event.message.content);
     this.#onEvent(info.id, event);
     if (event.type === "run_start" || event.type === "run_end") this.#onChange();
   }

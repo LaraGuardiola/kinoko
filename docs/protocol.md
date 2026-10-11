@@ -128,6 +128,8 @@ AgentInfo {
   title?: string;        // the first prompt, as a name
   started: number; activity: number;   // epoch ms
   error?: string;        // why it exited
+  ended?: "done" | "aborted" | "error" | "limit";   // how its last run ended (none while one runs)
+  last?: string;         // the start of its last reply, one line: what a notification says
 }
 
 Project { cwd: string; name: string; updated: number; sessions: [{ id: string; title: string; updated: number }] }
