@@ -7,6 +7,7 @@ terminal, but the events themselves, for the app to draw natively.
 
 ```
 phone app ──HTTPS/WSS──▶ Tailscale (serve or funnel) ──▶ 127.0.0.1:7878 kinoko serve ──stdio──▶ kinoko --mode rpc (per agent)
+phone app ──HTTPS/WSS (pinned certificate)──▶ <LAN IP>:7879 kinoko serve            (the same hub, at home)
 ```
 
 ## Reaching it
@@ -17,7 +18,12 @@ phone app ──HTTPS/WSS──▶ Tailscale (serve or funnel) ──▶ 127.0.0
   tailnet's devices reach it, from anywhere, encrypted end to end. The phone runs the Tailscale app.
 - **Funnel** (`kinoko serve --funnel`): the same URL, open to the internet, for a device without
   Tailscale. Then only the device tokens stand guard.
-- `--local`: not shared (development, tests).
+- **The local network** (default too, `--no-lan` turns it off): `https://<LAN IP>:7879`
+  (`--lan-port`), with the hub's own certificate (`~/.kinoko/tls`, EC P-256, self-signed, made once).
+  Nobody can vouch for a certificate on 192.168.x, so the app pins it: the QR carries its fingerprint
+  and the app trusts that certificate only. At home no Tailscale is needed; the app tries this
+  address first (3 s), then the main one. A firewall must let the port in from the local network.
+- `--no-tailscale`: the local network only. `--local`: not shared at all (development, tests).
 
 Either way it is HTTPS with a real certificate. `--port` and `--public-port` (443, 8443 or 10000 for
 Funnel) change the ports.
@@ -27,14 +33,18 @@ Funnel) change the ports.
 `kinoko serve` shows a QR code when no device is paired; `kinoko serve pair` shows a new one. It holds:
 
 ```
-kinoko://pair?u=<url-encoded base URL>&c=<pairing code>
+kinoko://pair?u=<url-encoded base URL>&c=<pairing code>[&l=<url-encoded LAN URL>&f=<fingerprint>]
 ```
+
+`u` is the main address (the tailnet's; the LAN's when Tailscale is off). `l` and `f`, when the hub
+listens on the local network: its https address there and the SHA-256 of its certificate (DER),
+base64url without padding. The app pairs and connects there first, trusting only that certificate.
 
 The code works once, for ten minutes. The app trades it for a token:
 
 ```
 POST /v1/pair            {"code": "...", "name": "OnePlus 12R"}
-200 {"token": "...", "device": {"id": "b913979b", "name": "OnePlus 12R"}, "version": "0.1.0", "protocol": 1}
+200 {"token": "...", "device": {"id": "b913979b", "name": "OnePlus 12R"}, "version": "0.1.0", "protocol": 1, "lan": {"urls": [...], "fingerprint": "..."}}
 403 {"error": "..."}     wrong, used or expired code
 429 {"error": "..."}     ten wrong codes in a minute
 ```
@@ -64,7 +74,7 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 
 | `type` | When | Fields |
 |---|---|---|
-| `hello` | on connect | `version`, `protocol`, `device {id, name}`, `agents: [AgentInfo]` |
+| `hello` | on connect | `version`, `protocol`, `device {id, name}`, `agents: [AgentInfo]`, `lan {urls, fingerprint}` when it listens on the LAN (a new IP reaches the app) |
 | `agents` | an agent starts or stops, a run starts or ends; and for `list` | `agents: [AgentInfo]`, newest activity first |
 | `projects` | for `projects` | `projects: [Project]` |
 | `history` | for `attach` | `agent`, `info: AgentInfo`, `messages: [Message]`, `live: [AgentEvent]` |

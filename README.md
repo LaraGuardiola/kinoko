@@ -95,7 +95,10 @@ dropping a PNG, JPEG, GIF or WebP file path attaches that file. Each shows in th
   runs agents (an rpc child each, in its project) and streams their events to paired devices over a
   WebSocket ([docs/protocol.md](docs/protocol.md)). It listens on localhost and shares itself with
   your tailnet through Tailscale (`--funnel`: with the internet; `--local`: not at all), taking the
-  share down when it stops. Pair a device by scanning `kinoko serve pair`'s QR code (one device
+  share down when it stops. On the local network it listens too, encrypted with its own
+  certificate that the app pins (the QR carries its fingerprint): at home a phone needs no
+  Tailscale (`--no-lan` turns it off; a firewall must let port 7879 in from the local network, e.g.
+  `sudo ufw allow from 192.168.1.0/24 to any port 7879 proto tcp`). Pair a device by scanning `kinoko serve pair`'s QR code (one device
   per code; it starts the hub when it is not running); as many devices as you like, each with its own
   token. `kinoko serve devices` and `revoke <id>` manage them, and forgetting the computer in the
   app unpairs it here too. A kinoko open in a terminal links itself to the hub too
