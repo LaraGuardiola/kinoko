@@ -912,3 +912,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Seen live: asked to "update the todo list", the local Qwen wrote ~/.agents/kinoko/todo.md (a path it made up), then a second .md in ~/.kinoko; the todo tool's description only said "a short plan for a task with several steps", never "todo list" nor that the user sees it.
 - Now it opens with: your todo list, the plan the user sees in kinoko's side panel; asked for a todo list, a checklist or a plan, this is it, never a file.
 - Not done: the same session's other slip (`music status` in a shell: music is a tool) is the cliamp extension's, its own branch.
+
+## fix/resize-scrollback: a narrower window keeps a clean scrollback (branch fix/resize-scrollback)
+- Seen live (screenshot): full screen, then half a screen, then a scroll up: every tool band was ragged pieces. The terminal re-wraps its scrollback itself on a resize, and a band is padded to the old full width; kinoko only redrew the screen's rows (the code said so: "what the terminal's re-wrap pushed into the scrollback stays there").
+- Now, on a new width, when all of the scrollback is kinoko's and still in its history (up to 2000 lines, and nothing from !command or /shell in between), the scrollback is wiped too (CSI 3J) and printed again whole at the new width; otherwise as before, the screen's rows only.
+- Tests: ten bands past the screen all redrawn at the new width with 3J; after a suspend/resume (a shell in the terminal) no 3J, only the screen's rows.
+- Not done: seen by eye: from here wtype's Super+F does not reach Hyprland, so the window could not be resized; the user's check (row 66).

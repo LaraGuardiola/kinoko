@@ -97,6 +97,8 @@ export class Renderer {
   /** After the user's shell: its output, full width, is on screen until kinoko has printed this
    *  many rows (or redrawn the screen); the side column waits, not to be drawn over it. */
   #foreignUntil = 0;
+  /** All the scrollback is kinoko's and still in #history: a resize can print it again whole. */
+  #whole = true;
   #blocks = new Map<string, Printed>();
   /** The text width the screen was last drawn at: another one redraws it. */
   #paintedText: number | undefined;
@@ -188,6 +190,7 @@ export class Renderer {
     this.#blocks.clear();
     this.#paintedText = undefined;
     this.#history = [];
+    this.#whole = true;
     this.#printed = [];
     this.#sideDrawn = undefined;
     this.#lastSideErased = false;
@@ -211,6 +214,7 @@ export class Renderer {
   /** The screen is back: the region is painted on the cursor's row, and its place asked for. */
   resume(): void {
     this.#foreignUntil = this.#rowsOut + this.#rows();
+    this.#whole = false; // what ran in between is in the scrollback, not in #history
     this.#dirty = true;
     this.flush();
     this.requestPosition();
@@ -280,6 +284,7 @@ export class Renderer {
     let lines = this.#history.reduce((n, e) => n + e.lines.length, 0);
     while (lines > HISTORY && this.#history.length > 1) {
       const gone = this.#history.shift()!;
+      this.#whole = false;
       lines -= gone.lines.length;
       for (const [k, e] of this.#blocks) if (e === gone) this.#blocks.delete(k);
     }
@@ -308,9 +313,10 @@ export class Renderer {
   }
 
   /**
-   * After a resize with the side column on: the screen again from the top, the last printed rows
-   * wrapped to the new width, then the region. What the terminal's re-wrap pushed into the
-   * scrollback before this stays there.
+   * After a resize (any new width, or new height with the side column on): the screen again from
+   * the top, what was printed wrapped to the new width, then the region. The terminal re-wrapped
+   * the scrollback itself, splitting each full-width band into ragged rows: when kinoko still has
+   * all of it, the scrollback is wiped and printed again whole; else only the screen's rows are.
    */
   #redraw(): void {
     this.#sideDrawn = undefined;
@@ -324,7 +330,8 @@ export class Renderer {
       return entry.lines.flatMap((line) => wrapAnsi(line, width));
     });
     const all = wrapped.flat();
-    const rows = all.slice(-room);
+    const whole = this.#whole;
+    const rows = whole ? all : all.slice(-room);
     // Where each piece's rows are now (above the screen when cut off), for a rewrite in place.
     let before = this.#rowsOut - (all.length - rows.length);
     for (const [i, entry] of this.#history.entries()) {
@@ -335,10 +342,10 @@ export class Renderer {
     const body = rows.map((line) => ` ${line}\r\n`).join("");
     this.#printed = [];
     this.#keepPrinted(rows);
-    this.#top = rows.length + 1;
+    this.#top = rows.length + 1; // past the bottom when whole: #paint brings it back on screen
     this.#drawn = [];
     this.#cursorRow = 0;
-    this.#write(`${SYNC_START}${RESET}${ESC}H${ESC}2J${body}${this.#paint()}${SYNC_END}`);
+    this.#write(`${SYNC_START}${RESET}${ESC}H${ESC}2J${whole ? `${ESC}3J` : ""}${body}${this.#paint()}${SYNC_END}`);
   }
 
   /** The rows currently on screen, for tests. */
