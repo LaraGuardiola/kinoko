@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { frontmatter } from "./context.ts";
 import { readDisabled, setDisabled } from "./disabled.ts";
 import type { Toggleable } from "./disabled.ts";
+import { extensionPlatforms, platformsLabel, platformsOf, runsHere } from "./platforms.ts";
 
 /** What sets one catalog apart from another. */
 export interface Kind {
@@ -24,6 +25,8 @@ export interface Kind {
   repo: string;
   /** Its description, read from its folder. */
   describe: (folder: string) => Promise<string>;
+  /** The systems it works on (none: everywhere), read from its folder. */
+  platforms: (folder: string) => Promise<string[] | undefined>;
   /** Older single-file installs (`name.ts`) count as installed: extensions only. */
   single?: string;
   /** A folder under home that kinoko also loads from but leaves to others (skills: ~/.agents/skills,
@@ -38,6 +41,7 @@ export const EXTENSIONS: Kind = {
   entry: "index.ts",
   repo: "https://github.com/LaraGuardiola/kinoko-extensions.git",
   describe: async (folder) => text((await json(join(folder, "package.json"))).description),
+  platforms: extensionPlatforms,
   single: ".ts",
 };
 
@@ -49,6 +53,7 @@ export const SKILLS: Kind = {
   repo: "https://github.com/LaraGuardiola/kinoko-skills.git",
   shared: ".agents/skills",
   describe: async (folder) => frontmatter(await Bun.file(join(folder, "SKILL.md")).text().catch(() => "")).description ?? "",
+  platforms: async (folder) => platformsOf(frontmatter(await Bun.file(join(folder, "SKILL.md")).text().catch(() => "")).platforms),
 };
 
 export interface Entry {
@@ -59,6 +64,9 @@ export interface Entry {
   enabled?: boolean;
   /** Found in the kind's shared folder: kinoko loads it, others manage it. */
   shared?: boolean;
+  /** The systems it works on, when not all; `here` false: not this one (not loaded, not installed). */
+  platforms?: string[];
+  here?: boolean;
 }
 
 export interface Catalog {
@@ -190,7 +198,15 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
     const others = shared === undefined ? [] : (await names(kind, shared)).filter((name) => !taken.has(name));
     const theirs = await Promise.all(others.map(async (name) => ({ name, description: await kind.describe(join(shared ?? "", name)), installed: true, shared: true })));
     const off = new Set((await readDisabled(opts.home))[kind.name as Toggleable] ?? []);
-    return [...fromRepo, ...mine, ...theirs].map((e): Entry => Object.assign(e, { enabled: e.installed && !off.has(e.name) })).toSorted(byName);
+    const folderOf = (e: Entry): string => join(e.shared ? (shared ?? "") : offered.includes(e.name) ? registry : target, e.name);
+    const all: Entry[] = [...fromRepo, ...mine, ...theirs];
+    const systems = await Promise.all(all.map((e) => kind.platforms(folderOf(e))));
+    return all
+      .map((e, i): Entry => {
+        const platforms = systems[i];
+        return Object.assign(e, { enabled: e.installed && !off.has(e.name) }, platforms ? { platforms, here: runsHere(platforms) } : {});
+      })
+      .toSorted(byName);
   }
 
   return {
@@ -209,6 +225,8 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
           return { ok: false, note: `${name} lives in ~/${kind.shared}, shared with other agents: kinoko leaves it alone` };
         return { ok: false, note: `no ${kind.one} called ${name} in ${repo}` };
       }
+      const platforms = await kind.platforms(join(registry, name));
+      if (!runsHere(platforms)) return { ok: false, note: `${name} is for ${platformsLabel(platforms ?? [])}: not this system` };
       const was = await installed(name);
       const folder = join(target, name);
       await rm(folder, { recursive: true, force: true });

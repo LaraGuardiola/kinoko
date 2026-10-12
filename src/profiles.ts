@@ -122,6 +122,7 @@ export async function applyProfile(host: CommandHost, home: string, profile: Pro
     // oxlint-disable-next-line no-await-in-loop -- one catalog after the other, changes in order
     const entries = await store.list(signal).catch(() => store.local());
     for (const entry of entries) {
+      if (entry.here === false) continue; // another system's: passed by, as if the profile did not name it
       const want = wants(profile[kind], profile.except, entry.name);
       const on = entry.installed && entry.enabled !== false;
       if (want === on) continue;

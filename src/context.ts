@@ -5,6 +5,7 @@ import { readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { readDisabled } from "./disabled.ts";
 import { userHome } from "./home.ts";
+import { platformsOf, runsHere } from "./platforms.ts";
 
 export interface ContextFile {
   path: string;
@@ -86,6 +87,7 @@ async function skillOf(path: string): Promise<SkillEntry | undefined> {
   const file = Bun.file(path);
   if (!(await file.exists())) return undefined;
   const meta = frontmatter(await file.text());
+  if (!runsHere(platformsOf(meta.platforms))) return undefined; // another system's: not in the index
   return { path, name: meta.name ?? basename(dirname(path)), description: meta.description ?? "" };
 }
 
@@ -102,22 +104,23 @@ export function renderSkills(skills: SkillEntry[]): string {
 }
 
 /**
- * The two frontmatter keys we care about; everything else in the YAML is ignored.
+ * The frontmatter keys we care about (name, description, and where it works: platforms);
+ * everything else in the YAML is ignored.
  * A value may continue on indented lines (`description: >` / `|` blocks, wrapped plain text):
  * they are joined with spaces, since the index renders each skill on one line.
  */
-export function frontmatter(text: string): { name?: string; description?: string } {
+export function frontmatter(text: string): { name?: string; description?: string; platforms?: string } {
   const lines = text.split("\n");
   if (lines[0]?.trim() !== "---") return {};
   const end = lines.findIndex((line, i) => i > 0 && line.trim() === "---");
   if (end < 0) return {};
   const body = lines.slice(1, end);
-  const out: { name?: string; description?: string } = {};
+  const out: { name?: string; description?: string; platforms?: string } = {};
   for (const [i, line] of body.entries()) {
     const at = line.indexOf(":");
     if (at < 0 || /^\s/.test(line)) continue;
     const key = line.slice(0, at).trim();
-    if (key !== "name" && key !== "description") continue;
+    if (key !== "name" && key !== "description" && key !== "platforms") continue;
     const head = line.slice(at + 1).trim();
     const rest = body.slice(i + 1);
     const stop = rest.findIndex((l) => l.trim() !== "" && !/^\s/.test(l));
