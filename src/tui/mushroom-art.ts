@@ -1,7 +1,7 @@
 // Kinoko in the terminal: the app's mushroom as pixel art, two pixels per character (▀ ▄ with
 // 24-bit colours), with the face of the profile in use, as the phone draws it. Amanita goes super
-// saiyan, Psilocybe is past the wardrobe, Shiitake wears glasses, Morchella a monocle, Cordyceps a
-// headset, Mycena is already leaving. Any other profile, or none: the plain smile.
+// saiyan, Psilocybe is past the wardrobe, Shiitake wears glasses, Morchella round gold ones, Cordyceps
+// conducts the orchestra, Mycena is already leaving. Any other profile, or none: the plain smile.
 
 const RGB: Record<string, string> = {
   R: "232;36;36", // cap
@@ -17,8 +17,8 @@ const RGB: Record<string, string> = {
   V: "183;148;246",
   L: "134;239;172",
   U: "253;224;71",
-  g: "107;113;148", // the headset, the glasses
-  A: "229;185;74", // the monocle
+  g: "107;113;148", // the glasses
+  A: "229;185;74", // the gold glasses
   S: "138;130;112", // speed lines
 };
 
@@ -89,14 +89,14 @@ const FACES: Record<string, (grid: Grid) => void> = {
   },
   shiitake: (g) => put(g, [[6, 11, "g"], [8, 11, "g"], [11, 11, "g"], [13, 11, "g"], [9, 10, "g"], [10, 10, "g"]]),
   morchella: (g) => {
-    // A monocle on the right eye, its chain down the side; a flat, unconvinced mouth.
-    put(g, [[12, 10, "A"], [11, 11, "A"], [13, 11, "A"], [12, 12, "A"], [14, 13, "A"], [14, 14, "A"]]);
+    // Round gold glasses on both eyes; a flat, unconvinced mouth.
+    put(g, [[7, 10, "A"], [6, 11, "A"], [8, 11, "A"], [7, 12, "A"], [12, 10, "A"], [11, 11, "A"], [13, 11, "A"], [12, 12, "A"], [9, 10, "A"], [10, 10, "A"], [6, 12, "P"], [13, 12, "P"]]);
     put(g, [[8, 13, "K"], [9, 13, "K"], [10, 13, "K"], [11, 13, "K"], [9, 14, "W"], [10, 14, "W"]]);
   },
   cordyceps: (g) => {
-    // A headset over the cap, a mic at the mouth; one eye winks.
-    put(g, [[6, 1, "g"], [7, 1, "g"], [8, 1, "g"], [9, 1, "g"], [10, 1, "g"], [11, 1, "g"], [12, 1, "g"], [13, 1, "g"], [4, 2, "g"], [5, 2, "g"], [14, 2, "g"], [15, 2, "g"], [3, 3, "g"], [16, 3, "g"], [2, 4, "g"], [17, 4, "g"]]);
-    put(g, [[1, 6, "g"], [1, 7, "g"], [18, 6, "g"], [18, 7, "g"], [2, 10, "g"], [3, 11, "g"], [4, 12, "g"], [5, 13, "g"], [6, 11, "K"], [7, 11, "K"]]);
+    // The conductor: a baton up in the air, the music around it.
+    put(g, [[15, 14, "g"], [16, 13, "w"], [17, 12, "w"], [18, 11, "w"]]);
+    put(g, [[17, 0, "C"], [18, 0, "C"], [17, 1, "C"], [17, 2, "C"], [16, 3, "C"], [17, 3, "C"], [2, 1, "V"], [3, 1, "V"], [2, 2, "V"], [1, 3, "V"], [2, 3, "V"]]);
   },
   mycena: (g) => {
     // Eyes shut with joy, already off: speed lines behind.

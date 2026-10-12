@@ -19,7 +19,8 @@ describe("kinoko in the terminal", () => {
     expect(join("amanita")).toContain("255;196;0"); // the golden aura
     expect(join("amanita").split("\n").length).toBeGreaterThan(join().split("\n").length); // flames above
     expect(join("psilocybe")).toContain("255;122;217");
-    expect(join("cordyceps")).toContain("107;113;148");
+    expect(join("cordyceps")).toContain("110;231;249"); // its music
+    expect(join("morchella")).toContain("229;185;74");
     expect(join("my-own")).toBe(join());
   });
 });
