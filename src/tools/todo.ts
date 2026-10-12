@@ -1,4 +1,4 @@
-// todo: the model's plan for work with several steps, which the TUI shows in its side panel. The
+// todo: the model's plan for work with several steps (the user's "todo list"), which the TUI shows in its side panel. The
 // WHOLE list every call: a small model never has to track ids or patch a list it cannot see, and
 // the newest call is the truth (a resumed session finds it again in its history).
 
@@ -43,7 +43,7 @@ export function planText(todos: Todo[]): string {
 export const todoTool: Tool = {
   name: TODO_TOOL,
   description:
-    "Keep a short plan for a task with several steps. Send the WHOLE list every time. Mark the step you start as in_progress (one at a time) and each finished step as done. When new work comes up (a fix, a check, a follow-up), add it to the same list, keeping the done items, even after everything was done. Skip it for one-step tasks.",
+    "Your todo list: the plan the user sees in kinoko's side panel. When the user asks for a todo list, a checklist or a plan, this is it: never a file. Keep a short plan for a task with several steps. Send the WHOLE list every time. Mark the step you start as in_progress (one at a time) and each finished step as done. When new work comes up (a fix, a check, a follow-up), add it to the same list, keeping the done items, even after everything was done. Skip it for one-step tasks.",
   schema: {
     type: "object",
     properties: {
