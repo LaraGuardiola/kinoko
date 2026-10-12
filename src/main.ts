@@ -372,6 +372,7 @@ if (tui) {
       },
     },
     session: () => `id ${session.meta.id}\nmessages ${agent.messages.length}\nmodel ${agent.model}`,
+    ...(jobs ? { jobs } : {}),
   };
   const rpc = new Rpc({
     agent: agent,

@@ -1,4 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Jobs } from "../jobs.ts";
 import type { Catalog, Entry } from "../catalog.ts";
 import { EXTENSIONS } from "../catalog.ts";
 import { commandList, runCommand } from "../commands.ts";
@@ -128,5 +132,29 @@ describe("slash commands for the phone", () => {
     const bare = new Rpc({ agent: agent(), model: "m", write: (t) => lines.push(JSON.parse(t) as RpcReply) });
     bare.handle(JSON.stringify({ type: "command", id: "x", name: "new" }));
     expect(lines.at(-1)).toEqual({ type: "error", id: "x", detail: "no commands here" });
+  });
+
+  test("jobs: the shells, the running ones first; one of them is its output", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "kinoko-cmd-jobs-"));
+    afterAll(() => rmSync(dir, { recursive: true, force: true }));
+    const jobs = new Jobs({ dir, onEnd: () => undefined });
+    const host: CommandHost = { agent: agent(), jobs };
+    expect(commandList(host).map((c) => c.name)).toContain("jobs");
+    expect((await runCommand(host, "jobs", "", signal)).hint).toContain("no shells yet");
+
+    const quick = jobs.start("printf 'one\\ntwo\\n'", dir);
+    await jobs.ended(quick.id);
+    // The only one there is: its output at once.
+    expect(await runCommand(host, "jobs", "", signal)).toMatchObject({ title: expect.stringMatching(/^#1 · done after/), text: "one\ntwo", hint: "$ printf 'one\\ntwo\\n'" });
+
+    const slow = jobs.start("sleep 30", dir);
+    const list = await runCommand(host, "jobs", "", signal);
+    expect(list.title).toBe("Shells");
+    expect(list.items?.map((i) => [i.name, i.current])).toEqual([["#2", true], ["#1", false]]);
+    expect(list.items?.[0]?.description).toMatch(/^sleep 30 · running/);
+    expect(await runCommand(host, "jobs", "#2", signal)).toMatchObject({ title: expect.stringMatching(/^#2 · running/), text: "(nothing printed yet)" });
+    expect((await runCommand(host, "jobs", "#9", signal)).text).toBe("no shell #9");
+    jobs.kill(slow.id);
+    await jobs.ended(slow.id);
   });
 });
