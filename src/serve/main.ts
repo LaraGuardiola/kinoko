@@ -14,6 +14,7 @@ import { renderMarkdown } from "../tui/markdown.ts";
 import { Devices } from "./devices.ts";
 import { qrText } from "./qr.ts";
 import { fenceRenderers } from "./renderers.ts";
+import { currentProfile } from "../profiles.ts";
 import { identity, lanAddresses } from "./tls.ts";
 import { serve } from "./server.ts";
 import { Bridge } from "./bridge.ts";
@@ -125,7 +126,19 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
     await renderers.fresh();
     return renderMarkdown(text, { width }).split("\n");
   };
-  const hub = serve({ port, ...(lanIdentity ? { lan: { port: lanPort, identity: lanIdentity, urls: lanUrls } } : {}), devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
+  // The profile in use, looked at every few seconds (a TUI or the phone may switch it): the phone
+  // draws that profile's mushroom.
+  let profile = await currentProfile(process.env.HOME ?? homedir());
+  const hub = serve({ profile: () => profile, port, ...(lanIdentity ? { lan: { port: lanPort, identity: lanIdentity, urls: lanUrls } } : {}), devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
+
+  const profileWatch = setInterval(() => {
+    void currentProfile(process.env.HOME ?? homedir()).then((now) => {
+      if (now === profile) return;
+      profile = now;
+      hub.announce({ type: "profile", profile: now ?? null });
+    });
+  }, 3000);
+  profileWatch.unref();
 
   // Telegram (set up from the TUI's /integrations): it answers while the hub runs.
   const bridgeStop = new AbortController();

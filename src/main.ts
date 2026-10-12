@@ -15,6 +15,7 @@ import type { Change } from "./catalog.ts";
 import { App } from "./tui/app.ts";
 import { THINKING, profileLabel } from "./tui/menu-pages.ts";
 import { activeProfile } from "./profiles.ts";
+import { mushroomArt } from "./tui/mushroom-art.ts";
 import { integrationsSummary, readIntegrations } from "./integrations.ts";
 import type { CommandHost } from "./commands.ts";
 import { setFenceRenderers } from "./tui/markdown.ts";
@@ -242,13 +243,19 @@ const profileLine = async (): Promise<string | undefined> => {
   return p ? `${p.title}${p.approvals === "auto" ? " · nothing asked" : ""}` : undefined;
 };
 
+/** The mushroom's face and the line beside it: the profile in use, and what it is about. */
+const faceOf = async (): Promise<{ face?: string; tagline?: string }> => {
+  const p = await activeProfile(process.env.HOME ?? "");
+  return p ? { face: p.name, tagline: p.description } : {};
+};
+
 /** The panel's integrations line: Telegram set up, and whether it runs. */
 const integrationsLine = async (): Promise<string> => integrationsSummary(await readIntegrations(process.env.HOME ?? ""));
 
 if (tui) {
   // The interactive mode: raw terminal in, live region out. Everything else is the same Agent.
   const term = new Term();
-  const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() });
+  const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), ...(await faceOf()), integrations: await integrationsLine() });
   const app = new App({
     agent: agent,
     write: (text) => term.write(text),
@@ -274,7 +281,7 @@ if (tui) {
     apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
     // What is on now, for the panel's [Capabilities] lines (skills read again: one may be new).
     jobs,
-    capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() }),
+    capabilities: async () => startupPanel({ context, skills: await discoverSkills(cwd), extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), ...(await faceOf()), integrations: await integrationsLine() }),
     resumeSession: async (path) => {
       // Another of this directory's sessions, in place of this one: the model in use stays.
       const last = session;
@@ -284,7 +291,7 @@ if (tui) {
       agent.restart(session);
       await restoreTracker(agent.messages, cwd);
       if (last.empty) await rm(last.path, { force: true });
-      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() }) };
+      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), ...(await faceOf()), integrations: await integrationsLine() }) };
     },
     newSession: async () => {
       // A new conversation: a new session file, the skills read again (installed ones join the
@@ -297,7 +304,7 @@ if (tui) {
       // The last one: deleted when nothing was said in it (as on quit), else how to come back to it.
       if (last.empty) await rm(last.path, { force: true });
       const back = last.empty ? "" : `\n\n${ANSI.dim}the last session:${ANSI.reset} ${ANSI.cream}kinoko --session ${last.meta.id}${ANSI.reset}`;
-      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), integrations: await integrationsLine() }) + back };
+      return { session, intro: startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), ...(await faceOf()), integrations: await integrationsLine() }) + back };
     },
     viewportRows: Math.max(2, term.rows - 1),
     viewportCols: term.cols,
@@ -439,9 +446,13 @@ async function applySkill(name: string, change: Change): Promise<string> {
   return "the model hears of it with your next message";
 }
 
-function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string; profile?: string; integrations?: string }): string {
+function startupPanel(parts: { context: { path: string }[]; skills: { name: string }[]; extensions: string[]; version: string; profile?: string; face?: string; tagline?: string; integrations?: string }): string {
+  // Kinoko itself, with the face of the profile in use; the name beside it.
+  const art = mushroomArt(parts.face);
+  const mid = Math.max(0, Math.floor(art.length / 2) - 1);
+  const beside = [`${ANSI.amanita}kinoko${ANSI.reset} ${ANSI.cream}v${parts.version}${ANSI.reset}`, parts.tagline ? `${ANSI.dim}${parts.tagline.length > 64 ? `${parts.tagline.slice(0, 63)}…` : parts.tagline}${ANSI.reset}` : ""];
   return [
-    `${ANSI.amanita}kinoko${ANSI.reset} ${ANSI.cream}v${parts.version}${ANSI.reset}`,
+    ...art.map((row, i) => (i >= mid && i < mid + beside.length && beside[i - mid] ? `${row}   ${beside[i - mid]}` : row).trimEnd()),
     "",
     "\x1b[38;5;214m[Capabilities]\x1b[0m",
     `  Profile: ${parts.profile ? `${ANSI.cream}${parts.profile}${ANSI.reset}` : "none (/profile)"}`,

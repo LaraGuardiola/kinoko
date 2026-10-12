@@ -1642,11 +1642,13 @@ function errorText(e: unknown): string {
 }
 
 /** The [Capabilities] lines of a panel: the header to the next blank line (at -1: none). */
+/** The panel's head through its [Capabilities] lines: the mushroom (its face is the profile's) and
+ *  what is on, all that changes when something is switched. */
 function capabilitiesSection(text: string): { lines: string[]; at: number; end: number } {
   const lines = text.split("\n");
-  const at = lines.findIndex((line) => line.includes("[Capabilities]"));
-  const end = lines.indexOf("", at + 1);
-  return { lines, at, end: end < 0 ? lines.length : end };
+  const caps = lines.findIndex((line) => line.includes("[Capabilities]"));
+  const end = lines.indexOf("", caps + 1);
+  return { lines, at: caps < 0 ? -1 : 0, end: end < 0 ? lines.length : end };
 }
 
 /** `panel` with its [Capabilities] lines taken from `fresh`. */

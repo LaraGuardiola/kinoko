@@ -74,7 +74,8 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 
 | `type` | When | Fields |
 |---|---|---|
-| `hello` | on connect | `version`, `protocol`, `device {id, name}`, `agents: [AgentInfo]`, `lan {urls, fingerprint}` when it listens on the LAN (a new IP reaches the app) |
+| `hello` | on connect | `version`, `protocol`, `device {id, name}`, `agents: [AgentInfo]`, `lan {urls, fingerprint}` when it listens on the LAN (a new IP reaches the app), `profile` (the one in use: the app draws its mushroom) |
+| `profile` | the profile in use changed on the computer (checked every 3 s) | `profile` (a name, or null) |
 | `agents` | an agent starts or stops, a run starts or ends; and for `list` | `agents: [AgentInfo]`, newest activity first |
 | `projects` | for `projects` | `projects: [Project]` |
 | `folders` | for `folders` | `path` (the one asked), `folders: [string]`: absolute paths |

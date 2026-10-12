@@ -29,6 +29,8 @@ interface Socket {
 
 export interface ServeOptions {
   port: number;
+  /** The profile in use (~/.kinoko/profile.json): the phone draws its mushroom. */
+  profile?: () => string | undefined;
   devices: Devices;
   /** How to run kinoko (the binary, or bun and main.ts). */
   command: string[];
@@ -71,7 +73,7 @@ type Incoming = {
   path?: string; // folders: what was typed so far
 };
 
-export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Server<Socket>; agents: Agents; watch: (listener: Watcher) => () => void; stop: () => void } {
+export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Server<Socket>; agents: Agents; watch: (listener: Watcher) => () => void; announce: (msg: object) => void; stop: () => void } {
   const sockets = new Set<ServerWebSocket<Socket>>();
   // Every agent's events, attached or not: the Telegram bridge listens here.
   const watchers = new Set<Watcher>();
@@ -216,7 +218,7 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Serve
         open(ws) {
           sockets.add(ws);
           log(`${ws.data.device.name} connected`);
-          send(ws, { type: "hello", version: opts.version, protocol: PROTOCOL, device: { id: ws.data.device.id, name: ws.data.device.name }, agents: agents.list(), ...(lan ? { lan } : {}) });
+          send(ws, { type: "hello", version: opts.version, protocol: PROTOCOL, device: { id: ws.data.device.id, name: ws.data.device.name }, agents: agents.list(), ...(lan ? { lan } : {}), ...(opts.profile?.() ? { profile: opts.profile() } : {}) });
         },
         message(ws, raw) {
           let msg: Incoming;
@@ -264,6 +266,8 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Serve
       watchers.add(listener);
       return () => watchers.delete(listener);
     },
+    /** Said to every device connected (the profile changed). */
+    announce: broadcast,
     stop: () => {
       agents.stopAll();
       links?.stop();
