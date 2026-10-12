@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.2.1
+
+Fixes found using 0.2.0: shells left running, a screen that smeared, a todo list written to a file.
+
+### Shells
+- A command or background job that puts something aside with `&` or `nohup` now says so to the
+  agent, with how to stop it; what a background job left running ends when kinoko quits.
+- The todo tool says it is the todo list you see in the side panel: asked for a todo list, the
+  agent no longer writes one to a file.
+
+### The TUI
+- A background job ending while the model writes no longer copies its text down the screen: a
+  queued message of several lines takes one row, and so does a job's multi-line command in `/jobs`.
+- A window made narrower (full screen to half) keeps a clean scrollback: kinoko prints it again at
+  the new width instead of leaving the terminal's ragged re-wrap of every band.
+
+### Extensions (installing one again from `/extensions` updates it)
+- permission-gate: `rm -f /tmp/x` is no longer refused as if it were `rm -rf /`; only `/`, `~`,
+  `$HOME` or `.` themselves are.
+- cliamp: `music status` names the next song; a background job reads the song from
+  `cliamp status`.
+
 ## 0.2.0
 
 The first public release. kinoko runs on Linux, macOS and Windows, as one binary with nothing else

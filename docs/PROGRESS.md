@@ -918,3 +918,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Now, on a new width, when all of the scrollback is kinoko's and still in its history (up to 2000 lines, and nothing from !command or /shell in between), the scrollback is wiped too (CSI 3J) and printed again whole at the new width; otherwise as before, the screen's rows only.
 - Tests: ten bands past the screen all redrawn at the new width with 3J; after a suspend/resume (a shell in the terminal) no 3J, only the screen's rows.
 - Not done: seen by eye: from here wtype's Super+F does not reach Hyprland, so the window could not be resized; the user's check (row 66).
+
+## release/v0.2.1: the fixes found using 0.2.0 (branch release/v0.2.1)
+- package.json 0.2.1; CHANGELOG section: job leftovers, the todo list, one-row queued messages and /jobs commands, the scrollback after a resize; the extensions' fixes (permission-gate, cliamp) listed for reinstalling from /extensions.
+- Tag v0.2.1 on main: release.yml builds and publishes.
