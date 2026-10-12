@@ -91,9 +91,15 @@ export function lineQueue(): { push: (line: string) => void; end: () => void; li
 export const spawnChild: Spawn = (cmd, cwd) => {
   const proc = Bun.spawn(cmd, { cwd, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   return {
+    // An agent that died meanwhile has no reader: its pipe refuses (EPIPE), which must not take the
+    // hub down. Its exit is handled where `exited` is.
     write: (line) => {
-      proc.stdin.write(`${line}\n`);
-      proc.stdin.flush();
+      try {
+        proc.stdin.write(`${line}\n`);
+        void Promise.resolve(proc.stdin.flush()).catch(() => undefined);
+      } catch {
+        // gone
+      }
     },
     lines: lines(proc.stdout),
     errors: lines(proc.stderr),
