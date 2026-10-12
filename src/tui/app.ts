@@ -1260,6 +1260,7 @@ export class App {
   commandHost(): CommandHost {
     return {
       agent: this.#agent,
+      ...(this.#jobs ? { jobs: this.#jobs } : {}),
       catalogs: this.#catalogs,
       apply: this.#apply,
       newSession: async () => {

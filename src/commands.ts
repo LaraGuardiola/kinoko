@@ -5,6 +5,8 @@
 
 import type { Catalog, Change, Entry } from "./catalog.ts";
 import type { Agent } from "./loop.ts";
+import { elapsed } from "./jobs.ts";
+import type { Jobs } from "./jobs.ts";
 import { THINKING } from "./tui/menu-pages.ts";
 import { applyProfile, currentProfile, readProfiles } from "./profiles.ts";
 
@@ -53,6 +55,8 @@ export interface CommandHost {
   /** /fork: the session's head back one message (a TUI's). */
   fork?: () => Promise<string>;
   session?: () => string;
+  /** The background shells (bash background: true): /jobs lists them and shows each one's output. */
+  jobs?: Jobs;
   /** Something the phone changed, for the terminal to show. */
   told?: (note: string) => void;
 }
@@ -66,6 +70,7 @@ export function commandList(host: CommandHost): CommandInfo[] {
     host.catalogs?.extensions !== undefined && { name: "extensions", description: "Switch extensions on or off, install, update, remove", kind: "list" },
     host.catalogs?.skills !== undefined && { name: "skills", description: "Switch skills on or off, install, update, remove", kind: "list" },
     host.catalogs !== undefined && { name: "profile", description: "Switch profile: what is on, how much it thinks, what it asks", kind: "list" },
+    host.jobs !== undefined && { name: "jobs", description: "The shells running in the background: what each is doing", kind: "list" },
     host.session !== undefined && { name: "session", description: "This session: id, messages, tokens", kind: "run" },
     { name: "clear", description: "Clear the view (the context stays)", kind: "run" },
     host.fork !== undefined && { name: "fork", description: "Move the session head back one message", kind: "run" },
@@ -109,6 +114,9 @@ export async function runCommand(host: CommandHost, name: string, arg: string, s
       const current = await currentProfile(home);
       return { title: "Profiles", text: note, items: all.map((p) => ({ name: p.name, description: `${p.title} · ${p.description}`, current: p.name === current })) };
     }
+    case "jobs":
+      if (host.jobs === undefined) break;
+      return jobsCommand(host.jobs, arg.trim());
     case "session":
       if (host.session === undefined) break;
       return { title: "Session", text: host.session() };
@@ -182,4 +190,25 @@ async function catalogCommand(host: CommandHost, kind: "extensions" | "skills", 
     shared: e.shared === true,
   }));
   return { title, text: note, items, hint };
+}
+
+/** The output a shell's window shows: its last lines. */
+const WINDOW_LINES = 300;
+
+/** The shells, the running ones first; "#2" (or the only one there is) is that one's output. */
+function jobsCommand(jobs: Jobs, arg: string): CommandResult {
+  const all = jobs.list().toSorted((a, b) => Number(b.state === "running") - Number(a.state === "running") || b.id - a.id);
+  const one = arg === "" && all.length === 1 ? all[0] : all.find((j) => `#${j.id}` === arg || String(j.id) === arg);
+  const took = (j: (typeof all)[number]): string => elapsed((j.ended ?? Date.now()) - j.started);
+  if (one !== undefined) {
+    const how = one.state === "running" ? `running ${took(one)}` : `${one.state === "failed" ? `failed (exit ${one.code ?? "?"})` : one.state} after ${took(one)}`;
+    const lines = jobs.tail(one.id, WINDOW_LINES);
+    return { title: `#${one.id} · ${how}`, text: lines.length > 0 ? lines.join("\n") : "(nothing printed yet)", hint: `$ ${one.command}` };
+  }
+  if (arg !== "") return { text: `no shell ${arg}` };
+  return {
+    title: "Shells",
+    items: all.map((j) => ({ name: `#${j.id}`, description: `${j.command} · ${j.state === "running" ? `running ${took(j)}` : `${j.state} after ${took(j)}`}`, current: j.state === "running" })),
+    hint: all.length > 0 ? "tap one to see what it is doing" : "no shells yet: the model starts one with bash background: true",
+  };
 }

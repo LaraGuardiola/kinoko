@@ -820,3 +820,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Seen live (sandbox hub 7979, emulator): the /tmp and deleted projects gone, typing /home/enterprise/Projects/kin listed the five kinoko folders, tapping kinoko went in (docs, examples…), Start here started the agent there.
 - Not done: no "~" shown back in the list (absolute paths), no creating folders.
 - Tests: projects without throwaway/deleted ones, folder completion, the hub's `folders`; app: parsing, isPath/matching/isFolder. 499 pass.
+
+## feat/phone-shells: the agent's background shells inside the phone's chat (branch feat/phone-shells; kinoko-android too)
+- Asked by the user: the shells showed only on the agents list; they wanted them in the chat, clickable, to see what each one is doing, choosing one when there are several.
+- `/jobs` for the phone (`src/commands.ts`, both an rpc agent and a TUI linked to the hub): the shells, running ones first, each `#id` with its command and how long; `#id` (or the only one there is) answers with its last 300 lines (colours out, \r resolved) and the command under them.
+- App: "⚙ N shells" in yellow on the right of the status line above the input, shown while shells run even when the agent is not working. A tap opens the panel with the list; a shell opens its window (smaller monospace, its end kept in sight), asked again 1.5 s after each answer without the spinner; ← back to the list.
+- Seen live (sandbox hub 7979, emulator, the local Qwen): the model started two shells, the label said 2 shells, the list had both, #1's window followed its ticks (28 → 32), back returned to the list. Nothing left running after the hub stopped.
+- Not done: stopping a shell from the phone (not asked); the list itself does not refresh while open.
+- Tests: /jobs listed only with jobs, the only one's output at once, the list's order and state, a window, an unknown one. 500 pass.
