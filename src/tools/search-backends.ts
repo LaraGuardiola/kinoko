@@ -439,7 +439,7 @@ async function* bunContent(query: SearchQuery, note: ScanNote): AsyncGenerator<H
     note.error = `invalid regex pattern: ${query.pattern}`;
     return;
   }
-  const rules = await readIgnores(query.path);
+  const rules = query.noIgnore ? [] : await readIgnores(query.path); // no_ignore: every file
   const globber = new Bun.Glob(query.glob === "" ? "**/*" : query.glob);
   try {
     for await (const found of globber.scan({ cwd: query.path })) {
@@ -486,7 +486,7 @@ async function* bunContent(query: SearchQuery, note: ScanNote): AsyncGenerator<H
 
 async function* bunFiles(query: SearchQuery, note: ScanNote): AsyncGenerator<FileRow, void> {
   const rels: string[] = [];
-  const rules = await readIgnores(query.path);
+  const rules = query.noIgnore ? [] : await readIgnores(query.path); // no_ignore: every file
   const globber = new Bun.Glob(query.glob === "" ? "**/*" : query.glob);
   try {
     for await (const found of globber.scan({ cwd: query.path })) {
