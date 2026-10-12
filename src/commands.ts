@@ -10,6 +10,7 @@ import type { Jobs } from "./jobs.ts";
 import { THINKING } from "./tui/menu-pages.ts";
 import { applyProfile, currentProfile, readProfiles } from "./profiles.ts";
 import { userHome } from "./home.ts";
+import { platformsLabel } from "./platforms.ts";
 
 export interface CommandInfo {
   name: string;
@@ -184,7 +185,7 @@ async function catalogCommand(host: CommandHost, kind: "extensions" | "skills", 
   }
   const items = entries.map((e) => ({
     name: e.name,
-    description: e.description,
+    description: e.here === false ? `${platformsLabel(e.platforms ?? [])} · ${e.description}` : e.description,
     installed: e.installed,
     current: e.installed && e.enabled !== false,
     off: e.installed && e.enabled === false,

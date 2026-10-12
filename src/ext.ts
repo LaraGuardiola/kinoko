@@ -5,12 +5,13 @@
 // handler that throws is logged and skipped, because a broken extension must never break a run.
 
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { uniqueDirs } from "./context.ts";
 import { readDisabled } from "./disabled.ts";
 import type { Message, ProviderRequest, Tool } from "./types.ts";
 import type { RunResult } from "./loop.ts";
 import { userHome } from "./home.ts";
+import { extensionPlatforms, runsHere } from "./platforms.ts";
 
 export interface SessionStartInfo {
   cwd: string;
@@ -268,7 +269,10 @@ export async function loadExtensions(k: Extensions, opts: LoadOptions): Promise<
   for (const dir of dirs) {
     for (const name of listEntries(dir)) if (!off.has(extensionName(join(dir, name)))) paths.push(join(dir, name));
   }
-  const mods = await Promise.all(paths.map((path) => importDefault(path, k)));
+  // Another system's (package.json "os"): not loaded, so none of its tools reach the model.
+  const here = await Promise.all(paths.map(async (path) => runsHere(await extensionPlatforms(dirname(path)))));
+  for (const [i, path] of paths.entries()) if (!here[i]) k.log(`${extensionName(path)} is not for this system: not loaded`);
+  const mods = await Promise.all(paths.map((path, i) => (here[i] ? importDefault(path, k) : null)));
   const loaded: string[] = [];
   for (const [index, factory] of mods.entries()) {
     const path = paths[index];

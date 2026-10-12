@@ -6,6 +6,7 @@ import type { ListPage, MenuItem } from "./menu.ts";
 import { languageName } from "./code.ts";
 import type { Snippet } from "./snippets.ts";
 import { renderTable } from "./table.ts";
+import { platformsLabel } from "../platforms.ts";
 
 export const ROOT: MenuItem[] = [
   { name: "thinking", description: "How much the model thinks: off, low, medium, high, extreme" },
@@ -95,7 +96,7 @@ export function catalogPage(
     items: (state.entries ?? []).map((e) => ({
       name: e.name,
       key: e.name,
-      description: `${e.installed && !e.enabled ? "off · " : ""}${e.shared ? "shared · " : ""}${e.description}`,
+      description: `${e.here === false ? `${platformsLabel(e.platforms ?? [])} · ` : ""}${e.installed && !e.enabled ? "off · " : ""}${e.shared ? "shared · " : ""}${e.description}`,
       current: e.installed && e.enabled !== false,
       off: e.installed && e.enabled === false,
       removable: e.installed && !e.shared,
