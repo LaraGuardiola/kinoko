@@ -22,12 +22,40 @@ jobs:
       - run: bun run lint
       - run: bunx tsc --noEmit
       - run: bun test
+      # The installers end to end: this system's binary, served locally as GitHub Releases would,
+      # installed by install.sh or install.ps1, then run. (On macOS: the signed binary starts.)
+      - name: install.sh, end to end
+        if: matrix.os != 'windows-latest'
+        shell: bash
+        run: |
+          os=$(uname -s | tr '[:upper:]' '[:lower:]'); arch=$(uname -m)
+          case "$arch" in x86_64) arch=x64 ;; arm64 | aarch64) arch=arm64 ;; esac
+          mkdir -p rel
+          bun build --compile --outfile "rel/kinoko-$os-$arch" src/main.ts
+          if [ "$os" = darwin ]; then codesign --force --sign - "rel/kinoko-$os-$arch"; fi
+          cd rel && { sha256sum kinoko-* 2>/dev/null || shasum -a 256 kinoko-*; } > SHA256SUMS && cd ..
+          (cd rel && python3 -m http.server 8799 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8799/SHA256SUMS >/dev/null && break; sleep 1; done
+          KINOKO_DOWNLOAD_URL=http://127.0.0.1:8799 KINOKO_INSTALL_DIR="$RUNNER_TEMP/kbin" KINOKO_NO_MODIFY_PATH=1 sh install.sh
+          "$RUNNER_TEMP/kbin/kinoko" --version
+      - name: install.ps1, end to end
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force rel | Out-Null
+          bun build --compile --outfile rel/kinoko-windows-x64.exe src/main.ts
+          $hash = (Get-FileHash rel/kinoko-windows-x64.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content rel/SHA256SUMS "$hash  kinoko-windows-x64.exe"
+          Start-Process python -ArgumentList '-m', 'http.server', '8799', '--bind', '127.0.0.1' -WorkingDirectory (Resolve-Path rel) -WindowStyle Hidden
+          foreach ($i in 1..30) { try { Invoke-WebRequest http://127.0.0.1:8799/SHA256SUMS -UseBasicParsing | Out-Null; break } catch { Start-Sleep 1 } }
+          $env:KINOKO_DOWNLOAD_URL = 'http://127.0.0.1:8799'
+          $env:KINOKO_INSTALL_DIR = "$env:RUNNER_TEMP\kbin"
+          ./install.ps1
+          & "$env:RUNNER_TEMP\kbin\kinoko.exe" --version
       # The Windows binary, to try on a real Windows (Actions → this run → Artifacts).
-      - if: matrix.os == 'windows-latest'
-        run: bun build --compile --outfile kinoko-out/kinoko.exe src/main.ts
       - if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
           name: kinoko-windows-x64
-          path: kinoko-out/kinoko.exe
+          path: rel/kinoko-windows-x64.exe
           retention-days: 14

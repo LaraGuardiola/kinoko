@@ -9,24 +9,30 @@ A small, fast, hackable coding-agent harness. Bun + TypeScript, **zero runtime d
 
 ## Quick start
 
-Needs [Bun](https://bun.sh) and `git`.
+Linux and macOS:
 
 ```
-git clone https://github.com/LaraGuardiola/kinoko && cd kinoko
-bun run build
-install -m 755 kinoko-out/kinoko ~/.local/bin/kinoko   # anywhere on PATH
-mkdir -p ~/.kinoko
+curl -fsSL https://raw.githubusercontent.com/LaraGuardiola/kinoko/main/install.sh | sh
 ```
 
-Pick a model. With no config, kinoko talks to OpenAI (`gpt-4o-mini`, its key from `$KINOKO_API_KEY`).
+Windows (PowerShell):
 
 ```
-# Anthropic
+irm https://raw.githubusercontent.com/LaraGuardiola/kinoko/main/install.ps1 | iex
+```
+
+One binary, nothing else to install (no Bun, no Node), checked against the release's checksums and
+put on your PATH (`~/.local/bin`, or `%LOCALAPPDATA%\kinoko\bin` on Windows). `git` is needed for
+`/extensions` and `/skills`. On Windows, kinoko's shell is Git Bash when Git for Windows is installed,
+PowerShell otherwise. Run the installer again to update; `kinoko --version` says what you have.
+
+Then just run `kinoko`. The first time it has no model: `/models` → **+ add provider**, give it a
+URL (a local llama.cpp, Ollama or LM Studio, no key; or an API and its key) and pick one of the
+models it serves. It is kept for the next start. Or write `~/.kinoko/config.json` (see [Config](#config)):
+
+```
 echo '{ "provider": "anthropic", "model": "claude-opus-5-5" }' > ~/.kinoko/config.json
 export ANTHROPIC_API_KEY=sk-ant-...
-
-# or a local llama.cpp / Strata engine
-cp examples/config.strata.json ~/.kinoko/config.json
 ```
 
 ```
@@ -35,7 +41,8 @@ kinoko -p "fix the flaky test" # one shot: the answer on stdout
 kinoko --mode rpc              # JSONL over stdio, for editors and scripts
 ```
 
-From source, without building: `bun run start`.
+From source (needs [Bun](https://bun.sh)): `git clone https://github.com/LaraGuardiola/kinoko && cd kinoko && bun run start`,
+or `bun run build` for the binary in `kinoko-out/`.
 
 ## What it is
 
@@ -347,4 +354,10 @@ bun run check     # oxlint --deny-warnings && tsc --noEmit && bun test
 bun run src/tui/demo.ts   # watch the region repaint while the editor stays live
 ```
 
-`docs/PROGRESS.md` is the running log of what is done, what is deliberately not done, and why.
+`docs/PROGRESS.md` is the running log of what is done, what is deliberately not done, and why;
+`CHANGELOG.md` what each release brings. A release is a tag `vX.Y.Z` (package.json's version):
+`.github/workflows/release.yml` builds the binaries and publishes them.
+
+## License
+
+[MIT](LICENSE).

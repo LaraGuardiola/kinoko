@@ -33,6 +33,7 @@ import { parseArgs } from "./args.ts";
 import { Jobs, endNote } from "./jobs.ts";
 import { userHome } from "./home.ts";
 import { shell, userShellArgv } from "./shell.ts";
+import { VERSION } from "./version.ts";
 
 /** Text to stdout, everything else (thinking, tool activity, timing) to stderr. */
 function print(agent: Agent): void {
@@ -68,12 +69,18 @@ function print(agent: Agent): void {
   });
 }
 
+// `kinoko --version`: what is installed, and nothing else.
+if (process.argv[2] === "--version" || process.argv[2] === "-v") {
+  process.stdout.write(`kinoko ${VERSION}\n`);
+  process.exit(0);
+}
+
 // `kinoko serve ...`: the hub for the phone app, a program of its own (it runs agents as children).
 if (process.argv[2] === "serve") {
   const { runServe } = await import("./serve/main.ts");
   // Children run this same kinoko: the compiled binary itself, or bun with this file.
   const command = Bun.main.endsWith(".ts") ? [process.execPath, Bun.main] : [process.execPath];
-  await runServe(process.argv.slice(3), { command, version: "0.1.0" });
+  await runServe(process.argv.slice(3), { command, version: VERSION });
   process.exit(process.exitCode ?? 0);
 }
 
@@ -93,7 +100,6 @@ if (!prompt && mode === "print") {
 }
 
 const cwd = process.cwd();
-const VERSION = "0.1.0";
 
 // Extensions load first and need nothing but the cwd, so a slash command works without an engine.
 const ext = new Extensions();
