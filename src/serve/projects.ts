@@ -3,6 +3,7 @@
 // session, whose first line names the project's directory.
 
 import { readdir, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 
 export interface SessionSummary {
@@ -41,7 +42,10 @@ async function head(path: string): Promise<{ id?: string; cwd?: string; title: s
   return { id, cwd, title };
 }
 
-export async function projects(sessionsDir: string, limit = 20, perProject = 8): Promise<Project[]> {
+/** Throwaway places (tests, scratch folders): never offered to start in. */
+const TEMP = [...new Set([tmpdir(), "/tmp", "/var/tmp"])];
+
+export async function projects(sessionsDir: string, limit = 20, perProject = 8, throwaway = TEMP): Promise<Project[]> {
   const dirs = await readdir(sessionsDir, { withFileTypes: true }).catch(() => []);
   const found = await Promise.all(
     dirs.filter((d) => d.isDirectory()).map(async (d): Promise<Project | undefined> => {
@@ -56,5 +60,9 @@ export async function projects(sessionsDir: string, limit = 20, perProject = 8):
       return { cwd, name: basename(cwd), updated: Math.round(recent[0]?.updated ?? 0), sessions };
     }),
   );
-  return found.filter((p) => p !== undefined).toSorted((a, b) => b.updated - a.updated).slice(0, limit);
+  // Not the throwaway ones nor those since deleted.
+  const temp = throwaway.map((t) => `${t.replace(/\/$/, "")}/`);
+  const lasting = found.filter((p): p is Project => p !== undefined && !temp.some((t) => `${p.cwd}/`.startsWith(t)));
+  const there = await Promise.all(lasting.map(async (p) => (await stat(p.cwd).catch(() => undefined))?.isDirectory() === true));
+  return lasting.filter((_, i) => there[i]).toSorted((a, b) => b.updated - a.updated).slice(0, limit);
 }
