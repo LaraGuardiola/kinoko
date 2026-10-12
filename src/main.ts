@@ -8,7 +8,7 @@ import type { AgentEvent } from "./loop.ts";
 import { Session, findSession, latestSession } from "./session.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { Extensions, extensionName, loadExtensions, loadOne } from "./ext.ts";
 import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
 import type { Change } from "./catalog.ts";
@@ -31,6 +31,8 @@ import { tracker } from "./tools/tracker.ts";
 import { Rpc, serveStdio } from "./rpc.ts";
 import { parseArgs } from "./args.ts";
 import { Jobs, endNote } from "./jobs.ts";
+import { userHome } from "./home.ts";
+import { shell, userShellArgv } from "./shell.ts";
 
 /** Text to stdout, everything else (thinking, tool activity, timing) to stderr. */
 function print(agent: Agent): void {
@@ -123,10 +125,22 @@ if (config.provider === "anthropic") {
   if (info && config.contextWindow === DEFAULTS.contextWindow) config.contextWindow = info.contextWindow;
   if (info && config.maxOutputTokens === DEFAULTS.maxOutputTokens) config.maxOutputTokens = Math.min(info.maxOutput, 64_000);
 }
-if (!config.apiKey) {
-  process.stderr.write("no apiKey: set it in ~/.kinoko/config.json, ./.kinoko/config.json, or --api-key\n");
+// Nothing set up (no config.json or flag names a model, endpoint or key): the model last added in
+// /models, so what is set up from the TUI holds from then on. Nothing there either: the TUI starts
+// without a model and leads to /models; the other modes cannot, and say how.
+const setUp = config.apiKey !== "" || config.model !== DEFAULTS.model || config.baseUrl !== DEFAULTS.baseUrl;
+const lastAdded = setUp ? undefined : (await loadSavedModels()).at(-1);
+if (lastAdded) {
+  Object.assign(config, { model: lastAdded.model, baseUrl: lastAdded.baseUrl, apiKey: lastAdded.apiKey, provider: lastAdded.provider ?? "openai-compat" });
+  if (lastAdded.contextWindow) config.contextWindow = lastAdded.contextWindow;
+  if (lastAdded.label) config.label = lastAdded.label;
+}
+const noModel = !setUp && lastAdded === undefined;
+if (noModel && !tui) {
+  process.stderr.write("no model set up yet: open kinoko (no arguments) and add one in /models, or write ~/.kinoko/config.json\n");
   process.exit(1);
 }
+if (noModel) config.model = "";
 
 // Sessions are kept per directory: `--session <id>` (or a unique prefix) is looked up in this
 // directory's sessions only, `--continue` takes its newest one.
@@ -144,6 +158,9 @@ if (previous && !tui) process.stderr.write(`[resumed ${session.meta.id}]\n`);
 // date is the session's own: a session resumed the next day keeps its prompt, and the engine's cache.
 const context = await discoverContext(cwd);
 let skills = await discoverSkills(cwd); // read again by /new
+/** The OS and the bash tool's shell, for the prompt: what commands work here. */
+const systemLine = (): string => `${{ linux: "Linux", darwin: "macOS", win32: "Windows" }[process.platform as string] ?? process.platform}; the bash tool runs ${shell().name}`;
+
 // The prompt names the model, so a switch from the models menu gets its own (the engine's cache is
 // lost on a switch anyway); for one model it stays byte-stable.
 const system = (model: string): string =>
@@ -154,6 +171,7 @@ const system = (model: string): string =>
     tools: [...defaultTools(), ...ext.tools()],
     context,
     skills,
+    system: systemLine(),
   });
 
 ext.emit("session_start", { cwd: cwd, model: config.model, mode: mode });
@@ -187,7 +205,7 @@ const jobs =
   mode === "print"
     ? undefined
     : new Jobs({
-        dir: join(process.env.HOME ?? "", ".kinoko", "jobs"),
+        dir: join(userHome(), ".kinoko", "jobs"),
         onEnd: (job) => {
           const note = endNote(job, jobs?.tail(job.id, 15) ?? []);
           if (agent.state === "running") agent.steer(note);
@@ -233,24 +251,24 @@ if (previous) await restoreTracker(agent.messages, cwd);
 const startedAt = Date.now();
 
 // The profile chosen last (/profile): its thinking level and how approvals go, from the start.
-const startProfile = mode === "print" ? undefined : await activeProfile(process.env.HOME ?? "");
+const startProfile = mode === "print" ? undefined : await activeProfile(userHome());
 const startThinking = THINKING.find((p) => p.name === startProfile?.thinking);
 if (startThinking) agent.setThinking(startThinking.effort, config.thinkingBudget !== undefined ? startThinking.budget : undefined);
 if (startProfile?.approvals === "auto") agent.setAutoApprove(true);
 /** The panel's profile line: which, and whether it asks. */
 const profileLine = async (): Promise<string | undefined> => {
-  const p = await activeProfile(process.env.HOME ?? "");
+  const p = await activeProfile(userHome());
   return p ? `${p.title}${p.approvals === "auto" ? " · nothing asked" : ""}` : undefined;
 };
 
 /** The mushroom's face and the line beside it: the profile in use, and what it is about. */
 const faceOf = async (): Promise<{ face?: string; tagline?: string }> => {
-  const p = await activeProfile(process.env.HOME ?? "");
+  const p = await activeProfile(userHome());
   return p ? { face: p.name, tagline: p.description } : {};
 };
 
 /** The panel's integrations line: Telegram set up, and whether it runs. */
-const integrationsLine = async (): Promise<string> => integrationsSummary(await readIntegrations(process.env.HOME ?? ""));
+const integrationsLine = async (): Promise<string> => integrationsSummary(await readIntegrations(userHome()));
 
 if (tui) {
   // The interactive mode: raw terminal in, live region out. Everything else is the same Agent.
@@ -258,6 +276,7 @@ if (tui) {
   const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), ...(await faceOf()), integrations: await integrationsLine() });
   const app = new App({
     agent: agent,
+    noModel,
     extensionCommands: { list: () => ext.commandList(), get: (name) => ext.command(name) },
     write: (text) => term.write(text),
     model: start.model,
@@ -268,17 +287,17 @@ if (tui) {
     budgets: config.thinkingBudget !== undefined,
     models: {
       endpoint: start.baseUrl,
-      saved: [configured, ...saved],
+      saved: noModel ? saved : [configured, ...saved], // no model yet: nothing configured to offer
       connect: connect,
       discover: listModels,
       // The configured model stays first: it is always there to go back to, and cannot be removed.
-      save: async (entry) => [configured, ...(await saveModel(entry))],
-      remove: async (entry) => [configured, ...(await removeModel(entry))],
+      save: async (entry) => [...(noModel ? [] : [configured]), ...(await saveModel(entry))],
+      remove: async (entry) => [...(noModel ? [] : [configured]), ...(await removeModel(entry))],
       fixed: (entry) => entry.baseUrl === configured.baseUrl && entry.model === configured.model,
     },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
-    extensions: catalog({ kind: EXTENSIONS, home: process.env.HOME ?? "", repo: config.extensionsRepo }),
-    skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
+    extensions: catalog({ kind: EXTENSIONS, home: userHome(), repo: config.extensionsRepo }),
+    skills: catalog({ kind: SKILLS, home: userHome(), repo: config.skillsRepo }),
     apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
     // What is on now, for the panel's [Capabilities] lines (skills read again: one may be new).
     jobs,
@@ -317,8 +336,7 @@ if (tui) {
       const size = `${term.cols}x${term.rows}`;
       term.stop();
       try {
-        const shell = process.env.SHELL || "/bin/sh";
-        const child = Bun.spawn(command ? [shell, "-c", command] : [shell], { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
+        const child = Bun.spawn(userShellArgv(command), { cwd, stdin: "inherit", stdout: "inherit", stderr: "inherit" });
         return await child.exited;
       } finally {
         term.start();
@@ -341,12 +359,13 @@ if (tui) {
   term.start();
   term.write(`${ansi.clearScreen}${ansi.hide}\n`);
   app.intro(startup);
+  app.noModelHint();
   if (previous) app.replay(agent.messages, `resumed session ${session.meta.id}`);
   app.locate(); // where the region sits on the screen: the side column is drawn from its top row
   // While `kinoko serve` runs, this terminal shows up in the phone app (KINOKO_LINK=0: it does not).
   if (process.env.KINOKO_LINK !== "0") {
-    const { linkToHub } = await import("./serve/link.ts");
-    linkToHub({ agent, socket: join(process.env.HOME ?? "", ".kinoko", "serve.sock"), cwd, model: () => agent.model, session: () => session.meta.id, commands: app.commandHost() });
+    const { hubSocket, linkToHub } = await import("./serve/link.ts");
+    linkToHub({ agent, socket: hubSocket(userHome()), cwd, model: () => agent.model, session: () => session.meta.id, commands: app.commandHost() });
   }
   process.on("SIGINT", () => app.handleKey({ name: "ctrl-c" }));
   await new Promise<void>(() => undefined); // runs until the user quits
@@ -357,8 +376,8 @@ if (tui) {
   const commands: CommandHost = {
     agent,
     catalogs: {
-      extensions: catalog({ kind: EXTENSIONS, home: process.env.HOME ?? "", repo: config.extensionsRepo }),
-      skills: catalog({ kind: SKILLS, home: process.env.HOME ?? "", repo: config.skillsRepo }),
+      extensions: catalog({ kind: EXTENSIONS, home: userHome(), repo: config.extensionsRepo }),
+      skills: catalog({ kind: SKILLS, home: userHome(), repo: config.skillsRepo }),
     },
     apply: (kind, name, change) => (kind === "extensions" ? applyExtension(name, change) : applySkill(name, change)),
     newSession: async () => {
@@ -418,7 +437,7 @@ async function applyExtension(name: string, change: Change): Promise<string> {
   const before = ext.tools().map((t) => t.name).join(",");
   const load = change === "install" || change === "enable";
   let failed: string | undefined;
-  if (load) failed = await loadOne(ext, join(process.env.HOME ?? "", ".kinoko", "ext", name, "index.ts"));
+  if (load) failed = await loadOne(ext, join(userHome(), ".kinoko", "ext", name, "index.ts"));
   else ext.unload(name);
   if (failed) return failed;
   if (load) loadedExtensions.add(name);
@@ -435,8 +454,8 @@ async function applyExtension(name: string, change: Change): Promise<string> {
  * the next start lists the skill there.
  */
 async function applySkill(name: string, change: Change): Promise<string> {
-  const installed = join(process.env.HOME ?? "", ".kinoko", "skills", name, "SKILL.md");
-  const sharedPath = join(process.env.HOME ?? "", ".agents", "skills", name, "SKILL.md");
+  const installed = join(userHome(), ".kinoko", "skills", name, "SKILL.md");
+  const sharedPath = join(userHome(), ".agents", "skills", name, "SKILL.md");
   const path = (await Bun.file(installed).exists()) ? installed : sharedPath;
   if (change === "remove" || change === "disable") {
     agent.note(`The skill ${name} was ${change === "remove" ? "removed" : "switched off"}: do not use it.`);
@@ -457,7 +476,7 @@ function startupPanel(parts: { context: { path: string }[]; skills: { name: stri
     "",
     "\x1b[38;5;214m[Capabilities]\x1b[0m",
     `  Profile: ${parts.profile ? `${ANSI.cream}${parts.profile}${ANSI.reset}` : "none (/profile)"}`,
-    `  Context: ${names(parts.context.map((file) => file.path.split("/").at(-1) ?? file.path), "none")}`,
+    `  Context: ${names(parts.context.map((file) => basename(file.path)), "none")}`,
     `  Skills: ${names(parts.skills.map((skill) => skill.name), "none")}`,
     `  Extensions: ${names(parts.extensions, "none")}`,
     `  Integrations: ${parts.integrations || "none (/integrations)"}`,

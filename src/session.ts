@@ -10,6 +10,7 @@ import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { hashOf } from "./tools/tracker.ts";
 import type { Message } from "./types.ts";
+import { userHome } from "./home.ts";
 
 export interface SessionMeta {
   id: string;
@@ -39,7 +40,7 @@ export interface SessionOptions {
 }
 
 function homeOf(home?: string): string {
-  return home ?? process.env.HOME ?? "";
+  return home ?? userHome();
 }
 
 /** Directory holding this project's sessions (hashed by cwd). */

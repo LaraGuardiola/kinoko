@@ -26,7 +26,7 @@ export function atQuery(text: string, cursor: number): { start: number; query: s
 
 /** "src/tu" -> the directory part "src/" and the name prefix "tu". */
 export function splitQuery(query: string): { dir: string; prefix: string } {
-  const slash = query.lastIndexOf("/");
+  const slash = Math.max(query.lastIndexOf("/"), query.lastIndexOf("\\")); // Windows: either one
   return { dir: query.slice(0, slash + 1), prefix: query.slice(slash + 1) };
 }
 

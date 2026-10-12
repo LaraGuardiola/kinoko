@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { expandHome, folders } from "../../serve/dirs.ts";
 
 const home = mkdtempSync(join(tmpdir(), "kinoko-dirs-"));
@@ -13,7 +13,7 @@ describe("a path typed on the phone", () => {
   test("~ is this user's home", () => {
     expect(expandHome("~", home)).toBe(home);
     expect(expandHome("~/Projects", home)).toBe(join(home, "Projects"));
-    expect(expandHome("/srv/x/../y", home)).toBe("/srv/y");
+    expect(expandHome("/srv/x/../y", home)).toBe(resolve("/srv/y")); // D:\srv\y on Windows
   });
 
   test("completed with the folders that start with it, any case; files and hidden ones left out", async () => {

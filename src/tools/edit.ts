@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { isCrlf, withEndings } from "./eol";
 import { checkRead, remember } from "./tracker";
 import type { Tool, ToolContext } from "../types";
 
@@ -136,14 +137,18 @@ async function editRun(args: Record<string, unknown>, ctx: ToolContext): Promise
     const repl = e.new;
     if (typeof old !== "string" || typeof repl !== "string") return "ERROR: edit: old and new must be strings";
     if (!old) return "ERROR: edit: old must not be empty";
-    let hits = findAll(content, old);
-    let rangeAt = (h: number): Range => ({ start: h, end: h + old.length, repl });
+    // A CRLF file (Windows) takes the model's "\n" as "\r\n", in what it looks for and what it writes.
+    const crlf = isCrlf(content);
+    const want = withEndings(old, crlf);
+    const put = withEndings(repl, crlf);
+    let hits = findAll(content, want);
+    let rangeAt = (h: number): Range => ({ start: h, end: h + want.length, repl: put });
     if (hits.length === 0) {
       // Fallback: forgive smart quotes, NFKC variants and trailing whitespace.
       const n = (norm ??= normalize(content));
       const nold = normalize(old).s;
       hits = nold ? findAll(n.s, nold) : [];
-      rangeAt = (h) => ({ start: n.map[h] ?? 0, end: (n.map[h + nold.length - 1] ?? content.length) + 1, repl });
+      rangeAt = (h) => ({ start: n.map[h] ?? 0, end: (n.map[h + nold.length - 1] ?? content.length) + 1, repl: put });
     }
     if (hits.length === 0) return `ERROR: edit: old text not found in ${path}. ${closest(content, old)}`;
     if (hits.length > 1) {
@@ -171,7 +176,7 @@ async function editRun(args: Record<string, unknown>, ctx: ToolContext): Promise
 
 /** Lines around each edit as they are now on disk: the result, not the model's memory of it. */
 function changed(out: string, ranges: Range[]): string {
-  const lines = out.split("\n");
+  const lines = out.split("\n").map((l) => l.replace(/\r$/, "")); // a CRLF file reads like any other
   const rows: string[] = [];
   let shift = 0;
   let shown = 0; // last line already printed (1-based)

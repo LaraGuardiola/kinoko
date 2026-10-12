@@ -14,9 +14,10 @@ function fileIsBinary(text: string): boolean {
   return text.slice(0, 8192).includes("\u0000");
 }
 
+/** The lines as the model reads them: a CRLF file (Windows) shows no "\r" at their ends. */
 function splitLines(text: string): string[] {
-  if (text.endsWith("\n")) return text.slice(0, -1).split("\n");
-  return text.split("\n");
+  const lines = (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
+  return lines.map((line) => (line.endsWith("\r") ? line.slice(0, -1) : line));
 }
 
 async function readRun(args: Record<string, unknown>, ctx: ToolContext): Promise<string> {

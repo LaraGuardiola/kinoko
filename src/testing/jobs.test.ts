@@ -30,7 +30,7 @@ describe("background jobs", () => {
     expect(j.tail(1, 5)).toEqual(["one", "two"]);
     await Bun.sleep(20); // the log's stream flushes
     expect(await Bun.file(job.log).text()).toBe("one\ntwo\n");
-    expect(statSync(job.log).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(job.log).mode & 0o777).toBe(0o600); // no Unix modes on Windows
   });
 
   test("a failure says its exit code; stderr is kept too", async () => {

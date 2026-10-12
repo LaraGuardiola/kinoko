@@ -1,0 +1,3 @@
+# LF everywhere, Windows checkouts too: the tests read files of this repo, and kinoko itself is LF.
+* text=auto eol=lf
+*.png binary

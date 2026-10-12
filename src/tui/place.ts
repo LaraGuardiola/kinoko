@@ -2,9 +2,10 @@
 // The branch is read from .git/HEAD directly: no git process, nothing blocks the event loop.
 
 import { dirname, resolve } from "node:path";
+import { userHome } from "../home.ts";
 
 /** "~/Projects/kinoko (master)", or just the path outside a repository. */
-export async function placeLine(cwd: string, home = process.env.HOME ?? ""): Promise<string> {
+export async function placeLine(cwd: string, home = userHome()): Promise<string> {
   const inHome = home !== "" && (cwd === home || cwd.startsWith(`${home}/`));
   const path = inHome ? `~${cwd.slice(home.length)}` : cwd;
   const branch = await gitBranch(cwd);

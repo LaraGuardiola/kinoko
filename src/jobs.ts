@@ -1,11 +1,12 @@
 // Background jobs: a shell command the model starts and does not wait for (a download, a build, a
-// server). Each runs in its own process group, its output goes to a log file and a short tail kept
+// server). Each runs in its own process group (Windows: its tree is stopped together), its output goes to a log file and a short tail kept
 // in memory, and when it ends the agent is told (main wakes it, or tells it mid-run). Esc does not
 // stop a job: the jobs page does (Del twice), and so does quitting kinoko.
 
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import type { FileSink } from "bun";
 import { join } from "node:path";
+import { killTree, shell } from "./shell.ts";
 
 export type JobState = "running" | "done" | "failed" | "killed";
 
@@ -69,7 +70,8 @@ export class Jobs {
     // Its own process group (detached): stopping it stops what it started too.
     let child;
     try {
-      child = Bun.spawn(["sh", "-c", command], { detached: true, cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      const sh = shell();
+      child = Bun.spawn(sh.argv(command), { detached: sh.detached, cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     } catch (e) {
       take(`\n[could not start: ${e instanceof Error ? e.message : String(e)}]\n`);
       void finish(null);
@@ -83,9 +85,12 @@ export class Jobs {
         if (text !== "") take(text);
       }
     };
-    // Ended once it exited and its output is all read (a signal leaves no exit code).
+    // Ended once it exited and its output is all read (a signal leaves no exit code). A stopped job
+    // waits a second at most for its pipes: on Windows something it started can hold them open.
     const proc = child;
-    void Promise.all([proc.exited, read(proc.stdout), read(proc.stderr)])
+    const output = Promise.all([read(proc.stdout), read(proc.stderr)]);
+    const drained = proc.exited.then(() => (job.state === "killed" ? Promise.race([output, Bun.sleep(1_000)]) : output));
+    void Promise.all([proc.exited, drained])
       .catch(() => undefined)
       .then(() => finish(proc.exitCode));
     this.#changed();
@@ -111,11 +116,7 @@ export class Jobs {
     const entry = this.#jobs.find((e) => e.job.id === id);
     if (entry === undefined || entry.job.state !== "running") return false;
     entry.job.state = "killed";
-    try {
-      process.kill(-entry.job.pid, "SIGTERM");
-    } catch {
-      // gone already
-    }
+    killTree(entry.job.pid, "SIGTERM");
     this.#changed();
     return true;
   }

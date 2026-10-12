@@ -216,7 +216,7 @@ export function catalog(opts: { kind: Kind; home: string; repo?: string; run?: R
       if (old !== undefined) await rm(old, { force: true }); // an older single-file copy would load twice
       await cp(join(registry, name), folder, {
         recursive: true,
-        filter: (src) => !src.endsWith(".test.ts") && !src.split("/").includes("node_modules"),
+        filter: (src) => !src.endsWith(".test.ts") && !src.split(/[\\/]/).includes("node_modules"),
       });
       const deps = (await json(join(folder, "package.json"))).dependencies;
       if (typeof deps === "object" && deps !== null && Object.keys(deps).length > 0) {

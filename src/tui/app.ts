@@ -57,12 +57,22 @@ import { jobsLabel, openJobs } from "./jobs-view.ts";
 import { applyProfile, currentProfile, readProfiles } from "../profiles.ts";
 import type { Jobs } from "../jobs.ts";
 import type { FilesState, IntegrationsHost } from "./integrations-menu.ts";
-import { hubRunning } from "../serve/link.ts";
+import { hubRunning, hubSocket } from "../serve/link.ts";
+import { userHome } from "../home.ts";
 
 
+
+/** What a first run without any model says. */
+const NO_MODEL = [
+  "No model set up yet. Open /models and pick \"+ add provider\":",
+  "  a local server (llama.cpp, Ollama, LM Studio: its URL, no key), or an API (its URL and key).",
+  "kinoko lists what it serves; the one you pick is kept for the next start.",
+].join("\n");
 
 export interface AppOptions {
   agent: Agent;
+  /** Started with no model set up anywhere: the status says so, and a prompt leads to /models. */
+  noModel?: boolean;
   /** Extensions' slash commands: in the menu, run by `/name args`. */
   extensionCommands?: { list: () => Array<{ name: string; description: string }>; get: (name: string) => ((args: string) => string | Promise<string>) | undefined };
   write: (text: string) => void;
@@ -149,6 +159,7 @@ export class App {
   #capabilities: AppOptions["capabilities"];
   #jobs: Jobs | undefined;
   #extensionCommands: AppOptions["extensionCommands"];
+  #noModel = false;
   /** The block with the [Capabilities] lines as printed (the startup panel, or a fresh copy). */
   #panel: { text: string; gap: boolean } | undefined;
   #panelStale = false; // changed while scrolled off screen: printed again when the menu closes
@@ -222,6 +233,7 @@ export class App {
     this.#capabilities = opts.capabilities;
     this.#jobs = opts.jobs;
     this.#extensionCommands = opts.extensionCommands;
+    this.#noModel = opts.noModel === true;
     this.#jobs?.on(() => this.render()); // the label counts them
     this.#newSessionOf = opts.newSession;
     this.#resumeOf = opts.resumeSession;
@@ -364,7 +376,7 @@ export class App {
   get statusLine(): string {
     return statusLine({
       running: this.#running,
-      model: this.#model,
+      model: this.#noModel ? "no model yet" : this.#model,
       tokens: this.#tokens,
       contextWindow: this.#window,
       cost: this.#cost,
@@ -461,6 +473,12 @@ export class App {
     if (text.startsWith("/")) {
       this.#editor.clear();
       if (!(await this.command(text))) this.#print("system", `unknown command ${text}: try /help`);
+      this.render();
+      return;
+    }
+    // No model yet: what was typed stays, and /models opens to set one up.
+    if (this.#noModel) {
+      this.#openModels();
       this.render();
       return;
     }
@@ -933,6 +951,12 @@ export class App {
     }
   }
 
+  /** Started with no model: the panel is followed by how to set one up. */
+  noModelHint(): void {
+    if (this.#noModel) this.#print("system", NO_MODEL);
+    this.render();
+  }
+
   /** An extension's command: what it answers, printed here; one that throws says so. */
   async #extensionCommand(name: string, args: string): Promise<boolean> {
     const run = this.#extensionCommands?.get(name);
@@ -1117,7 +1141,7 @@ export class App {
 
   /** The profiles, the one in use marked; Enter switches to one (installs, switches, thinking, asks). */
   #openProfiles(): void {
-    const home = this.#integrations?.home ?? process.env.HOME ?? "";
+    const home = this.#integrations?.home ?? userHome();
     const loading: ListPage = { kind: "list", title: "Profiles", items: [], empty: "reading…", pick: () => undefined, stay: true };
     this.#menu.open(loading);
     void Promise.all([readProfiles(home), currentProfile(home)]).then(([all, current]) => {
@@ -1183,7 +1207,7 @@ export class App {
   }
 
   #integrationsHost(): IntegrationsHost {
-    const home = this.#integrations?.home ?? process.env.HOME ?? "";
+    const home = this.#integrations?.home ?? userHome();
     return {
       home,
       apiBase: this.#integrations?.apiBase,
@@ -1200,7 +1224,7 @@ export class App {
         this.render();
       },
       changed: () => void this.#refreshCapabilities(),
-      hubRunning: this.#integrations?.hubRunning ?? (() => hubRunning(`${home}/.kinoko/serve.sock`)),
+      hubRunning: this.#integrations?.hubRunning ?? (() => hubRunning(hubSocket(home))),
       filesExtension: this.#integrations?.filesExtension ?? this.#telegramExtension(),
     };
   }
@@ -1516,6 +1540,7 @@ export class App {
 
   /** Switches to a model, and to its endpoint when it is served elsewhere; then its window. */
   #useModel(entry: SavedModel): void {
+    this.#noModel = false;
     if (entry.baseUrl !== this.#endpoint && this.#host) {
       this.#agent.setProvider(this.#host.connect(entry));
       this.#endpoint = entry.baseUrl;

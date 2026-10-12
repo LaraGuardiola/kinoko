@@ -77,7 +77,7 @@ describe("saved models", () => {
     const all = await saveModel({ model: "a", baseUrl: "http://x/v1", apiKey: "k2", contextWindow: 9000 }, HOME);
     expect(all.map((m) => [m.model, m.apiKey])).toEqual([["b", "k1"], ["a", "k2"]]);
     expect(await loadSavedModels(HOME)).toEqual(all);
-    expect(statSync(`${HOME}/.kinoko/models.json`).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(`${HOME}/.kinoko/models.json`).mode & 0o777).toBe(0o600); // no Unix modes on Windows
     expect(await loadSavedModels(`${HOME}/nowhere`)).toEqual([]);
     // Removing takes out only that endpoint's model.
     expect((await removeModel({ model: "a", baseUrl: "http://x/v1", apiKey: "" }, HOME)).map((m) => m.model)).toEqual(["b"]);

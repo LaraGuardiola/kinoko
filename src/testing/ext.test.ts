@@ -1,6 +1,6 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Extensions, extensionName, loadExtensions, loadOne } from "../ext.ts";
 import { Agent } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
@@ -40,32 +40,32 @@ export default function (): void {
 
 describe("extension loader", () => {
   test("1. load order: user dir first, then project dir, name-sorted inside each", async () => {
-    const home = `${ROOT}/order-home`;
-    const cwd = `${ROOT}/order-project`;
-    rmSync(`${ROOT}/order-home`, { recursive: true, force: true });
-    writeOrderProbe(`${home}/.kinoko/ext`, "z-second.ts", "user");
-    writeOrderProbe(`${home}/.kinoko/ext`, "a-first.ts", "user");
-    writeOrderProbe(`${cwd}/.kinoko/ext`, "m-project.ts", "project");
-    writeFileSync(`${cwd}/.kinoko/ext/notes.md`, "not an extension");
+    const home = join(ROOT, "order-home");
+    const cwd = join(ROOT, "order-project");
+    rmSync(join(ROOT, "order-home"), { recursive: true, force: true });
+    writeOrderProbe(join(home, ".kinoko/ext"), "z-second.ts", "user");
+    writeOrderProbe(join(home, ".kinoko/ext"), "a-first.ts", "user");
+    writeOrderProbe(join(cwd, ".kinoko/ext"), "m-project.ts", "project");
+    writeFileSync(join(cwd, ".kinoko/ext/notes.md"), "not an extension");
 
     const { ext } = extBus();
     const loaded = await loadExtensions(ext, { cwd: cwd, home: home });
-    expect(loaded.map((p) => p.slice(p.lastIndexOf("/") + 1))).toEqual([
+    expect(loaded.map((p) => basename(p))).toEqual([
       "a-first.ts",
       "z-second.ts",
       "m-project.ts",
     ]);
-    const log = (await Bun.file(`${home}/.kinoko/ext/order.log`).text()).trim().split("\n");
+    const log = (await Bun.file(join(home, ".kinoko/ext/order.log")).text()).trim().split("\n");
     expect(log).toEqual(["user:a-first.ts", "user:z-second.ts"]);
   });
 
   test("1a. a folder with an index.ts is an extension, in name order with the files; its name is the folder's", async () => {
-    const home = `${ROOT}/folder-home`;
+    const home = join(ROOT, "folder-home");
     rmSync(home, { recursive: true, force: true });
-    writeOrderProbe(`${home}/.kinoko/ext`, "b-file.ts", "user");
-    mkdirSync(`${home}/.kinoko/ext/a-folder`, { recursive: true });
-    writeFileSync(`${home}/.kinoko/ext/a-folder/index.ts`, "export default function (k) { k.registerCommand('folder', () => 'from a folder'); }\n");
-    mkdirSync(`${home}/.kinoko/ext/no-index`, { recursive: true }); // a folder without index.ts is skipped
+    writeOrderProbe(join(home, ".kinoko/ext"), "b-file.ts", "user");
+    mkdirSync(join(home, ".kinoko/ext/a-folder"), { recursive: true });
+    writeFileSync(join(home, ".kinoko/ext/a-folder/index.ts"), "export default function (k) { k.registerCommand('folder', () => 'from a folder'); }\n");
+    mkdirSync(join(home, ".kinoko/ext/no-index"), { recursive: true }); // a folder without index.ts is skipped
     const { ext } = extBus();
     const loaded = await loadExtensions(ext, { cwd: home, home: home });
     expect(loaded.map(extensionName)).toEqual(["a-folder", "b-file"]);
@@ -73,12 +73,12 @@ describe("extension loader", () => {
   });
 
   test("1c. live: an extension loaded late starts like the others, reloads from its updated file, unloads cleanly", async () => {
-    const dir = `${ROOT}/live/a-live`;
-    rmSync(`${ROOT}/live`, { recursive: true, force: true });
+    const dir = join(ROOT, "live/a-live");
+    rmSync(join(ROOT, "live"), { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     const version = (v: string): void =>
       writeFileSync(
-        `${dir}/index.ts`,
+        join(dir, "index.ts"),
         `export default function (k) {
   k.on("session_start", (info) => k.registerCommand("mode", () => info.mode + " ${v}"));
   k.registerTool({ name: "tool_${v}", description: "", schema: {}, run: async () => "" });
@@ -92,10 +92,10 @@ describe("extension loader", () => {
     }); // someone else's handler: never taken back
     ext.emit("session_start", { cwd: "/p", model: "m", mode: "tui" }); // the session started before it
     version("v1");
-    expect(await loadOne(ext, `${dir}/index.ts`)).toBeUndefined();
+    expect(await loadOne(ext, join(dir, "index.ts"))).toBeUndefined();
     expect(await ext.command("mode")?.("")).toBe("tui v1"); // session_start replayed to it alone
     version("v2");
-    expect(await loadOne(ext, `${dir}/index.ts`)).toBeUndefined();
+    expect(await loadOne(ext, join(dir, "index.ts"))).toBeUndefined();
     expect(ext.tools().map((t) => t.name)).toEqual(["tool_v2"]); // the old copy is gone
     const result = { name: "read", output: "x", signal: new AbortController().signal };
     ext.emit("tool_result", result);
@@ -106,30 +106,30 @@ describe("extension loader", () => {
     expect(ext.renderer("demo")).toBeUndefined();
     expect(ext.command("mode")).toBeUndefined();
     expect(ext.unload("a-live")).toBe(false);
-    writeFileSync(`${dir}/index.ts`, "export default 1;\n");
-    expect(await loadOne(ext, `${dir}/index.ts`)).toBe("a-live did not load (see the log)");
+    writeFileSync(join(dir, "index.ts"), "export default 1;\n");
+    expect(await loadOne(ext, join(dir, "index.ts"))).toBe("a-live did not load (see the log)");
   });
 
   test("1b. run from $HOME, the shared ext dir is loaded once", async () => {
-    const home = `${ROOT}/same-home`;
+    const home = join(ROOT, "same-home");
     rmSync(home, { recursive: true, force: true });
-    writeOrderProbe(`${home}/.kinoko/ext`, "web.ts", "user");
+    writeOrderProbe(join(home, ".kinoko/ext"), "web.ts", "user");
     const { ext } = extBus();
     const loaded = await loadExtensions(ext, { cwd: home, home: home });
-    expect(loaded.map((p) => p.slice(p.lastIndexOf("/") + 1))).toEqual(["web.ts"]);
+    expect(loaded.map((p) => basename(p))).toEqual(["web.ts"]);
   });
 
   test("2. a broken extension is skipped, the good ones still load", async () => {
-    const home = `${ROOT}/broken-home`;
-    const cwd = `${ROOT}/broken-project`;
+    const home = join(ROOT, "broken-home");
+    const cwd = join(ROOT, "broken-project");
     const { ext, log } = extBus();
-    writeExt(`${home}/.kinoko/ext`, "1-syntax.ts", "export default function ( { this is not typescript");
-    writeExt(`${home}/.kinoko/ext`, "2-no-default.ts", "export const notDefault = 1;");
-    writeExt(`${cwd}/.kinoko/ext`, "3-throws.ts", "export default function (): void { throw new Error('boom'); }");
-    writeExt(`${cwd}/.kinoko/ext`, "4-fine.ts", "export default function (k: { log: (m: string) => void }): void { k.log('fine loaded'); }");
+    writeExt(join(home, ".kinoko/ext"), "1-syntax.ts", "export default function ( { this is not typescript");
+    writeExt(join(home, ".kinoko/ext"), "2-no-default.ts", "export const notDefault = 1;");
+    writeExt(join(cwd, ".kinoko/ext"), "3-throws.ts", "export default function (): void { throw new Error('boom'); }");
+    writeExt(join(cwd, ".kinoko/ext"), "4-fine.ts", "export default function (k: { log: (m: string) => void }): void { k.log('fine loaded'); }");
 
     const loaded = await loadExtensions(ext, { cwd: cwd, home: home });
-    expect(loaded.map((p) => p.slice(p.lastIndexOf("/") + 1))).toEqual(["4-fine.ts"]);
+    expect(loaded.map((p) => basename(p))).toEqual(["4-fine.ts"]);
     expect(log.some((l) => l.includes("failed to load") && l.includes("1-syntax.ts"))).toBe(true);
     expect(log.some((l) => l.includes("no default export") && l.includes("2-no-default.ts"))).toBe(true);
     expect(log.some((l) => l.includes("boom"))).toBe(true);
@@ -269,12 +269,12 @@ describe("extension events", () => {
 /** Installs the example files the way a user would, and loads them. */
 async function install(files: string[], tag: string): Promise<Extensions> {
   const home = `${ROOT}/${tag}`;
-  const dir = `${home}/.kinoko/ext`;
+  const dir = join(home, ".kinoko/ext");
   rmSync(home, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
   for (const file of files) copyFileSync(`${EXAMPLES}/${file}`, join(dir, file));
   const { ext } = extBus();
-  const loaded = await loadExtensions(ext, { cwd: `${ROOT}/no-such-project`, home: home });
+  const loaded = await loadExtensions(ext, { cwd: join(ROOT, "no-such-project"), home: home });
   expect(loaded).toHaveLength(files.length);
   return ext;
 }

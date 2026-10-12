@@ -1,4 +1,5 @@
 import { mkdir, writeFile } from "node:fs/promises";
+import { userHome } from "./home.ts";
 
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
 
@@ -115,7 +116,7 @@ function fromFlag(key: string, value: string): Partial<Config> {
 /** Defaults < ~/.kinoko/config.json < ./.kinoko/config.json < CLI flags. */
 export async function loadConfig(flags: Record<string, string | undefined> = {}): Promise<Config> {
   const layers: Array<Partial<Config>> = [DEFAULTS];
-  const home = process.env.HOME ?? "";
+  const home = userHome();
   if (home) layers.push(await readJson(`${home}/.kinoko/config.json`));
   layers.push(await readJson(`${process.cwd()}/.kinoko/config.json`));
   for (const [k, v] of Object.entries(flags)) {
@@ -149,7 +150,7 @@ function isSaved(value: unknown): value is SavedModel {
   return typeof m?.model === "string" && typeof m.baseUrl === "string" && typeof m.apiKey === "string";
 }
 
-export async function loadSavedModels(home = process.env.HOME ?? ""): Promise<SavedModel[]> {
+export async function loadSavedModels(home = userHome()): Promise<SavedModel[]> {
   try {
     const parsed: unknown = await Bun.file(modelsFile(home)).json();
     return Array.isArray(parsed) ? parsed.filter(isSaved) : [];
@@ -167,12 +168,12 @@ async function writeSaved(all: SavedModel[], home: string): Promise<SavedModel[]
 }
 
 /** Adds (or replaces: same endpoint and model) one entry, and returns the list as now saved. */
-export async function saveModel(entry: SavedModel, home = process.env.HOME ?? ""): Promise<SavedModel[]> {
+export async function saveModel(entry: SavedModel, home = userHome()): Promise<SavedModel[]> {
   return writeSaved([...(await loadSavedModels(home)).filter((m) => !sameModel(m, entry)), entry], home);
 }
 
 /** Removes the entry with this endpoint and model, and returns the list as now saved. */
-export async function removeModel(entry: SavedModel, home = process.env.HOME ?? ""): Promise<SavedModel[]> {
+export async function removeModel(entry: SavedModel, home = userHome()): Promise<SavedModel[]> {
   return writeSaved((await loadSavedModels(home)).filter((m) => !sameModel(m, entry)), home);
 }
 

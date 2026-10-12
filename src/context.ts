@@ -4,6 +4,7 @@
 import { readdirSync, realpathSync } from "node:fs";
 import { basename, dirname, join, parse, resolve } from "node:path";
 import { readDisabled } from "./disabled.ts";
+import { userHome } from "./home.ts";
 
 export interface ContextFile {
   path: string;
@@ -43,7 +44,7 @@ async function instructionOf(dir: string): Promise<ContextFile | undefined> {
 
 /** Skills from the project first, then the user's; bodies are loaded with the read tool. */
 export async function discoverSkills(cwd: string, home?: string): Promise<SkillEntry[]> {
-  const base = home ?? process.env.HOME ?? "";
+  const base = home ?? userHome();
   // The project's, the user's shared ones, then those installed from /skills (~/.kinoko/skills).
   const roots = [join(cwd, SKILLS_REL), ...(base ? [join(base, SKILLS_REL), join(base, ".kinoko", "skills")] : [])];
   const paths = uniqueDirs(roots).flatMap(skillPathsOf);

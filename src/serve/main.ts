@@ -8,7 +8,6 @@
 // --lan-port with its own certificate (the app pins it; `--no-lan` turns that off).
 
 import { unlink } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { renderMarkdown } from "../tui/markdown.ts";
 import { Devices } from "./devices.ts";
@@ -20,11 +19,13 @@ import { serve } from "./server.ts";
 import { Bridge } from "./bridge.ts";
 import { projects } from "./projects.ts";
 import { expose, tailnet, unexpose } from "./tailscale.ts";
+import { userHome } from "../home.ts";
+import { hubSocket } from "./link.ts";
 
-const HOME = join(process.env.HOME ?? homedir(), ".kinoko");
+const HOME = join(userHome(), ".kinoko");
 const STATE = join(HOME, "serve-state.json");
 /** Where kinoko TUIs link themselves to the hub (link.ts). */
-export const SOCKET = join(HOME, "serve.sock");
+export const SOCKET = hubSocket(userHome());
 
 interface State {
   pid: number;
@@ -120,7 +121,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const lanIdentity = lanUrls.length > 0 ? await identity(join(HOME, "tls")) : undefined;
   // The extensions, loaded only for their renderers (```mermaid…): the phone gets blocks drawn as
   // the TUI draws them, with what is switched on now.
-  const renderers = fenceRenderers(process.env.HOME ?? homedir());
+  const renderers = fenceRenderers(userHome());
   await renderers.fresh();
   const render = async (text: string, width: number): Promise<string[]> => {
     await renderers.fresh();
@@ -128,11 +129,11 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   };
   // The profile in use, looked at every few seconds (a TUI or the phone may switch it): the phone
   // draws that profile's mushroom.
-  let profile = await currentProfile(process.env.HOME ?? homedir());
+  let profile = await currentProfile(userHome());
   const hub = serve({ profile: () => profile, port, ...(lanIdentity ? { lan: { port: lanPort, identity: lanIdentity, urls: lanUrls } } : {}), devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
 
   const profileWatch = setInterval(() => {
-    void currentProfile(process.env.HOME ?? homedir()).then((now) => {
+    void currentProfile(userHome()).then((now) => {
       if (now === profile) return;
       profile = now;
       hub.announce({ type: "profile", profile: now ?? null });
@@ -142,7 +143,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
 
   // Telegram (set up from the TUI's /integrations): it answers while the hub runs.
   const bridgeStop = new AbortController();
-  const bridge = new Bridge({ home: process.env.HOME ?? homedir(), agents: hub.agents, projects: () => projects(join(HOME, "sessions")), log: (line) => out(dim(`${time()} ${line}`)) });
+  const bridge = new Bridge({ home: userHome(), agents: hub.agents, projects: () => projects(join(HOME, "sessions")), log: (line) => out(dim(`${time()} ${line}`)) });
   hub.watch((agent, event) => bridge.event(agent, event));
   void bridge.run(bridgeStop.signal);
 

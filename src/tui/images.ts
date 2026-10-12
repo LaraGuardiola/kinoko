@@ -3,6 +3,7 @@
 // which images go with the message. Everything here is async: a stuck clipboard tool never blocks.
 
 import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import type { Image } from "../types.ts";
 
 /** Over this the APIs refuse the image (Anthropic: 5 MB of base64, which is 3.75 MB of bytes). */
@@ -75,15 +76,16 @@ export function imagePathOf(paste: string): string | undefined {
   let text = paste.trim();
   if (text === "" || text.includes("\n")) return undefined;
   if (/^(['"]).*\1$/.test(text)) text = text.slice(1, -1);
-  else text = text.replace(/\\(.)/g, "$1");
-  if (text.startsWith("file://")) text = decodeURIComponent(text.slice("file://".length));
+  // A Windows path (C:\…, \\server\…) keeps its backslashes: they are separators, not escapes.
+  else if (!/^([A-Za-z]:[\\/]|\\\\)/.test(text)) text = text.replace(/\\(.)/g, "$1");
+  if (text.startsWith("file://")) text = decodeURIComponent(text.slice("file://".length)).replace(/^\/([A-Za-z]:)/, "$1"); // file:///C:/… on Windows
   if (text.startsWith("~/")) text = `${homedir()}${text.slice(1)}`;
   return EXTENSIONS.test(text) ? text : undefined;
 }
 
 /** Reads an image file; undefined when the path is not a file, so the paste stays plain text. */
 export async function imageFromFile(path: string, cwd: string): Promise<Image | string | undefined> {
-  const file = Bun.file(path.startsWith("/") ? path : `${cwd}/${path}`);
+  const file = Bun.file(isAbsolute(path) ? path : join(cwd, path));
   if (!(await file.exists())) return undefined;
   if (file.size > MAX_IMAGE_BYTES) return tooLarge(file.size);
   return toImage(new Uint8Array(await file.arrayBuffer()));
