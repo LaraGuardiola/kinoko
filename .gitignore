@@ -10,3 +10,4 @@ pid.txt
 
 # dependencies (bun install restores them)
 node_modules/
+rel/

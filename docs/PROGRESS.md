@@ -883,3 +883,14 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Reviewed every extension: generic ones stay unmarked; cliamp too (cliamp itself runs on Windows). vision's screenshot is not registered on Windows (it captures on Wayland, X11 and macOS); notify's desktop notification only where notify-send or osascript is (ntfy anywhere). The bluetooth skill says `platforms: linux`. READMEs, AGENTS.md and the write-kinoko-extension skill say how to name systems.
 - Tests: names and labels, a loader skipping another system's extension, the index skipping another system's skill, the catalog marking and refusing; all written against "a system that is not this one", so they pass on all three.
 - Not done: a Windows desktop notification (PowerShell toast); vision's screenshot on Windows.
+
+## release/v0.2.0: the first public release (branch release/v0.2.0)
+- Decided with the user: curl only for now (npm and bun later), Windows a must, MIT.
+- One version: package.json (0.2.0), read by src/version.ts (the binary carries it); `kinoko --version` (-v).
+- CHANGELOG.md (0.2.0: what the first public release brings), LICENSE (MIT), package.json license; the loose notes at the root moved to docs/notes/.
+- install.sh (Linux, macOS: the system's binary from GitHub Releases, checked against SHA256SUMS, into ~/.local/bin, the PATH line added once to the shell's startup file unless KINOKO_NO_MODIFY_PATH=1; KINOKO_VERSION, KINOKO_INSTALL_DIR, KINOKO_DOWNLOAD_URL) and install.ps1 (Windows: into %LOCALAPPDATA%\kinoko\bin, the user PATH; a running kinoko.exe is said, not overwritten).
+- .github/workflows/release.yml: a tag v* checks, verifies it is package.json's version, builds linux-x64/arm64 and windows-x64 on Linux and darwin-x64/arm64 on macOS (codesigned ad hoc: Apple Silicon needs it), then publishes them with SHA256SUMS and the CHANGELOG's section as notes.
+- CI (check.yml) now runs each installer end to end on its system: the binary built and served locally as a release would be, installed, then `kinoko --version`.
+- Tested here: install.sh against a local server (off the PATH with bash and fish, run twice, already on the PATH, a wrong checksum refused).
+- README: the one-line install per system, the first run through /models, the license.
+- Not done: npm/bun packages; FUNDING.yml (needs the user's links); the APK (signing undecided).
