@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { FilePicker, atQuery, narrow, splitQuery } from "../../tui/files.ts";
 import type { Entry } from "../../tui/files.ts";
+import { resolve } from "node:path";
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 5));
 
@@ -28,9 +29,10 @@ describe("@ file references", () => {
 
   test("the picker lists the typed directory, completes a directory in place and a file with a space", async () => {
     const asked: string[] = [];
+    // Keyed by the resolved path: "/p" is "D:\\p" on Windows.
     const tree: Record<string, Entry[]> = {
-      "/p": [{ name: "src", dir: true }, { name: "README.md", dir: false }],
-      "/p/src": [{ name: "app.ts", dir: false }],
+      [resolve("/p")]: [{ name: "src", dir: true }, { name: "README.md", dir: false }],
+      [resolve("/p/src")]: [{ name: "app.ts", dir: false }],
     };
     let changes = 0;
     const picker = new FilePicker("/p", () => changes++, async (dir) => (asked.push(dir), tree[dir] ?? []));
@@ -47,7 +49,7 @@ describe("@ file references", () => {
     expect(picker.accept()).toEqual({ start: 4, end: 9, text: "@src/app.ts " });
     picker.sync("see @src/app.ts ", 16);
     expect(picker.open).toBe(false);
-    expect(asked).toEqual(["/p", "/p/src"]); // each directory read once
+    expect(asked).toEqual([resolve("/p"), resolve("/p/src")]); // each directory read once
     // Esc closes it for this word; a new @ opens it again, reading afresh.
     picker.sync("@", 1);
     picker.dismiss();
@@ -58,6 +60,6 @@ describe("@ file references", () => {
     picker.sync("@", 1);
     expect(picker.open).toBe(true);
     await tick();
-    expect(asked).toEqual(["/p", "/p/src", "/p", "/p"]);
+    expect(asked).toEqual([resolve("/p"), resolve("/p/src"), resolve("/p"), resolve("/p")]);
   });
 });

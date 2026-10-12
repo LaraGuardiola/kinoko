@@ -2,6 +2,7 @@ import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { searchTool as tool } from "../../tools/search";
 import { estimateTokens } from "../../tools/budget";
+import { join } from "node:path";
 
 /** search answers in text, never with images. */
 const searchTool = { ...tool, run: async (args: unknown, c: { signal: AbortSignal; cwd: string }): Promise<string> => String(await tool.run(args, c)) };
@@ -17,17 +18,17 @@ function fixture(tag: string, files: number, lines: number): string {
   const dir = `${ROOT}/${tag}`;
   rmSync(dir, { recursive: true, force: true });
   mkdirSync(dir, { recursive: true });
-  writeFileSync(`${dir}/.gitignore`, "skip/\n");
-  mkdirSync(`${dir}/.git`, { recursive: true });
-  mkdirSync(`${dir}/skip`, { recursive: true });
-  mkdirSync(`${dir}/sub`, { recursive: true });
-  writeFileSync(`${dir}/skip/hidden.txt`, "needle hidden\n");
+  writeFileSync(join(dir, ".gitignore"), "skip/\n");
+  mkdirSync(join(dir, ".git"), { recursive: true });
+  mkdirSync(join(dir, "skip"), { recursive: true });
+  mkdirSync(join(dir, "sub"), { recursive: true });
+  writeFileSync(join(dir, "skip/hidden.txt"), "needle hidden\n");
   for (let i = 0; i < files; i = i + 1) {
     const body: string[] = [];
     for (let l = 0; l < lines; l = l + 1) {
       body.push(l % 4 === 0 ? `needle ${l} here` : `filler ${l}`);
     }
-    writeFileSync(`${dir}/sub/f${String(i).padStart(3, "0")}.txt`, `${body.join("\n")}\n`);
+    writeFileSync(`${join(dir, "sub/f")}${String(i).padStart(3, "0")}.txt`, `${body.join("\n")}\n`);
   }
   return dir;
 }
@@ -132,7 +133,7 @@ describe("search tool", () => {
     expect(rg).toBe(bun);
     expect(rg).toContain("f000.txt");
     // A path outside the cwd is honoured too (the old code glued it onto the cwd).
-    const [parent] = await bothBackends({ pattern: "needle", path: `${dir}/sub` }, dir);
+    const [parent] = await bothBackends({ pattern: "needle", path: join(dir, "sub") }, dir);
     expect(parent).toContain("f000.txt");
   });
 

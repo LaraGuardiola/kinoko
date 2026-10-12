@@ -27,8 +27,8 @@ describe("the hub's own certificate", () => {
     const first = await identity(join(dir, "tls"));
     const again = await identity(join(dir, "tls"));
     expect(again).toEqual(first);
-    expect(statSync(join(dir, "tls", "key.pem")).mode & 0o777).toBe(0o600);
-    expect(statSync(join(dir, "tls")).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") expect(statSync(join(dir, "tls", "key.pem")).mode & 0o777).toBe(0o600); // no Unix modes on Windows
+    if (process.platform !== "win32") expect(statSync(join(dir, "tls")).mode & 0o777).toBe(0o700); // no Unix modes on Windows
   });
 
   test("the local network's addresses: private IPv4, not containers, VPNs or loopback", () => {

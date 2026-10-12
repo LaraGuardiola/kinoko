@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { ImageRegistry, MAX_IMAGE_BYTES, clipboardImage, imageFromFile, imagePathOf, sniffMime, toImage } from "../../tui/images.ts";
 import type { Run } from "../../tui/images.ts";
+import { join } from "node:path";
 
 const ROOT = `${process.cwd()}/.tmp-images-test-${process.pid}`;
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
@@ -46,12 +47,19 @@ describe("pasted images", () => {
     expect(imagePathOf("notes.md")).toBeUndefined();
   });
 
+  test("Windows: a dropped path keeps its backslashes; file:///C:/ becomes C:/", () => {
+    expect(imagePathOf("C:\\Users\\me\\Pictures\\shot.png")).toBe("C:\\Users\\me\\Pictures\\shot.png");
+    expect(imagePathOf('"C:\\Users\\me\\my shot.png"')).toBe("C:\\Users\\me\\my shot.png");
+    expect(imagePathOf("\\\\nas\\photos\\a.jpg")).toBe("\\\\nas\\photos\\a.jpg");
+    expect(imagePathOf("file:///C:/Users/me/a%20b.png")).toBe("C:/Users/me/a b.png");
+  });
+
   test("files: read when they exist (relative to cwd), undefined when not", async () => {
     mkdirSync(ROOT, { recursive: true });
-    writeFileSync(`${ROOT}/shot.png`, PNG);
-    writeFileSync(`${ROOT}/fake.png`, "text");
+    writeFileSync(join(ROOT, "shot.png"), PNG);
+    writeFileSync(join(ROOT, "fake.png"), "text");
     expect(await imageFromFile("shot.png", ROOT)).toEqual({ mime: "image/png", data: Buffer.from(PNG).toString("base64") });
-    expect(await imageFromFile(`${ROOT}/fake.png`, "/")).toContain("not a PNG");
+    expect(await imageFromFile(join(ROOT, "fake.png"), "/")).toContain("not a PNG");
     expect(await imageFromFile("missing.png", ROOT)).toBeUndefined();
   });
 

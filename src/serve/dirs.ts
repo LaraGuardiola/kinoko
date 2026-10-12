@@ -8,16 +8,16 @@ import { dirname, join, resolve } from "node:path";
 /** `~` and `~/x` as this user's home; anything else made absolute. */
 export function expandHome(path: string, home = homedir()): string {
   if (path === "~") return home;
-  return resolve(path.startsWith("~/") ? join(home, path.slice(2)) : path);
+  return resolve(/^~[\\/]/.test(path) ? join(home, path.slice(2)) : path);
 }
 
 /** The folders that complete `typed`: inside it when it ends in "/", else its siblings starting with
  *  its last part (any case). Hidden ones only when that part starts with ".". */
 export async function folders(typed: string, home = homedir(), limit = 50): Promise<string[]> {
   const full = expandHome(typed.trim() || "~", home);
-  const inside = typed.endsWith("/") || typed.trim() === "~" || typed.trim() === "";
+  const inside = /[\\/]$/.test(typed) || typed.trim() === "~" || typed.trim() === "";
   const parent = inside ? full : dirname(full);
-  const prefix = inside ? "" : full.slice(parent.length).replace(/^\//, "").toLowerCase();
+  const prefix = inside ? "" : full.slice(parent.length).replace(/^[\\/]/, "").toLowerCase(); // either separator
   const entries = await readdir(parent, { withFileTypes: true }).catch(() => []);
   return entries
     .filter((e) => (e.isDirectory() || e.isSymbolicLink()) && e.name.toLowerCase().startsWith(prefix) && (prefix.startsWith(".") || !e.name.startsWith(".")))

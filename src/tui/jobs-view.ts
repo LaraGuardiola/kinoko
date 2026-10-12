@@ -7,6 +7,7 @@ import type { Job, Jobs } from "../jobs.ts";
 import type { InfoPage, ListPage, MenuPage } from "./menu.ts";
 import { ANSI, visibleLength } from "./style.ts";
 import { wrapAnsi } from "./view.ts";
+import { userHome } from "../home.ts";
 
 /** A job that ended well: the green of the tool bands. */
 const GREEN = "\x1b[38;2;166;209;137m";
@@ -110,7 +111,7 @@ function windowPage(host: JobsHost, id: number): InfoPage {
   const body = text.length > 0 ? text : [`${ANSI.dim}(nothing written yet)${ANSI.reset}`];
   const color = job.state === "running" ? ANSI.cream : job.state === "done" ? GREEN : ANSI.amanita;
   const head = ` #${job.id} · ${stateText(job, Date.now())} `;
-  const foot = ` ${job.log.replace(process.env.HOME ?? "\u0000", "~")} `;
+  const foot = ` ${job.log.replace(userHome(), "~")} `;
   const line = (label: string, left: string, right: string): string => {
     const cut = visibleLength(label) > width - 4 ? `${label.slice(0, width - 5)}…` : label;
     return `${ANSI.dim}${left}─${ANSI.reset}${color}${cut}${ANSI.reset}${ANSI.dim}${"─".repeat(Math.max(0, width - 3 - visibleLength(cut)))}${right}${ANSI.reset}`;

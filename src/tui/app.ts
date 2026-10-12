@@ -58,6 +58,7 @@ import { applyProfile, currentProfile, readProfiles } from "../profiles.ts";
 import type { Jobs } from "../jobs.ts";
 import type { FilesState, IntegrationsHost } from "./integrations-menu.ts";
 import { hubRunning } from "../serve/link.ts";
+import { userHome } from "../home.ts";
 
 
 
@@ -1117,7 +1118,7 @@ export class App {
 
   /** The profiles, the one in use marked; Enter switches to one (installs, switches, thinking, asks). */
   #openProfiles(): void {
-    const home = this.#integrations?.home ?? process.env.HOME ?? "";
+    const home = this.#integrations?.home ?? userHome();
     const loading: ListPage = { kind: "list", title: "Profiles", items: [], empty: "reading…", pick: () => undefined, stay: true };
     this.#menu.open(loading);
     void Promise.all([readProfiles(home), currentProfile(home)]).then(([all, current]) => {
@@ -1183,7 +1184,7 @@ export class App {
   }
 
   #integrationsHost(): IntegrationsHost {
-    const home = this.#integrations?.home ?? process.env.HOME ?? "";
+    const home = this.#integrations?.home ?? userHome();
     return {
       home,
       apiBase: this.#integrations?.apiBase,

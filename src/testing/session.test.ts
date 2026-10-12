@@ -4,9 +4,10 @@ import { Session, findSession, latestSession, sessionDir } from "../session.ts";
 import { openaiCompat } from "../providers/openai-compat.ts";
 import { Agent } from "../loop.ts";
 import type { Message, ProviderRequest, StreamEvent, Usage } from "../types.ts";
+import { join } from "node:path";
 
 const HOME = `${process.cwd()}/.tmp-session-test-${process.pid}`;
-const CWD = `${HOME}/project`;
+const CWD = join(HOME, "project");
 
 afterAll(() => rmSync(HOME, { recursive: true, force: true }));
 
@@ -196,8 +197,8 @@ describe("session log", () => {
 
     expect(latestSession(CWD, HOME)).toBe(second.path);
     expect((await Session.load(latestSession(CWD, HOME)!)).view().at(-1)!.content).toBe("second");
-    expect(latestSession(`${HOME}/other`, HOME)).toBeUndefined();
-    expect(sessionDir(CWD, HOME)).toStartWith(`${HOME}/.kinoko/sessions/`);
+    expect(latestSession(join(HOME, "other"), HOME)).toBeUndefined();
+    expect(sessionDir(CWD, HOME)).toStartWith(`${join(HOME, ".kinoko/sessions")}/`);
   });
 
   test("6. compaction record turns the log into summary + verbatim tail", async () => {
@@ -218,7 +219,7 @@ describe("session log", () => {
   });
 
   test("7. --session finds an id, or a prefix only one session has, in this directory only", async () => {
-    const cwd = `${HOME}/resume-here`;
+    const cwd = join(HOME, "resume-here");
     const a = await Session.create({ cwd, model: "m", home: HOME });
     const b = await Session.create({ cwd, model: "m", home: HOME });
     expect(findSession(cwd, a.meta.id, HOME)).toBe(a.path);
@@ -229,12 +230,12 @@ describe("session log", () => {
     expect(findSession(cwd, a.meta.id.slice(0, unique), HOME)).toBe(a.path);
     expect(findSession(cwd, "", HOME)).toBeUndefined();
     // Sessions are kept per directory: the same id from elsewhere is not found.
-    expect(findSession(`${HOME}/somewhere-else`, a.meta.id, HOME)).toBeUndefined();
+    expect(findSession(join(HOME, "somewhere-else"), a.meta.id, HOME)).toBeUndefined();
     expect(findSession(cwd, "no-such-session", HOME)).toBeUndefined();
   });
 
   test("8. a session is empty until something is said in it", async () => {
-    const session = await Session.create({ cwd: `${HOME}/empty`, model: "m", home: HOME });
+    const session = await Session.create({ cwd: join(HOME, "empty"), model: "m", home: HOME });
     expect(session.empty).toBe(true);
     await session.append({ id: "u", role: "user", content: "hi" });
     expect(session.empty).toBe(false);

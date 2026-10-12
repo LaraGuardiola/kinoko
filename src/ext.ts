@@ -10,6 +10,7 @@ import { uniqueDirs } from "./context.ts";
 import { readDisabled } from "./disabled.ts";
 import type { Message, ProviderRequest, Tool } from "./types.ts";
 import type { RunResult } from "./loop.ts";
+import { userHome } from "./home.ts";
 
 export interface SessionStartInfo {
   cwd: string;
@@ -260,7 +261,7 @@ function isAsk(value: unknown): value is ToolCallAsk {
  * in that order.
  */
 export async function loadExtensions(k: Extensions, opts: LoadOptions): Promise<string[]> {
-  const home = opts.home ?? process.env.HOME ?? "";
+  const home = opts.home ?? userHome();
   const dirs = uniqueDirs([join(home, ".kinoko", "ext"), join(opts.cwd, ".kinoko", "ext")]);
   const off = new Set((await readDisabled(home)).extensions); // switched off in /extensions
   const paths: string[] = [];
@@ -296,7 +297,7 @@ function listEntries(dir: string): string[] {
 
 /** What an extension is called: its file without `.ts`, or its folder. */
 export function extensionName(path: string): string {
-  const parts = path.split("/");
+  const parts = path.split(/[\\/]/); // either separator: Windows paths too
   const file = parts.at(-1) ?? path;
   return (file === "index.ts" ? (parts.at(-2) ?? file) : file).replace(/\.ts$/, "");
 }

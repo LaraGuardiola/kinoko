@@ -26,13 +26,15 @@ export interface PromptInput {
   tools: ToolSpec[];
   context: ContextFile[];
   skills: SkillEntry[];
+  /** The OS and the shell the bash tool runs ("Windows; bash tool: PowerShell ..."): what commands work. */
+  system?: string;
 }
 
 export function buildSystemPrompt(input: PromptInput): string {
   const blocks: string[] = [PERSONA.join("\n")];
   blocks.push(`Tools: ${input.tools.map((t) => t.name).join(", ") || "none"}.`);
   // Without it a model asked what it is guesses, then goes looking (ps, config files) and confabulates.
-  blocks.push(`Date: ${input.date}\nModel: ${modelName(input.model)} (Kinoko is the harness, this is the model)\nWorking directory: ${input.cwd}`);
+  blocks.push(`Date: ${input.date}\nModel: ${modelName(input.model)} (Kinoko is the harness, this is the model)\nWorking directory: ${input.cwd}${input.system ? `\nSystem: ${input.system}` : ""}`);
   const context = renderContext(input.context);
   if (context) blocks.push(context);
   const skills = renderSkills(input.skills);

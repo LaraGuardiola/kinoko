@@ -21,7 +21,7 @@ describe("serve: devices", () => {
     const text = await Bun.file(file).text();
     expect(text).not.toContain(paired?.token ?? "?");
     expect(text).not.toContain(code);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== "win32") expect(statSync(file).mode & 0o777).toBe(0o600); // no Unix modes on Windows
   });
 
   test("a code expires after ten minutes", async () => {

@@ -66,7 +66,7 @@ export async function restoreTracker(messages: Message[], cwd: string): Promise<
     if (disk === undefined || body(disk) !== body(content)) continue;
     // oxlint-disable-next-line no-await-in-loop -- same pass
     const st = await file.stat();
-    tracker.record(path, { mtimeMs: st.mtimeMs, hash: hashOf(disk) });
+    tracker.record(path, { mtimeMs: st.mtimeMs, size: st.size, hash: hashOf(disk) });
     restored++;
   }
   return restored;

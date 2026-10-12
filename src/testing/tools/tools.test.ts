@@ -2,6 +2,7 @@ import { expect, test, describe, afterAll } from "bun:test";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "node:fs";
 import { defaultTools } from "../../tools/registry";
 import type { Tool } from "../../types";
+import { join } from "node:path";
 
 const ROOT = `${process.cwd()}/.tmp-tools-test-${process.pid}`;
 
@@ -26,21 +27,21 @@ function ctx(cwd: string): { signal: AbortSignal; cwd: string } {
 describe("kinoko core tools", () => {
   test("read: line-numbered, offset/limit, binary refusal", async () => {
     const dir = fresh("read");
-    writeFileSync(`${dir}/a.txt`, "one\ntwo\nthree\n");
+    writeFileSync(join(dir, "a.txt"), "one\ntwo\nthree\n");
     const r = pick("read");
     const out = await r.run({ path: "a.txt" }, ctx(dir));
     expect(out).toBe("1: one\n2: two\n3: three");
     const paged = await r.run({ path: "a.txt", offset: 2, limit: 1 }, ctx(dir));
     expect(paged).toBe("2: two\n[lines 2-2 of 3; continue with offset=3]");
     expect(await r.run({ path: "a.txt", offset: 3 }, ctx(dir))).toBe("3: three\n[lines 3-3 of 3]");
-    writeFileSync(`${dir}/b.bin`, "a\u0000b");
+    writeFileSync(join(dir, "b.bin"), "a\u0000b");
     const bin = await r.run({ path: "b.bin" }, ctx(dir));
     expect(bin).toContain("ERROR");
   });
 
   test("read-before-edit enforced", async () => {
     const dir = fresh("rb");
-    writeFileSync(`${dir}/a.txt`, "alpha\nbeta\n");
+    writeFileSync(join(dir, "a.txt"), "alpha\nbeta\n");
     const e = pick("edit");
     const err = await e.run({ path: "a.txt", edits: [{ old: "alpha", new: "x" }] }, ctx(dir));
     expect(err).toContain("must read");
@@ -52,30 +53,30 @@ describe("kinoko core tools", () => {
     const r = pick("read");
     const made = await w.run({ path: "sub/deep/new.txt", content: "hello" }, ctx(dir));
     expect(made.includes("ERROR")).toBe(false);
-    writeFileSync(`${dir}/other.txt`, "created outside the tracker");
+    writeFileSync(join(dir, "other.txt"), "created outside the tracker");
     const unread = await w.run({ path: "other.txt", content: "other" }, ctx(dir));
     expect(unread).toContain("ERROR");
     await r.run({ path: "sub/deep/new.txt" }, ctx(dir));
-    writeFileSync(`${dir}/sub/deep/new.txt`, "tampered");
+    writeFileSync(join(dir, "sub/deep/new.txt"), "tampered");
     const stale = await w.run({ path: "sub/deep/new.txt", content: "again" }, ctx(dir));
     expect(stale).toContain("changed on disk");
   });
 
   test("edit: unique match applies, untouched whitespace kept", async () => {
     const dir = fresh("e1");
-    writeFileSync(`${dir}/a.txt`, "keep this\n  indented line  \nkeep this too\n");
+    writeFileSync(join(dir, "a.txt"), "keep this\n  indented line  \nkeep this too\n");
     const e = pick("edit");
     const r = pick("read");
     await r.run({ path: "a.txt" }, ctx(dir));
     const ok = await e.run({ path: "a.txt", edits: [{ old: "indented", new: "OUTDATED" }] }, ctx(dir));
     expect(ok.includes("ERROR")).toBe(false);
-    const text = readFileSync(`${dir}/a.txt`, "utf8");
+    const text = readFileSync(join(dir, "a.txt"), "utf8");
     expect(text).toBe("keep this\n  OUTDATED line  \nkeep this too\n");
   });
 
   test("edit: ambiguous (N matches) vs not found, with line hints", async () => {
     const dir = fresh("amb");
-    writeFileSync(`${dir}/a.txt`, "alpha one\nbeta one\ngamma two\n");
+    writeFileSync(join(dir, "a.txt"), "alpha one\nbeta one\ngamma two\n");
     const e = pick("edit");
     const r = pick("read");
     await r.run({ path: "a.txt" }, ctx(dir));
@@ -90,25 +91,25 @@ describe("kinoko core tools", () => {
 
   test("edit: overlapping edits rejected, all-or-none", async () => {
     const dir = fresh("ov");
-    writeFileSync(`${dir}/a.txt`, "abcdef\n");
+    writeFileSync(join(dir, "a.txt"), "abcdef\n");
     const e = pick("edit");
     const r = pick("read");
     await r.run({ path: "a.txt" }, ctx(dir));
     const bad = await e.run({ path: "a.txt", edits: [{ old: "abc", new: "X" }, { old: "cde", new: "Y" }] }, ctx(dir));
     expect(bad).toContain("overlap");
-    const text = readFileSync(`${dir}/a.txt`, "utf8");
+    const text = readFileSync(join(dir, "a.txt"), "utf8");
     expect(text).toBe("abcdef\n");
     // Separate edits in one call all apply (this used to be rejected as an overlap).
     const ok = await e.run({ path: "a.txt", edits: [{ old: "ef", new: "F" }, { old: "ab", new: "A" }] }, ctx(dir));
     expect(ok).toContain("2 edit(s) applied");
-    expect(readFileSync(`${dir}/a.txt`, "utf8")).toBe("AcdF\n");
+    expect(readFileSync(join(dir, "a.txt"), "utf8")).toBe("AcdF\n");
     // The result shows the edited lines as they are on disk now.
     expect(ok).toEndWith("The file now reads:\n1: AcdF\n2: ");
   });
 
   test("read: a long file is cut at a line boundary with the offset to continue from", async () => {
     const dir = fresh("long");
-    writeFileSync(`${dir}/big.txt`, `${"x".repeat(1000)}\n`.repeat(100));
+    writeFileSync(join(dir, "big.txt"), `${"x".repeat(1000)}\n`.repeat(100));
     const out = await pick("read").run({ path: "big.txt" }, ctx(dir));
     expect(out.length).toBeLessThan(42_000);
     expect(out).toMatch(/\[lines 1-\d+ of 100; continue with offset=\d+\]$/);
@@ -151,7 +152,7 @@ describe("kinoko core tools", () => {
     expect(elapsed).toBeLessThan(200);
     expect(out).toBe("Aborted by user");
     await Bun.sleep(100);
-    const pid = parseInt(readFileSync(`${dir}/pid.txt`, "utf8"), 10);
+    const pid = parseInt(readFileSync(join(dir, "pid.txt"), "utf8"), 10);
     let alive = false;
     try {
       process.kill(pid, 0);
@@ -159,7 +160,8 @@ describe("kinoko core tools", () => {
     } catch {
       alive = false;
     }
-    expect(alive).toBe(false);
+    // Git Bash's $$ is an MSYS pid, not a Windows one: there the time taken is the proof.
+    if (process.platform !== "win32") expect(alive).toBe(false);
   });
 
   test("bash: timeout kills the group", async () => {
@@ -169,7 +171,7 @@ describe("kinoko core tools", () => {
     const out = await b.run({ cmd: "echo $$ > pid.txt && sleep 5", timeout: 150 }, ctx(dir));
     expect(Date.now() - t0).toBeLessThan(1000);
     expect(out).toContain("timed out");
-    const pid = parseInt(readFileSync(`${dir}/pid.txt`, "utf8"), 10);
+    const pid = parseInt(readFileSync(join(dir, "pid.txt"), "utf8"), 10);
     let alive = false;
     try {
       process.kill(pid, 0);
@@ -177,7 +179,8 @@ describe("kinoko core tools", () => {
     } catch {
       alive = false;
     }
-    expect(alive).toBe(false);
+    // Git Bash's $$ is an MSYS pid, not a Windows one: there the time taken is the proof.
+    if (process.platform !== "win32") expect(alive).toBe(false);
   });
 });
 

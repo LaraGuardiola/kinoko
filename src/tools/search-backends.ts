@@ -379,9 +379,11 @@ function ruleMatches(rule: IgnoreRule, rel: string): boolean {
   return false;
 }
 
-/** rg prints `./foo`; the Bun glob does not. Normalize so both backends emit the same paths. */
+/** rg prints `./foo`; the Bun glob does not; on Windows both use backslashes. Normalized to `a/b` so
+ *  both backends emit the same paths and .gitignore rules (always `/`) match them. */
 function normPath(raw: string): string {
-  return raw.startsWith("./") ? raw.slice(2) : raw;
+  const posix = raw.replaceAll("\\", "/");
+  return posix.startsWith("./") ? posix.slice(2) : posix;
 }
 
 function hiddenPath(rel: string): boolean {
@@ -429,9 +431,7 @@ async function* linesOf(path: string): AsyncGenerator<LineItem, void> {
 }
 
 /** Bun.Glob yields "./x" while rg yields "x": normalize so both backends agree. */
-function norm(rel: string): string {
-  return rel.startsWith("./") ? rel.slice(2) : rel;
-}
+const norm = normPath;
 
 async function* bunContent(query: SearchQuery, note: ScanNote): AsyncGenerator<Hit, void> {
   const regex = smartRegex(query.pattern);

@@ -1,3 +1,4 @@
+import { killTree, shell, stopHint } from "../shell";
 import { budget } from "./budget";
 import type { Tool, ToolContext } from "../types";
 
@@ -13,8 +14,9 @@ interface BashArgs {
 }
 
 /**
- * Runs `sh -c cmd` in its own process group (detached), streams chunks
- * through ctx.onOutput, and kills the WHOLE group on abort or timeout.
+ * Runs the command in this computer's shell (shell.ts: sh in its own process group; on Windows Git
+ * Bash or PowerShell), streams chunks through ctx.onOutput, and kills the WHOLE group (Windows: the
+ * process tree) on abort or timeout.
  */
 async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
   // `command` is what models expect (most harnesses use it).
@@ -27,7 +29,7 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
       `started background job #${job.id} (pid ${job.pid}): ${cmd}`,
       "Do not wait for it: no wait, sleep, tail or polling (wait does not work on it). Do other work, or end your reply now.",
       "When it ends, kinoko sends you a message with its exit code and last lines: do what comes after it then.",
-      `Its output: ${job.log}. To stop it: kill -- -${job.pid}`,
+      `Its output: ${job.log}. To stop it: ${stopHint(job.pid)}`,
     ].join("\n");
   }
   const timeoutMs = typeof args.timeout === "number" && args.timeout > 0 ? Math.trunc(args.timeout) : DEFAULT_TIMEOUT_MS;
@@ -35,10 +37,11 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
   // No stdin: a command waiting for input would otherwise wait forever. Its own process group
   // (detached), so a kill reaches whatever it started too.
   let child;
+  const sh = shell();
   try {
-    child = Bun.spawn(["sh", "-c", cmd], { detached: true, cwd: ctx.cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    child = Bun.spawn(sh.argv(cmd), { detached: sh.detached, cwd: ctx.cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
   } catch (e) {
-    return `ERROR: bash: could not start sh: ${e instanceof Error ? e.message : String(e)}`;
+    return `ERROR: bash: could not start ${sh.name}: ${e instanceof Error ? e.message : String(e)}`;
   }
   const pid = child.pid;
 
@@ -55,13 +58,7 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
   };
   const drained = Promise.all([read(child.stdout), read(child.stderr)]).catch(() => undefined);
 
-  const killGroup = (): void => {
-    try {
-      process.kill(-pid, "SIGKILL");
-    } catch {
-      // group may already be gone
-    }
-  };
+  const killGroup = (): void => killTree(pid);
 
   if (ctx.signal.aborted) {
     killGroup();

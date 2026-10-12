@@ -9,6 +9,7 @@ import { elapsed } from "./jobs.ts";
 import type { Jobs } from "./jobs.ts";
 import { THINKING } from "./tui/menu-pages.ts";
 import { applyProfile, currentProfile, readProfiles } from "./profiles.ts";
+import { userHome } from "./home.ts";
 
 export interface CommandInfo {
   name: string;
@@ -105,7 +106,7 @@ export async function runCommand(host: CommandHost, name: string, arg: string, s
       return catalogCommand(host, name, arg, signal);
     case "profile": {
       if (host.catalogs === undefined) break;
-      const home = process.env.HOME ?? "";
+      const home = userHome();
       const all = await readProfiles(home);
       const chosen = arg.trim() === "" ? undefined : all.find((p) => p.name === arg.trim() || p.title.toLowerCase() === arg.trim().toLowerCase());
       if (arg.trim() !== "" && chosen === undefined) return { text: `no profile ${arg.trim()}` };
