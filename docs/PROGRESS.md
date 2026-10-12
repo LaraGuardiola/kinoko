@@ -908,3 +908,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Then the same, seen with the jobs menu open (screenshot: the editor and its rules copied down the screen, one copy a second as the elapsed time ticked): a job's multi-line command in its row. Fixed where every row passes (view.ts region()): a raw newline in any row becomes " ↵ ", so no menu or note can do it again.
 - Seen by eye (foot): a 3-line `bash -c` job in /jobs is one row, nothing copied after 8 s of ticking.
 - Not done: the scrollback already smeared by old copies stays so (it is the terminal's); resizing to half a screen was not retried here.
+## fix/todo-description: "todo list" is the todo tool (branch fix/todo-description)
+- Seen live: asked to "update the todo list", the local Qwen wrote ~/.agents/kinoko/todo.md (a path it made up), then a second .md in ~/.kinoko; the todo tool's description only said "a short plan for a task with several steps", never "todo list" nor that the user sees it.
+- Now it opens with: your todo list, the plan the user sees in kinoko's side panel; asked for a todo list, a checklist or a plan, this is it, never a file.
+- Not done: the same session's other slip (`music status` in a shell: music is a tool) is the cliamp extension's, its own branch.
