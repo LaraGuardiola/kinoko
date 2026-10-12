@@ -54,6 +54,21 @@ describe("background jobs", () => {
     expect(j.list().every((x) => x.state === "killed")).toBe(true);
   });
 
+  test.skipIf(process.platform === "win32")("a job that ends leaving processes behind (nohup &) says so, and killAll takes them", async () => {
+    const { jobs: j, ended } = jobs();
+    const job = j.start("nohup sleep 30 > /dev/null 2>&1 & echo started", dir);
+    await j.ended(job.id);
+    expect(ended[0]).toMatchObject({ state: "done", leftover: true });
+    expect(endNote(ended[0]!, ["started"])).toContain(`they end when kinoko quits. To stop them: kill -- -${job.pid}`);
+    j.killAll();
+    await Bun.sleep(50);
+    expect(() => process.kill(-job.pid, 0)).toThrow();
+    // A job that leaves nothing is not marked.
+    const clean = j.start("echo x", dir);
+    await j.ended(clean.id);
+    expect(ended[1]?.leftover).toBeUndefined();
+  });
+
   test("a change (start, output, end) tells the listeners", async () => {
     const { jobs: j } = jobs();
     let changes = 0;

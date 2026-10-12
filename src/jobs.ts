@@ -6,7 +6,7 @@
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import type { FileSink } from "bun";
 import { join } from "node:path";
-import { killTree, shell } from "./shell.ts";
+import { groupAlive, killTree, leftNote, shell } from "./shell.ts";
 
 export type JobState = "running" | "done" | "failed" | "killed";
 
@@ -21,6 +21,8 @@ export interface Job {
   code?: number | null;
   /** Where all of its output is. */
   log: string;
+  /** It ended but left processes running in its group (& or nohup): they go when kinoko quits. */
+  leftover?: boolean;
 }
 
 /** What the tail keeps in memory per job: the window shows it, the end note quotes it. */
@@ -61,6 +63,7 @@ export class Jobs {
       job.ended = Date.now();
       job.code = code;
       if (job.state === "running") job.state = code === 0 ? "done" : "failed";
+      if (job.state !== "killed" && groupAlive(job.pid)) job.leftover = true;
       await out.end();
       closeSync(fd);
       this.#changed();
@@ -121,9 +124,12 @@ export class Jobs {
     return true;
   }
 
-  /** Quitting kinoko: every job still running ends with it. */
+  /** Quitting kinoko: every job still running ends with it, and what an ended one left running. */
   killAll(): void {
-    for (const e of this.#jobs) if (e.job.state === "running") this.kill(e.job.id);
+    for (const e of this.#jobs) {
+      if (e.job.state === "running") this.kill(e.job.id);
+      else if (e.job.leftover === true && groupAlive(e.job.pid)) killTree(e.job.pid, "SIGTERM");
+    }
   }
 
   /** Resolves once the job's process has ended (tests). */
@@ -164,5 +170,6 @@ export function endNote(job: Job, tail: string[]): string {
   const how = job.state === "killed" ? "was stopped" : job.state === "done" ? "finished (exit 0)" : `failed (exit ${job.code ?? "?"})`;
   const took = elapsed((job.ended ?? Date.now()) - job.started);
   const last = tail.length > 0 ? `\nLast lines:\n\`\`\`\n${tail.join("\n")}\n\`\`\`` : "\nIt printed nothing.";
-  return `[kinoko] Background job #${job.id} ${how} after ${took}: \`${job.command}\`${last}\nFull output: ${job.log}`;
+  const left = job.leftover === true ? `\n${leftNote(job.pid, "they end when kinoko quits")}` : "";
+  return `[kinoko] Background job #${job.id} ${how} after ${took}: \`${job.command}\`${last}\nFull output: ${job.log}${left}`;
 }

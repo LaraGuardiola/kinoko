@@ -894,3 +894,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Tested here: install.sh against a local server (off the PATH with bash and fish, run twice, already on the PATH, a wrong checksum refused).
 - README: the one-line install per system, the first run through /models, the license.
 - Not done: npm/bun packages; FUNDING.yml (needs the user's links); the APK (signing undecided).
+
+## fix/job-leftovers: shells the model put aside (branch fix/job-leftovers; kinoko-extensions fix/hardline-paths, merged)
+- Found in a real session on 0.2.0 (the user asked for a watcher that tells the model when the song changes): two things went wrong with its shells.
+- permission-gate's hardline matched `rm -f` on ANY absolute path (`rm -f /tmp/x` as if `rm -rf /`): a watcher script was refused and never written, and the model built scripts on scripts. Now the hardline is rm -r/-f on `/`, `/*`, `~`, `$HOME` or `.` as a whole argument, in any position; the rest of rm -rf is asked as before. Test with the session's script. Merged in kinoko-extensions.
+- `nohup … &` inside a background job: the job ended at 0s and what it started ran on, unwatched, after kinoko quit. Now a job that ends with its process group still alive is marked (leftover), its end note says so with the stop command and "use background: true without & or nohup to be told", and quitting kinoko takes those groups too. A plain bash command that leaves processes behind gets the same note but they are NOT killed on quit (a server put aside on purpose must outlive kinoko).
+- Unix only: Windows has no process groups to ask (groupAlive is false there).
+- Not done: a job that tells the model on each line of output (only its end wakes the model; a job that exits on the event and is started again is the way).
