@@ -41,7 +41,8 @@ POST /v1/pair            {"code": "...", "name": "OnePlus 12R"}
 
 Keep the token (Android Keystore). Send it as `Authorization: Bearer <token>` (or `?token=` where a
 header cannot be set). `401` means the device is not (or no longer) paired: `kinoko serve revoke` on
-the computer, or a lost token. Pair again.
+the computer, or a lost token. Pair again. Forgetting the computer in the app sends
+`DELETE /v1/device` first, so the computer forgets the device too (no stale entry left behind).
 
 ## HTTP
 
@@ -51,6 +52,7 @@ the computer, or a lost token. Pair again.
 | `POST /v1/pair` | no | above |
 | `GET /v1/agents` | yes | `{"agents": [AgentInfo]}` |
 | `GET /v1/ws` | yes | the WebSocket |
+| `DELETE /v1/device` | yes | `{"ok": true}`: this device unpairs itself; its sockets close (4001) |
 
 ## The WebSocket
 

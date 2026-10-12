@@ -1,6 +1,6 @@
 // `kinoko serve`: the hub the phone app talks to.
 //   kinoko serve [--port 7878] [--public-port 8443] [--funnel | --local]
-//   kinoko serve pair          a QR code to pair a device (the hub must be running)
+//   kinoko serve pair          a QR code to pair a device (starting the hub when it is not running)
 //   kinoko serve devices       the paired devices
 //   kinoko serve revoke <id>   forget one
 // By default it is shared with your tailnet through Tailscale (`--funnel`: with the internet;
@@ -72,15 +72,14 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const devices = new Devices(join(HOME, "serve.json"));
   const sub = argv[0]?.startsWith("--") ? undefined : argv[0];
 
-  if (sub === "pair") {
+  // Not running: `pair` starts it, and shows the code once it is up.
+  const pairNow = sub === "pair";
+  if (pairNow) {
     const state = await running();
-    if (state === undefined) {
-      out("kinoko serve is not running: start it first (`kinoko serve`), then pair.");
-      process.exitCode = 1;
+    if (state !== undefined) {
+      await showPairing(devices, state.url);
       return;
     }
-    await showPairing(devices, state.url);
-    return;
   }
   if (sub === "devices") {
     const list = await devices.list();
@@ -93,7 +92,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
     out((await devices.revoke(which)) ? `${which} can no longer connect` : `no device ${which} (see \`kinoko serve devices\`)`);
     return;
   }
-  if (sub !== undefined) {
+  if (sub !== undefined && !pairNow) {
     out(`unknown: kinoko serve ${sub} (pair, devices, revoke)`);
     process.exitCode = 1;
     return;
@@ -146,8 +145,8 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const paired = await devices.list();
   out(`  devices  ${paired.length === 0 ? "none yet" : paired.map((d) => `${d.name} (seen ${ago(d.seen)})`).join(", ")}`);
   out();
-  if (paired.length === 0) await showPairing(devices, url);
-  else out(dim("pair another device: kinoko serve pair · Ctrl+C stops"));
+  if (paired.length === 0 || pairNow) await showPairing(devices, url);
+  else out(`  pair one more: ${bold("kinoko serve pair")} ${dim("(in another terminal) · Ctrl+C stops")}`);
 
   let stopping = false;
   const stop = async (): Promise<void> => {

@@ -185,6 +185,13 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
         return Response.json({ error: "expected a WebSocket" }, { status: 400 });
       }
       if (url.pathname === "/v1/agents") return Response.json({ agents: agents.list() });
+      // The app's "Forget this computer": the device unpairs itself, so this side forgets it too.
+      if (url.pathname === "/v1/device" && req.method === "DELETE") {
+        await opts.devices.revoke(device.id);
+        for (const ws of sockets) if (ws.data.device.id === device.id) ws.close(4001, "unpaired");
+        log(`${device.name} unpaired itself (${device.id})`);
+        return Response.json({ ok: true });
+      }
       return Response.json({ error: "not found" }, { status: 404 });
     },
     websocket: {
