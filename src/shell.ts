@@ -73,3 +73,19 @@ export function killTree(pid: number, signal: NodeJS.Signals = "SIGKILL", platfo
 
 /** How the model stops a background job by hand. */
 export const stopHint = (pid: number, platform: NodeJS.Platform = process.platform): string => (platform === "win32" ? `taskkill /pid ${pid} /T /F` : `kill -- -${pid}`);
+
+/** Whether something of a command's process group still runs after the command ended (it was put
+ *  aside with & or nohup). Unix only: Windows has no groups to ask, so false. */
+export function groupAlive(pid: number, platform: NodeJS.Platform = process.platform): boolean {
+  if (platform === "win32" || pid <= 0) return false;
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** What the model is told when a command ended but left processes running on their own. */
+export const leftNote = (pid: number, after: string): string =>
+  `It left processes running on their own (& or nohup): kinoko does not watch them and nobody is told when they end; ${after}. To stop them: ${stopHint(pid)}. To be told when something ends, run it with background: true, without & or nohup.`;

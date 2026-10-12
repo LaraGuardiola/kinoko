@@ -1,4 +1,4 @@
-import { killTree, shell, stopHint } from "../shell";
+import { groupAlive, killTree, leftNote, shell, stopHint } from "../shell";
 import { budget } from "./budget";
 import type { Tool, ToolContext } from "../types";
 
@@ -85,7 +85,8 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
   // A signal (the timeout's kill) leaves no exit code, as a normal end of 0 adds nothing.
   const code = child.exitCode;
   const exit = code !== null && code !== 0 ? `\n[exit code ${code}]` : "";
-  const suffix = timedOut ? `\n[timed out after ${timeoutMs}ms — process group killed]` : exit;
+  const left = !timedOut && groupAlive(pid) ? `\n[${leftNote(pid, "they keep running after kinoko quits")}]` : "";
+  const suffix = (timedOut ? `\n[timed out after ${timeoutMs}ms — process group killed]` : exit) + left;
   return budget(chunks.join("") + suffix, { maxTokens: DEFAULT_MAX_TOKENS, id: crypto.randomUUID() });
 }
 

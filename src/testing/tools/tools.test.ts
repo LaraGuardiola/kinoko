@@ -141,6 +141,15 @@ describe("kinoko core tools", () => {
     expect(await b.run({ cmd: "echo hi" }, ctx(fresh("exit0")))).toBe("hi\n");
   });
 
+  test.skipIf(process.platform === "win32")("bash: a command leaving processes behind (nohup &) says so and how to stop them", async () => {
+    const out = await pick("bash").run({ command: "nohup sleep 30 > /dev/null 2>&1 & echo pid=$!" }, ctx(fresh("left")));
+    const pid = Number(/pid=(\d+)/.exec(out)?.[1]);
+    expect(out).toContain("It left processes running on their own (& or nohup)");
+    expect(out).toMatch(/To stop them: kill -- -\d+/);
+    process.kill(pid, "SIGKILL");
+    expect(await pick("bash").run({ command: "echo hi" }, ctx(fresh("left2")))).toBe("hi\n");
+  });
+
   test("bash: abort kills the process group, returns <200ms", async () => {
     const dir = fresh("abort");
     const b = pick("bash");
