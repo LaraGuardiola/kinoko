@@ -620,15 +620,18 @@ describe("TUI app with the agent", () => {
   });
 
   test("10. an aborted tool says aborted, not a result", async () => {
+    // Esc once the tool runs: a fixed wait raced it on a slow machine (nothing to abort yet).
+    const begun = Promise.withResolvers<void>();
+    const watched: Tool = { ...slow, run: (args, ctx) => (begun.resolve(), slow.run(args, ctx)) };
     const h = await harness(
       [
         [{ type: "tool_call", call: { id: "c1", name: "slow", args: {} } }, { type: "done", stop: "tool_use" }],
         [{ type: "text", delta: "never" }, { type: "done", stop: "end" }],
       ],
-      { tools: [slow], pace: 5 },
+      { tools: [watched], pace: 5 },
     );
     h.press("go\r");
-    await new Promise((r) => setTimeout(r, 10));
+    await begun.promise;
     h.press("\x1b");
     await settle(h.agent);
     expect(h.screen()).toContain("aborted");
