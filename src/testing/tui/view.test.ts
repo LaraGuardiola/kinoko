@@ -39,6 +39,13 @@ describe("live region", () => {
     expect(stripAnsi(liveRegion(input({ viewportCols: 12, thinking: "LOW · 2048" })).lines[1]!)).toBe("─".repeat(10));
   });
 
+  test("a queued message of several lines (a job's end note) takes one row, never a raw newline", () => {
+    const note = "[kinoko] Background job #3 finished (exit 0) after 0s\nIt printed nothing.\nFull output: /j/3.log";
+    const region = liveRegion(input({ viewportRows: 20, viewportCols: 80, queued: [{ kind: "steer", text: note }] }));
+    expect(region.lines.every((line) => !line.includes("\n"))).toBe(true);
+    expect(region.lines.map(stripAnsi)).toContain("[steer] [kinoko] Background job #3 finished (exit 0) after 0s …");
+  });
+
   test("the path is cream and the branch amanita red", () => {
     const region = liveRegion(input({ place: "~/p (master)" }));
     expect(region.lines.at(-2)).toBe("\x1b[38;2;238;222;186m~/p\x1b[0m \x1b[38;2;232;36;36m(master)\x1b[0m");

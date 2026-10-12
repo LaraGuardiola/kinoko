@@ -204,7 +204,10 @@ export function liveRegion(input: RegionInput): Region {
     tail.push("", `${ANSI.dim}${steering ? "alt+x send now · " : ""}alt+c cancel · alt+↑ edit the last${ANSI.reset}`);
     for (const item of input.queued) {
       const tag = item.kind === "steer" ? "[steer]" : "[follow-up]";
-      tail.push(`${ANSI.cream}${tag} ${item.text}${ANSI.reset}`);
+      // One row each: a message of several lines (a job's end note) shows its first, or its raw
+      // newlines would draw rows the region does not count, and each repaint would leave a copy.
+      const [first = "", ...more] = item.text.split(/\r?\n/);
+      tail.push(`${ANSI.cream}${tag} ${first}${more.length > 0 ? " …" : ""}${ANSI.reset}`);
     }
   }
   // The editor sits between two rules, with a block cursor drawn in place (the terminal's own
