@@ -1,10 +1,11 @@
 // `kinoko serve`: the hub the phone app talks to.
-//   kinoko serve [--port 7878] [--public-port 8443] [--funnel | --local]
+//   kinoko serve [--port 7878] [--public-port 8443] [--lan-port 7879] [--funnel | --local | --no-lan | --no-tailscale]
 //   kinoko serve pair          a QR code to pair a device (starting the hub when it is not running)
 //   kinoko serve devices       the paired devices
 //   kinoko serve revoke <id>   forget one
 // By default it is shared with your tailnet through Tailscale (`--funnel`: with the internet;
-// `--local`: not at all) and stops sharing when it stops.
+// `--local`: not at all) and stops sharing when it stops. On the local network it listens too, on
+// --lan-port with its own certificate (the app pins it; `--no-lan` turns that off).
 
 import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -13,6 +14,7 @@ import { Extensions, loadExtensions } from "../ext.ts";
 import { renderMarkdown, setFenceRenderers } from "../tui/markdown.ts";
 import { Devices } from "./devices.ts";
 import { qrText } from "./qr.ts";
+import { identity, lanAddresses } from "./tls.ts";
 import { serve } from "./server.ts";
 import { Bridge } from "./bridge.ts";
 import { projects } from "./projects.ts";
@@ -28,6 +30,8 @@ interface State {
   port: number;
   url: string;
   funnel: boolean;
+  /** The local network's address and the certificate's fingerprint, when it listens there. */
+  lan?: { url: string; fingerprint: string };
 }
 
 /** Markdown as the TUI draws it, `width` columns wide: what the phone shows for a block. */
@@ -59,13 +63,17 @@ async function running(): Promise<State | undefined> {
   }
 }
 
-async function showPairing(devices: Devices, url: string): Promise<void> {
+async function showPairing(devices: Devices, url: string, lan?: State["lan"]): Promise<void> {
   const code = await devices.code();
-  const link = `kinoko://pair?u=${encodeURIComponent(url)}&c=${code}`;
+  // The local network's address and the certificate's fingerprint ride along: at home the app
+  // goes straight there (no Tailscale needed), trusting that certificate only.
+  const local = lan ? `&l=${encodeURIComponent(lan.url)}&f=${lan.fingerprint}` : "";
+  const link = `kinoko://pair?u=${encodeURIComponent(url)}&c=${code}${local}`;
   out(qrText(link));
   out(`Scan it with the kinoko app (good for 10 minutes, once).`);
-  out(dim(`by hand: ${url}  code ${code}`));
-  if (url.startsWith("http://127.0.0.1")) out(dim("this address is this computer only: without Tailscale the phone cannot reach it"));
+  // By hand, the link carries the pin too (a typed address and code could not check the certificate).
+  out(dim(lan ? `or paste in the app: ${link}` : `by hand: ${url}  code ${code}`));
+  if (url.startsWith("http://127.0.0.1") && !lan) out(dim("this address is this computer only: without Tailscale the phone cannot reach it"));
 }
 
 export async function runServe(argv: string[], opts: { command: string[]; version: string }): Promise<void> {
@@ -77,7 +85,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   if (pairNow) {
     const state = await running();
     if (state !== undefined) {
-      await showPairing(devices, state.url);
+      await showPairing(devices, state.url, state.lan);
       return;
     }
   }
@@ -107,12 +115,16 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const publicPort = Number(flag(argv, "public-port") ?? 8443);
   const funnel = argv.includes("--funnel");
   const local = argv.includes("--local");
+  const lanPort = Number(flag(argv, "lan-port") ?? 7879);
+  // The local network, encrypted (the hub's own certificate): no Tailscale needed at home.
+  const lanUrls = local || argv.includes("--no-lan") ? [] : lanAddresses().map((ip) => `https://${ip}:${lanPort}`);
+  const lanIdentity = lanUrls.length > 0 ? await identity(join(HOME, "tls")) : undefined;
   // The extensions, loaded only for their renderers (```mermaid…): the phone gets blocks drawn as
   // the TUI draws them.
   const ext = new Extensions(() => undefined);
   await loadExtensions(ext, { cwd: process.env.HOME ?? homedir() });
   setFenceRenderers((lang) => ext.renderer(lang));
-  const hub = serve({ port, devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
+  const hub = serve({ port, ...(lanIdentity ? { lan: { port: lanPort, identity: lanIdentity, urls: lanUrls } } : {}), devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
 
   // Telegram (set up from the TUI's /integrations): it answers while the hub runs.
   const bridgeStop = new AbortController();
@@ -125,7 +137,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const signal = new AbortController().signal;
   out(`${bold("kinoko serve")} 🍄 ${dim(opts.version)}`);
   out(`  local    ${url}`);
-  if (!local) {
+  if (!local && !argv.includes("--no-tailscale")) {
     const tn = await tailnet(signal);
     if (typeof tn === "string") out(`  tailscale ${dim(`off: ${tn}`)}`);
     else {
@@ -140,12 +152,16 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
       }
     }
   }
-  await Bun.write(STATE, JSON.stringify({ pid: process.pid, port, url, funnel } satisfies State));
+  const lan = hub.lan && lanIdentity && lanUrls[0] ? { url: lanUrls[0], fingerprint: lanIdentity.fingerprint } : undefined;
+  if (lan) out(`  lan      ${bold(lan.url)}  ${dim("(this network, encrypted: no Tailscale needed here)")}`);
+  // No tailnet: the local network is the address the app is given first.
+  if (lan && !shared) url = lan.url;
+  await Bun.write(STATE, JSON.stringify({ pid: process.pid, port, url, funnel, ...(lan ? { lan } : {}) } satisfies State));
 
   const paired = await devices.list();
   out(`  devices  ${paired.length === 0 ? "none yet" : paired.map((d) => `${d.name} (seen ${ago(d.seen)})`).join(", ")}`);
   out();
-  if (paired.length === 0 || pairNow) await showPairing(devices, url);
+  if (paired.length === 0 || pairNow) await showPairing(devices, url, lan);
   else out(`  pair one more: ${bold("kinoko serve pair")} ${dim("(in another terminal) · Ctrl+C stops")}`);
 
   let stopping = false;

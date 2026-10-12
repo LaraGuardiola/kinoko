@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { Child, Spawn } from "../../serve/agents.ts";
 import { Devices } from "../../serve/devices.ts";
 import { serve } from "../../serve/server.ts";
+import { identity } from "../../serve/tls.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "kinoko-serve-"));
 afterAll(() => rmSync(dir, { recursive: true, force: true }));
@@ -169,6 +170,27 @@ describe("serve: the hub", () => {
       expect((await fetch(`${base}/v1/agents`, { headers: { authorization: `Bearer ${tablet}` } })).status).toBe(200);
       expect((await devices.list()).map((d) => d.name)).toEqual(["tablet"]);
       expect((await fetch(`${base}/v1/device`, { method: "DELETE" })).status).toBe(401); // no token: nothing to forget
+    } finally {
+      hub.stop();
+    }
+  });
+
+  test("the local network: the same hub over TLS, its address and fingerprint given at pairing and in hello", async () => {
+    const devices = new Devices(join(dir, "lan.json"));
+    const id = await identity(join(dir, "lan-tls"));
+    const hub = serve({ port: 0, lan: { port: 0, host: "127.0.0.1", identity: id, urls: ["https://192.168.1.42:7879"] }, devices, command: ["kinoko"], sessionsDir: dir, version: "t", spawn: fakeSpawn });
+    const insecure = { tls: { rejectUnauthorized: false } }; // the app pins the fingerprint instead
+    try {
+      const base = `https://127.0.0.1:${hub.lan?.port}`;
+      expect(await (await fetch(`${base}/v1/health`, insecure)).json()).toEqual({ name: "kinoko", version: "t", protocol: 1 });
+      const paired = (await (await fetch(`${base}/v1/pair`, { method: "POST", body: JSON.stringify({ code: await devices.code(), name: "tablet" }), ...insecure })).json()) as { token: string; lan: unknown };
+      expect(paired.lan).toEqual({ urls: ["https://192.168.1.42:7879"], fingerprint: id.fingerprint });
+      const ws = new WebSocket(`wss://127.0.0.1:${hub.lan?.port}/v1/ws`, { headers: { authorization: `Bearer ${paired.token}` }, ...insecure } as unknown as string[]);
+      const hello = await new Promise<Record<string, unknown>>((r) => ws.addEventListener("message", (e) => r(JSON.parse(String(e.data)) as Record<string, unknown>), { once: true }));
+      expect(hello).toMatchObject({ type: "hello", lan: { urls: ["https://192.168.1.42:7879"], fingerprint: id.fingerprint } });
+      ws.close();
+      // Plain http on that port is refused: the local network only ever speaks TLS.
+      expect(await fetch(`http://127.0.0.1:${hub.lan?.port}/v1/health`).then(() => "answered", () => "refused")).toBe("refused");
     } finally {
       hub.stop();
     }

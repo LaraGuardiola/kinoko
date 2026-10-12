@@ -1,4 +1,5 @@
-// `kinoko serve`'s HTTP and WebSocket server, on localhost (Tailscale brings the phone in). The
+// `kinoko serve`'s HTTP and WebSocket server, on localhost (Tailscale brings the phone in) and,
+// encrypted with its own certificate, on the local network. The
 // protocol is in docs/protocol.md: pairing over HTTP, then one WebSocket per device carrying JSON
 // messages both ways: the agent list, agents started, attached to, prompted, aborted, stopped.
 
@@ -11,6 +12,7 @@ import type { Image, Message } from "../types.ts";
 import { Agents, lineQueue } from "./agents.ts";
 import type { Child, Hello, Spawn } from "./agents.ts";
 import type { Device, Devices } from "./devices.ts";
+import type { Identity } from "./tls.ts";
 import { projects } from "./projects.ts";
 import { saveUploads, uploadsOf, withUploads } from "./uploads.ts";
 
@@ -38,6 +40,8 @@ export interface ServeOptions {
   /** Draws markdown (a fenced block, a table) as the TUI would, `width` columns wide: ANSI rows. */
   render?: (text: string, width: number) => string[];
   host?: string;
+  /** The local network too: listened on with TLS (the hub's own certificate), the app pins it. */
+  lan?: { port: number; host?: string; identity: Identity; urls: string[] };
   spawn?: Spawn;
   log?: (line: string) => void;
 }
@@ -65,7 +69,7 @@ type Incoming = {
   remember?: boolean;
 };
 
-export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Agents; watch: (listener: Watcher) => () => void; stop: () => void } {
+export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Server<Socket>; agents: Agents; watch: (listener: Watcher) => () => void; stop: () => void } {
   const sockets = new Set<ServerWebSocket<Socket>>();
   // Every agent's events, attached or not: the Telegram bridge listens here.
   const watchers = new Set<Watcher>();
@@ -158,67 +162,81 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
     }
   }
 
-  const server = Bun.serve<Socket>({
-    hostname: opts.host ?? "127.0.0.1",
-    port: opts.port,
-    async fetch(req, srv) {
-      const url = new URL(req.url);
-      if (url.pathname === "/v1/health") return Response.json({ name: "kinoko", version: opts.version, protocol: PROTOCOL });
-      if (url.pathname === "/v1/pair" && req.method === "POST") {
-        const now = Date.now();
-        failures = failures.filter((t) => now - t < 60_000);
-        if (failures.length >= 10) return Response.json({ error: "too many attempts: wait a minute" }, { status: 429 });
-        const body = (await req.json().catch(() => ({}))) as { code?: unknown; name?: unknown };
-        const paired = typeof body.code === "string" ? await opts.devices.pair(body.code, typeof body.name === "string" ? body.name : "phone") : undefined;
-        if (paired === undefined) {
-          failures.push(now);
-          return Response.json({ error: "that pairing code is wrong, used or expired: run `kinoko serve pair` for a new one" }, { status: 403 });
+  // Where else the app can reach this hub: the local network, encrypted, its certificate pinned.
+  const lan = opts.lan ? { urls: opts.lan.urls, fingerprint: opts.lan.identity.fingerprint } : undefined;
+
+  // The same hub on each address it listens on: here (Tailscale brings the phone in), and the LAN.
+  const listen = (where: { hostname: string; port: number; tls?: { cert: string; key: string } }): Server<Socket> =>
+    Bun.serve<Socket>({
+      ...where,
+      async fetch(req, srv) {
+        const url = new URL(req.url);
+        if (url.pathname === "/v1/health") return Response.json({ name: "kinoko", version: opts.version, protocol: PROTOCOL });
+        if (url.pathname === "/v1/pair" && req.method === "POST") {
+          const now = Date.now();
+          failures = failures.filter((t) => now - t < 60_000);
+          if (failures.length >= 10) return Response.json({ error: "too many attempts: wait a minute" }, { status: 429 });
+          const body = (await req.json().catch(() => ({}))) as { code?: unknown; name?: unknown };
+          const paired = typeof body.code === "string" ? await opts.devices.pair(body.code, typeof body.name === "string" ? body.name : "phone") : undefined;
+          if (paired === undefined) {
+            failures.push(now);
+            return Response.json({ error: "that pairing code is wrong, used or expired: run `kinoko serve pair` for a new one" }, { status: 403 });
+          }
+          log(`paired ${paired.device.name} (${paired.device.id})`);
+          return Response.json({ token: paired.token, device: { id: paired.device.id, name: paired.device.name }, version: opts.version, protocol: PROTOCOL, ...(lan ? { lan } : {}) });
         }
-        log(`paired ${paired.device.name} (${paired.device.id})`);
-        return Response.json({ token: paired.token, device: { id: paired.device.id, name: paired.device.name }, version: opts.version, protocol: PROTOCOL });
-      }
-      const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? url.searchParams.get("token") ?? "";
-      const device = await opts.devices.check(token);
-      if (device === undefined) return Response.json({ error: "not paired: scan the code from `kinoko serve pair`" }, { status: 401 });
-      if (url.pathname === "/v1/ws") {
-        if (srv.upgrade(req, { data: { device, attached: new Set<string>() } })) return undefined;
-        return Response.json({ error: "expected a WebSocket" }, { status: 400 });
-      }
-      if (url.pathname === "/v1/agents") return Response.json({ agents: agents.list() });
-      // The app's "Forget this computer": the device unpairs itself, so this side forgets it too.
-      if (url.pathname === "/v1/device" && req.method === "DELETE") {
-        await opts.devices.revoke(device.id);
-        for (const ws of sockets) if (ws.data.device.id === device.id) ws.close(4001, "unpaired");
-        log(`${device.name} unpaired itself (${device.id})`);
-        return Response.json({ ok: true });
-      }
-      return Response.json({ error: "not found" }, { status: 404 });
-    },
-    websocket: {
-      maxPayloadLength: 32 * 1024 * 1024, // a prompt may carry photos
-      idleTimeout: 120,
-      sendPings: true,
-      open(ws) {
-        sockets.add(ws);
-        log(`${ws.data.device.name} connected`);
-        send(ws, { type: "hello", version: opts.version, protocol: PROTOCOL, device: { id: ws.data.device.id, name: ws.data.device.name }, agents: agents.list() });
-      },
-      message(ws, raw) {
-        let msg: Incoming;
-        try {
-          msg = JSON.parse(String(raw)) as Incoming;
-        } catch {
-          send(ws, { type: "error", detail: "not JSON" });
-          return;
+        const token = req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? url.searchParams.get("token") ?? "";
+        const device = await opts.devices.check(token);
+        if (device === undefined) return Response.json({ error: "not paired: scan the code from `kinoko serve pair`" }, { status: 401 });
+        if (url.pathname === "/v1/ws") {
+          if (srv.upgrade(req, { data: { device, attached: new Set<string>() } })) return undefined;
+          return Response.json({ error: "expected a WebSocket" }, { status: 400 });
         }
-        handle(ws, msg).catch((e: unknown) => send(ws, { type: "error", id: msg.id, detail: e instanceof Error ? e.message : String(e) }));
+        if (url.pathname === "/v1/agents") return Response.json({ agents: agents.list() });
+        // The app's "Forget this computer": the device unpairs itself, so this side forgets it too.
+        if (url.pathname === "/v1/device" && req.method === "DELETE") {
+          await opts.devices.revoke(device.id);
+          for (const ws of sockets) if (ws.data.device.id === device.id) ws.close(4001, "unpaired");
+          log(`${device.name} unpaired itself (${device.id})`);
+          return Response.json({ ok: true });
+        }
+        return Response.json({ error: "not found" }, { status: 404 });
       },
-      close(ws) {
-        sockets.delete(ws);
-        log(`${ws.data.device.name} disconnected`);
+      websocket: {
+        maxPayloadLength: 32 * 1024 * 1024, // a prompt may carry photos
+        idleTimeout: 120,
+        sendPings: true,
+        open(ws) {
+          sockets.add(ws);
+          log(`${ws.data.device.name} connected`);
+          send(ws, { type: "hello", version: opts.version, protocol: PROTOCOL, device: { id: ws.data.device.id, name: ws.data.device.name }, agents: agents.list(), ...(lan ? { lan } : {}) });
+        },
+        message(ws, raw) {
+          let msg: Incoming;
+          try {
+            msg = JSON.parse(String(raw)) as Incoming;
+          } catch {
+            send(ws, { type: "error", detail: "not JSON" });
+            return;
+          }
+          handle(ws, msg).catch((e: unknown) => send(ws, { type: "error", id: msg.id, detail: e instanceof Error ? e.message : String(e) }));
+        },
+        close(ws) {
+          sockets.delete(ws);
+          log(`${ws.data.device.name} disconnected`);
+        },
       },
-    },
-  });
+    });
+
+  const server = listen({ hostname: opts.host ?? "127.0.0.1", port: opts.port });
+  let lanServer: Server<Socket> | undefined;
+  if (opts.lan) {
+    try {
+      lanServer = listen({ hostname: opts.lan.host ?? "0.0.0.0", port: opts.lan.port, tls: { cert: opts.lan.identity.cert, key: opts.lan.identity.key } });
+    } catch (e) {
+      log(`the local network: cannot listen on port ${opts.lan.port} (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
 
   // Terminals linking in are a bonus: a socket that cannot be opened (a path too long for one,
   // a read-only home) leaves the phone side working, and says so.
@@ -233,6 +251,7 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
 
   return {
     server,
+    ...(lanServer ? { lan: lanServer } : {}),
     agents,
     watch: (listener) => {
       watchers.add(listener);
@@ -242,6 +261,7 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; agents: Age
       agents.stopAll();
       links?.stop();
       void server.stop(true);
+      void lanServer?.stop(true);
     },
   };
 }
