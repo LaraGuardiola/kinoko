@@ -20,11 +20,12 @@ import { Bridge } from "./bridge.ts";
 import { projects } from "./projects.ts";
 import { expose, tailnet, unexpose } from "./tailscale.ts";
 import { userHome } from "../home.ts";
+import { hubSocket } from "./link.ts";
 
 const HOME = join(userHome(), ".kinoko");
 const STATE = join(HOME, "serve-state.json");
 /** Where kinoko TUIs link themselves to the hub (link.ts). */
-export const SOCKET = join(HOME, "serve.sock");
+export const SOCKET = hubSocket(userHome());
 
 interface State {
   pid: number;

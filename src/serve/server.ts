@@ -4,6 +4,7 @@
 // messages both ways: the agent list, agents started, attached to, prompted, aborted, stopped.
 
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
+import { isPipe } from "./link.ts";
 import { dirname, join } from "node:path";
 import { stat } from "node:fs/promises";
 import type { Server, ServerWebSocket } from "bun";
@@ -287,11 +288,14 @@ interface Link {
 
 /** The socket a kinoko TUI links itself through: its first line says who it is, the rest is rpc. */
 function listenForTerminals(path: string, agents: Agents, log: (line: string) => void): { stop: () => void } {
-  mkdirSync(dirname(path), { recursive: true }); // a first run: ~/.kinoko may not be there yet
-  try {
-    unlinkSync(path); // a socket left by a hub that died
-  } catch {
-    // none
+  const pipe = isPipe(path); // Windows: a named pipe, no file to make, clear or protect
+  if (!pipe) {
+    mkdirSync(dirname(path), { recursive: true }); // a first run: ~/.kinoko may not be there yet
+    try {
+      unlinkSync(path); // a socket left by a hub that died
+    } catch {
+      // none
+    }
   }
   const listener = Bun.listen<Link>({
     unix: path,
@@ -339,7 +343,7 @@ function listenForTerminals(path: string, agents: Agents, log: (line: string) =>
       },
     },
   });
-  chmodSync(path, 0o600); // only this user's processes may link
+  if (!pipe) chmodSync(path, 0o600); // only this user's processes may link
   return {
     stop: () => {
       listener.stop(true);

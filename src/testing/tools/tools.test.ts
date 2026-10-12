@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "nod
 import { defaultTools } from "../../tools/registry";
 import type { Tool } from "../../types";
 import { join } from "node:path";
+import { stopHint } from "../../shell.ts";
 
 const ROOT = `${process.cwd()}/.tmp-tools-test-${process.pid}`;
 
@@ -194,7 +195,7 @@ describe("bash background: true", () => {
     const out = await pick("bash").run({ command: "make -j8", background: true }, { ...ctx(fresh("bg")), background } as never);
     expect(started).toEqual(["make -j8"]);
     expect(out).toStartWith("started background job #4 (pid 4242): make -j8\nDo not wait for it");
-    expect(out).toContain("kill -- -4242");
+    expect(out).toContain(stopHint(4242)); // kill -- -4242; taskkill on Windows
     expect(await pick("bash").run({ command: "make", background: true }, ctx(fresh("bg2")))).toStartWith("ERROR: bash: background jobs only run");
   });
 });

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Agent } from "../../loop.ts";
 import { Devices } from "../../serve/devices.ts";
-import { linkToHub } from "../../serve/link.ts";
+import { hubSocket, isPipe, linkToHub } from "../../serve/link.ts";
 import { serve } from "../../serve/server.ts";
 import type { StreamEvent } from "../../types.ts";
 
@@ -37,7 +37,7 @@ async function until<T>(get: () => T | undefined, ms = 4000): Promise<T> {
 
 describe("serve: a terminal linked to the hub", () => {
   test("shows up as a terminal agent, runs a prompt from the phone, refuses to be stopped by it, leaves when it closes", async () => {
-    const socket = join(dir, "serve.sock");
+    const socket = hubSocket(dir); // a named pipe on Windows
     const devices = new Devices(join(dir, "serve.json"));
     const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: dir, version: "t", socket });
     const agent = new Agent({ provider, model: "qwen", system: "", tools: [], maxTurns: 4, maxCost: 10 });
@@ -74,7 +74,7 @@ describe("serve: a terminal linked to the hub", () => {
   });
 
   test("no hub, no link; a hub that starts later is found", async () => {
-    const socket = join(dir, "late.sock");
+    const socket = hubSocket(join(dir, "late"));
     const agent = new Agent({ provider, model: "m", system: "", tools: [], maxTurns: 4, maxCost: 10 });
     const unlink = linkToHub({ agent, socket, cwd: "/p", model: () => "m", session: () => "s" });
     const hub = serve({ port: 0, devices: new Devices(join(dir, "x.json")), command: ["kinoko"], sessionsDir: dir, version: "t", socket });
@@ -85,4 +85,16 @@ describe("serve: a terminal linked to the hub", () => {
       hub.stop();
     }
   }, 10_000);
+});
+
+describe("where the hub listens for terminals", () => {
+  test("a Unix socket in ~/.kinoko; on Windows a named pipe named after the home folder", () => {
+    expect(hubSocket("/home/me", "linux")).toBe(join("/home/me", ".kinoko", "serve.sock"));
+    const pipe = hubSocket("C:\\Users\\Me", "win32");
+    expect(pipe).toMatch(/^\\\\\.\\pipe\\kinoko-serve-[0-9a-z]+$/);
+    expect(hubSocket("c:\\users\\me", "win32")).toBe(pipe); // the same home, whatever its case
+    expect(hubSocket("C:\\Users\\Other", "win32")).not.toBe(pipe);
+    expect(isPipe(pipe)).toBe(true);
+    expect(isPipe("/home/me/.kinoko/serve.sock")).toBe(false);
+  });
 });

@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { isCrlf, withEndings } from "./eol";
 import { checkRead, remember } from "./tracker";
 import type { Tool, ToolContext } from "../types";
 
@@ -8,12 +9,15 @@ async function writeRun(args: Record<string, unknown>, ctx: ToolContext): Promis
   if (typeof path !== "string") return "ERROR: write: missing path (string)";
   if (typeof content !== "string") return "ERROR: write: missing content (string)";
   const abs = resolve(ctx.cwd, path);
+  let text = content;
   if (await Bun.file(abs).exists()) {
-    const err = await checkRead(abs);
+    const before = await Bun.file(abs).text();
+    const err = await checkRead(abs, before);
     if (err) return err;
+    text = withEndings(content, isCrlf(before)); // a CRLF file (Windows) stays CRLF
   }
-  await Bun.write(abs, content);
-  await remember(abs, content);
+  await Bun.write(abs, text);
+  await remember(abs, text);
   const lines = content === "" ? 0 : content.split("\n").length - (content.endsWith("\n") ? 1 : 0);
   return `wrote ${lines} lines (${content.length} chars) to ${path}`;
 }

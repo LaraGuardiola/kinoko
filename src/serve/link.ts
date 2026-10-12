@@ -9,6 +9,7 @@ import type { Socket } from "bun";
 import type { CommandHost } from "../commands.ts";
 import type { Agent } from "../loop.ts";
 import { Rpc } from "../rpc.ts";
+import { join } from "node:path";
 
 /** How often the TUI looks for a hub when it has none. */
 const LOOK_MS = 3_000;
@@ -37,7 +38,7 @@ export function linkToHub(opts: LinkOptions): () => void {
 
   async function attempt(): Promise<void> {
     if (stopped) return;
-    const there = await stat(opts.socket).then((s) => s.isSocket()).catch(() => false);
+    const there = isPipe(opts.socket) || (await stat(opts.socket).then((s) => s.isSocket()).catch(() => false));
     if (!there) return later();
     let rpc: Rpc | undefined;
     let buffer = "";
@@ -83,6 +84,15 @@ export function linkToHub(opts: LinkOptions): () => void {
     conn?.end();
   };
 }
+
+/** Where the hub listens for this user's terminals: a Unix socket in ~/.kinoko (mode 600); on
+ *  Windows, which has no socket files, a named pipe whose name comes from the home folder. */
+export function hubSocket(home: string, platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? `\\\\.\\pipe\\kinoko-serve-${Bun.hash(home.toLowerCase()).toString(36)}` : join(home, ".kinoko", "serve.sock");
+}
+
+/** A named pipe is no file: whether it is there is known by connecting. */
+export const isPipe = (path: string): boolean => path.startsWith("\\\\.\\pipe\\");
 
 /** Whether a hub listens on `socket` (a connection opened and closed at once, never a hello). */
 export async function hubRunning(socket: string): Promise<boolean> {

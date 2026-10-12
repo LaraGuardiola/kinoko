@@ -36,7 +36,10 @@ function applyEdits(content: string, edits: unknown): string | undefined {
 }
 
 /** The trailing newline is not visible in a read, so it never decides a match. */
-const body = (text: string): string => (text.endsWith("\n") ? text.slice(0, -1) : text);
+const body = (text: string): string => {
+  const lf = text.replaceAll("\r\n", "\n"); // a CRLF file is read without its "\r"
+  return lf.endsWith("\n") ? lf.slice(0, -1) : lf;
+};
 
 /** Marks as read every file whose last content in `messages` is still exactly what is on disk. */
 export async function restoreTracker(messages: Message[], cwd: string): Promise<number> {

@@ -1,6 +1,6 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { Extensions, extensionName, loadExtensions, loadOne } from "../ext.ts";
 import { Agent } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
@@ -50,7 +50,7 @@ describe("extension loader", () => {
 
     const { ext } = extBus();
     const loaded = await loadExtensions(ext, { cwd: cwd, home: home });
-    expect(loaded.map((p) => p.slice(p.lastIndexOf("/") + 1))).toEqual([
+    expect(loaded.map((p) => basename(p))).toEqual([
       "a-first.ts",
       "z-second.ts",
       "m-project.ts",
@@ -116,7 +116,7 @@ describe("extension loader", () => {
     writeOrderProbe(join(home, ".kinoko/ext"), "web.ts", "user");
     const { ext } = extBus();
     const loaded = await loadExtensions(ext, { cwd: home, home: home });
-    expect(loaded.map((p) => p.slice(p.lastIndexOf("/") + 1))).toEqual(["web.ts"]);
+    expect(loaded.map((p) => basename(p))).toEqual(["web.ts"]);
   });
 
   test("2. a broken extension is skipped, the good ones still load", async () => {
@@ -129,7 +129,7 @@ describe("extension loader", () => {
     writeExt(join(cwd, ".kinoko/ext"), "4-fine.ts", "export default function (k: { log: (m: string) => void }): void { k.log('fine loaded'); }");
 
     const loaded = await loadExtensions(ext, { cwd: cwd, home: home });
-    expect(loaded.map((p) => p.slice(p.lastIndexOf("/") + 1))).toEqual(["4-fine.ts"]);
+    expect(loaded.map((p) => basename(p))).toEqual(["4-fine.ts"]);
     expect(log.some((l) => l.includes("failed to load") && l.includes("1-syntax.ts"))).toBe(true);
     expect(log.some((l) => l.includes("no default export") && l.includes("2-no-default.ts"))).toBe(true);
     expect(log.some((l) => l.includes("boom"))).toBe(true);

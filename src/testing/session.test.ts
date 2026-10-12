@@ -4,7 +4,7 @@ import { Session, findSession, latestSession, sessionDir } from "../session.ts";
 import { openaiCompat } from "../providers/openai-compat.ts";
 import { Agent } from "../loop.ts";
 import type { Message, ProviderRequest, StreamEvent, Usage } from "../types.ts";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 const HOME = `${process.cwd()}/.tmp-session-test-${process.pid}`;
 const CWD = join(HOME, "project");
@@ -198,7 +198,7 @@ describe("session log", () => {
     expect(latestSession(CWD, HOME)).toBe(second.path);
     expect((await Session.load(latestSession(CWD, HOME)!)).view().at(-1)!.content).toBe("second");
     expect(latestSession(join(HOME, "other"), HOME)).toBeUndefined();
-    expect(sessionDir(CWD, HOME)).toStartWith(`${join(HOME, ".kinoko/sessions")}/`);
+    expect(sessionDir(CWD, HOME)).toStartWith(`${join(HOME, ".kinoko/sessions")}${sep}`);
   });
 
   test("6. compaction record turns the log into summary + verbatim tail", async () => {

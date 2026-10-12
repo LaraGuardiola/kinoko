@@ -85,9 +85,12 @@ export class Jobs {
         if (text !== "") take(text);
       }
     };
-    // Ended once it exited and its output is all read (a signal leaves no exit code).
+    // Ended once it exited and its output is all read (a signal leaves no exit code). A stopped job
+    // waits a second at most for its pipes: on Windows something it started can hold them open.
     const proc = child;
-    void Promise.all([proc.exited, read(proc.stdout), read(proc.stderr)])
+    const output = Promise.all([read(proc.stdout), read(proc.stderr)]);
+    const drained = proc.exited.then(() => (job.state === "killed" ? Promise.race([output, Bun.sleep(1_000)]) : output));
+    void Promise.all([proc.exited, drained])
       .catch(() => undefined)
       .then(() => finish(proc.exitCode));
     this.#changed();

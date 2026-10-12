@@ -57,7 +57,7 @@ import { jobsLabel, openJobs } from "./jobs-view.ts";
 import { applyProfile, currentProfile, readProfiles } from "../profiles.ts";
 import type { Jobs } from "../jobs.ts";
 import type { FilesState, IntegrationsHost } from "./integrations-menu.ts";
-import { hubRunning } from "../serve/link.ts";
+import { hubRunning, hubSocket } from "../serve/link.ts";
 import { userHome } from "../home.ts";
 
 
@@ -1201,7 +1201,7 @@ export class App {
         this.render();
       },
       changed: () => void this.#refreshCapabilities(),
-      hubRunning: this.#integrations?.hubRunning ?? (() => hubRunning(`${home}/.kinoko/serve.sock`)),
+      hubRunning: this.#integrations?.hubRunning ?? (() => hubRunning(hubSocket(home))),
       filesExtension: this.#integrations?.filesExtension ?? this.#telegramExtension(),
     };
   }
