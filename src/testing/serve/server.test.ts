@@ -151,6 +151,29 @@ describe("serve: the hub", () => {
     }
   });
 
+  test("a device unpairs itself (the app forgot this computer): its sockets close, its token stops working, the others stay", async () => {
+    const devices = new Devices(join(dir, "unpair.json"));
+    const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: dir, version: "t", spawn: fakeSpawn });
+    const base = `http://127.0.0.1:${hub.server.port}`;
+    const pair = async (name: string): Promise<string> => ((await (await fetch(`${base}/v1/pair`, { method: "POST", body: JSON.stringify({ code: await devices.code(), name }) })).json()) as { token: string }).token;
+    try {
+      const phone = await pair("phone");
+      const tablet = await pair("tablet");
+      const ws = new WebSocket(`ws://127.0.0.1:${hub.server.port}/v1/ws`, { headers: { authorization: `Bearer ${phone}` } } as unknown as string[]);
+      await new Promise((r) => ws.addEventListener("open", r, { once: true }));
+      const closed = new Promise<number>((r) => ws.addEventListener("close", (e) => r(e.code), { once: true }));
+      const res = await fetch(`${base}/v1/device`, { method: "DELETE", headers: { authorization: `Bearer ${phone}` } });
+      expect(await res.json()).toEqual({ ok: true });
+      expect(await closed).toBe(4001);
+      expect((await fetch(`${base}/v1/agents`, { headers: { authorization: `Bearer ${phone}` } })).status).toBe(401);
+      expect((await fetch(`${base}/v1/agents`, { headers: { authorization: `Bearer ${tablet}` } })).status).toBe(200);
+      expect((await devices.list()).map((d) => d.name)).toEqual(["tablet"]);
+      expect((await fetch(`${base}/v1/device`, { method: "DELETE" })).status).toBe(401); // no token: nothing to forget
+    } finally {
+      hub.stop();
+    }
+  });
+
   test("resume and model reach the child's command line", async () => {
     const hub = serve({ port: 0, devices: new Devices(join(dir, "x.json")), command: ["bun", "main.ts"], sessionsDir: dir, version: "t", spawn: fakeSpawn });
     try {
