@@ -316,4 +316,27 @@ describe("a new width redraws the screen from what was printed", () => {
     expect(renderer.rewrite("capabilities", "Extensions: a, b")).toBe(true);
     expect(renderer.rowAt(renderer.top! - 1)).toBe(" Extensions: a, b");
   });
+
+  test("the scrollback too: wiped and printed whole at the new width, unless something not kinoko's is in it", () => {
+    let cols = 42;
+    const out: string[] = [];
+    const renderer = new Renderer({ write: (text) => out.push(text), columns: () => cols, rows: () => 6, now: () => 1000 });
+    renderer.update({ lines: ["> "], row: 0, col: 2 });
+    renderer.flush();
+    for (let i = 0; i < 10; i++) renderer.printAbove(band(40), undefined, band); // far more than the screen
+    cols = 22;
+    renderer.flush();
+    const whole = out.at(-1) ?? "";
+    expect(whole).toContain("\x1b[2J\x1b[3J"); // the terminal's ragged re-wrap goes
+    expect(whole.split(` ${"█".repeat(20)}\r\n`).length - 1).toBe(10); // every band, 20 wide
+    expect(whole).not.toContain("█".repeat(21));
+    // A shell ran in the terminal (!command): its output is not kinoko's to print again.
+    renderer.suspend();
+    renderer.resume();
+    cols = 32;
+    renderer.flush();
+    const screen = out.at(-1) ?? "";
+    expect(screen).not.toContain("\x1b[3J");
+    expect(screen.split(` ${"█".repeat(30)}\r\n`).length - 1).toBeLessThan(10); // the screen's rows only
+  });
 });
