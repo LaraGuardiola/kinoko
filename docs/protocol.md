@@ -77,6 +77,7 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `hello` | on connect | `version`, `protocol`, `device {id, name}`, `agents: [AgentInfo]`, `lan {urls, fingerprint}` when it listens on the LAN (a new IP reaches the app) |
 | `agents` | an agent starts or stops, a run starts or ends; and for `list` | `agents: [AgentInfo]`, newest activity first |
 | `projects` | for `projects` | `projects: [Project]` |
+| `folders` | for `folders` | `path` (the one asked), `folders: [string]`: absolute paths |
 | `history` | for `attach` | `agent`, `info: AgentInfo`, `messages: [Message]`, `live: [AgentEvent]` |
 | `event` | an attached agent did something | `agent`, `event: AgentEvent` |
 | `ok` | a command was taken | `id`, and per command: `agent` (start), `text` (prompt: "started") |
@@ -90,8 +91,9 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `type` | Fields | Does |
 |---|---|---|
 | `list` | | the agents again |
-| `projects` | | the projects kinoko has worked in, with their recent sessions |
-| `start` | `cwd`, `session?` (an id, or `"continue"`), `model?` | starts an agent there; the app is attached to it |
+| `projects` | | the projects kinoko has worked in (not under /tmp, still there), with their recent sessions |
+| `folders` | `path` (as typed; `~` is the home) | the folders that complete it: inside it when it ends in `/`, else those starting with its last part |
+| `start` | `cwd` (`~` allowed), `session?` (an id, or `"continue"`), `model?` | starts an agent there; the app is attached to it |
 | `attach` | `agent` | the conversation so far, then its events as they happen |
 | `detach` | `agent` | no more events from it |
 | `prompt` | `agent`, `text`, `images?`, `files?` | a new run (refused while one runs: use steer) |

@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Child, Spawn } from "../../serve/agents.ts";
@@ -139,6 +139,10 @@ describe("serve: the hub", () => {
 
       c.send({ id: "w", type: "render", text: "```ts\nx\n```", width: 7 });
       expect(await c.next("rendered")).toEqual({ type: "rendered", id: "w", lines: ["20:```ts\nx\n```"] }); // at least 20 columns
+
+      mkdirSync(join(dir, "Somewhere"), { recursive: true });
+      c.send({ id: "f", type: "folders", path: `${dir}/some` });
+      expect(await c.next("folders")).toEqual({ type: "folders", id: "f", path: `${dir}/some`, folders: [join(dir, "Somewhere")] });
 
       c.send({ id: "4", type: "stop", agent: id });
       await c.next("ok");

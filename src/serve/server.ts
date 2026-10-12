@@ -13,6 +13,7 @@ import { Agents, lineQueue } from "./agents.ts";
 import type { Child, Hello, Spawn } from "./agents.ts";
 import type { Device, Devices } from "./devices.ts";
 import type { Identity } from "./tls.ts";
+import { expandHome, folders } from "./dirs.ts";
 import { projects } from "./projects.ts";
 import { saveUploads, uploadsOf, withUploads } from "./uploads.ts";
 
@@ -67,6 +68,7 @@ type Incoming = {
   request?: string; // approve: the approval_request's id
   allow?: boolean;
   remember?: boolean;
+  path?: string; // folders: what was typed so far
 };
 
 export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Server<Socket>; agents: Agents; watch: (listener: Watcher) => () => void; stop: () => void } {
@@ -102,9 +104,14 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Serve
         return send(ws, { type: "agents", id: msg.id, agents: agents.list() });
       case "projects":
         return send(ws, { type: "projects", id: msg.id, projects: await projects(opts.sessionsDir) });
+      case "folders": {
+        const path = typeof msg.path === "string" ? msg.path : "";
+        return send(ws, { type: "folders", id: msg.id, path, folders: await folders(path) });
+      }
       case "start": {
-        if (typeof msg.cwd !== "string" || !(await isDir(msg.cwd))) return fail(`no directory ${String(msg.cwd)}`);
-        const info = agents.start({ cwd: msg.cwd, session: msg.session, model: msg.model });
+        const cwd = typeof msg.cwd === "string" ? expandHome(msg.cwd) : undefined;
+        if (cwd === undefined || !(await isDir(cwd))) return fail(`no directory ${String(msg.cwd)}`);
+        const info = agents.start({ cwd, session: msg.session, model: msg.model });
         ws.data.attached.add(info.id);
         log(`${ws.data.device.name} started ${info.id} in ${info.cwd}`);
         return ok({ agent: info });

@@ -812,3 +812,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 - `src/serve/renderers.ts`: before each drawing the hub looks at the mtimes of `~/.kinoko/disabled.json` and `~/.kinoko/ext` (two stats), and loads the extensions again when they changed (one load at a time). `render` in the server may now be async.
 - Not done: an extension updated in place (same folder) is not seen until the hub restarts (Bun keeps the imported module).
 - Tests: a renderer off at start, switched on, then off again, without a new hub. 496 pass.
+
+## feat/start-anywhere: start an agent anywhere from the phone (branch feat/start-anywhere; kinoko-android too)
+- Asked by the user: "Start an agent in…" listed temporary folders from tests (/tmp/…), and there was no way to search or type a path.
+- Hub: `projects` leaves out folders under the temp dirs (os.tmpdir(), /tmp, /var/tmp) and those that no longer exist. New `folders` request (`src/serve/dirs.ts`): the folders completing a typed path (`~` is the home; inside it when it ends in "/", else those starting with its last part, any case; hidden ones only when asked for with "."). `start` takes `~` too.
+- App: a field at the top of the sheet. Words filter the projects (name or folder, every word). A path (/ or ~) asks the computer for its folders as it is typed (150 ms after the last key): tap one to go into it, ▶ to start there; "Start here" when what is typed is a folder (ends in "/" or is one of those listed); Go on the keyboard does the same.
+- Seen live (sandbox hub 7979, emulator): the /tmp and deleted projects gone, typing /home/enterprise/Projects/kin listed the five kinoko folders, tapping kinoko went in (docs, examples…), Start here started the agent there.
+- Not done: no "~" shown back in the list (absolute paths), no creating folders.
+- Tests: projects without throwaway/deleted ones, folder completion, the hub's `folders`; app: parsing, isPath/matching/isFolder. 499 pass.
