@@ -901,3 +901,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - `nohup … &` inside a background job: the job ended at 0s and what it started ran on, unwatched, after kinoko quit. Now a job that ends with its process group still alive is marked (leftover), its end note says so with the stop command and "use background: true without & or nohup to be told", and quitting kinoko takes those groups too. A plain bash command that leaves processes behind gets the same note but they are NOT killed on quit (a server put aside on purpose must outlive kinoko).
 - Unix only: Windows has no process groups to ask (groupAlive is false there).
 - Not done: a job that tells the model on each line of output (only its end wakes the model; a job that exits on the event and is started again is the way).
+
+## fix/steer-multiline: a queued job note no longer smears the screen (branch fix/steer-multiline)
+- Seen live (screenshot): a background job ended while the model was thinking; its end note, queued as a steer, has several lines, and the live region drew `[steer] <note>` as ONE row with raw newlines in it. The renderer counted fewer rows than the terminal showed, so every repaint left a copy of the streaming thinking above ("The", "The user", "The user also wants me"...).
+- Now a queued message shows its first line, with " …" when there is more (the whole text still goes to the model). Test: no region row holds a newline.
+- Then the same, seen with the jobs menu open (screenshot: the editor and its rules copied down the screen, one copy a second as the elapsed time ticked): a job's multi-line command in its row. Fixed where every row passes (view.ts region()): a raw newline in any row becomes " ↵ ", so no menu or note can do it again.
+- Seen by eye (foot): a 3-line `bash -c` job in /jobs is one row, nothing copied after 8 s of ticking.
+- Not done: the scrollback already smeared by old copies stays so (it is the terminal's); resizing to half a screen was not retried here.

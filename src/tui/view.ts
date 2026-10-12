@@ -204,7 +204,10 @@ export function liveRegion(input: RegionInput): Region {
     tail.push("", `${ANSI.dim}${steering ? "alt+x send now · " : ""}alt+c cancel · alt+↑ edit the last${ANSI.reset}`);
     for (const item of input.queued) {
       const tag = item.kind === "steer" ? "[steer]" : "[follow-up]";
-      tail.push(`${ANSI.cream}${tag} ${item.text}${ANSI.reset}`);
+      // One row each: a message of several lines (a job's end note) shows its first, or its raw
+      // newlines would draw rows the region does not count, and each repaint would leave a copy.
+      const [first = "", ...more] = item.text.split(/\r?\n/);
+      tail.push(`${ANSI.cream}${tag} ${first}${more.length > 0 ? " …" : ""}${ANSI.reset}`);
     }
   }
   // The editor sits between two rules, with a block cursor drawn in place (the terminal's own
@@ -284,9 +287,12 @@ export function thinkingBlock(text: string): string {
 
 /** Keeps a live row inside the terminal margin: terminals wrap a margin write on the next byte. */
 function region(rows: string[], row: number, col: number, width: number | undefined, upper: number): Region {
-  if (width === undefined) return { lines: rows, row, col, upper };
+  // One row is one terminal row: a raw newline (a job's multi-line command in a menu) would draw
+  // rows the renderer does not count, and every repaint would leave a copy of the region above.
+  const flat = rows.map((line) => line.replace(/\r?\n|\r/g, " ↵ "));
+  if (width === undefined) return { lines: flat, row, col, upper };
   const max = Math.max(1, width - 2);
-  return { lines: rows.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max), upper };
+  return { lines: flat.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max), upper };
 }
 
 export function statusLine(parts: {
