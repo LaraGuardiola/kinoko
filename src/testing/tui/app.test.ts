@@ -699,7 +699,7 @@ describe("TUI app with the agent", () => {
   });
 
   test("12c. no model set up: the status says so, a prompt keeps its text and opens /models, never the model", async () => {
-    const h = await harness([[{ type: "done", stop: "end" }]], { noModel: true, modelsHost: { endpoint: "", saved: [], connect: () => ({}) as never, discover: async () => [], save: async () => [], remove: async () => [] } });
+    const h = await harness([[{ type: "done", stop: "end" }]], { noModel: true, modelsHost: { endpoint: "", saved: [], connect: () => ({}) as never, discover: async () => [], save: async () => [], remove: async () => [], fixed: () => false } });
     expect(h.app.statusLine).toContain("no model yet");
     h.app.noModelHint();
     expect(h.screen()).toContain("No model set up yet");
