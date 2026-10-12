@@ -22,3 +22,12 @@ jobs:
       - run: bun run lint
       - run: bunx tsc --noEmit
       - run: bun test
+      # The Windows binary, to try on a real Windows (Actions → this run → Artifacts).
+      - if: matrix.os == 'windows-latest'
+        run: bun build --compile --outfile kinoko-out/kinoko.exe src/main.ts
+      - if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: kinoko-windows-x64
+          path: kinoko-out/kinoko.exe
+          retention-days: 14
