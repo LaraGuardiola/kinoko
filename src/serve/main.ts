@@ -139,7 +139,8 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   out(`  local    ${url}`);
   if (!local && !argv.includes("--no-tailscale")) {
     const tn = await tailnet(signal);
-    if (typeof tn === "string") out(`  tailscale ${dim(`off: ${tn}`)}`);
+    // Said loud: without it, the devices reach this computer from its own network only.
+    if (typeof tn === "string") out(`  tailscale \x1b[33moff\x1b[0m: ${tn} ${dim("(until then, devices reach this computer from this network only)")}`);
     else {
       const exposed = await expose({ port, publicPort, funnel, dns: tn.dns }, signal);
       if (exposed instanceof Error) out(`  tailscale \x1b[31mcould not share\x1b[0m: ${exposed.message}`);
