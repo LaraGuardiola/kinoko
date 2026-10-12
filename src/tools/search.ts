@@ -1,6 +1,5 @@
 import { estimateTokens } from "./budget";
 import { makeBackend, smartRegex } from "./search-backends";
-import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Tool, ToolContext } from "../types";
 import type { Backend, Hit, ScanNote, SearchQuery } from "./search-backends";
@@ -61,12 +60,12 @@ interface Row {
   mtimeMs: number;
 }
 
-function mtimeMs(file: string): number {
-  try {
-    return statSync(file).mtimeMs;
-  } catch {
-    return 0;
-  }
+/** When a file last changed (0 when it is gone): read without blocking. */
+function mtimeMs(file: string): Promise<number> {
+  return Bun.file(file)
+    .stat()
+    .then((st) => st.mtimeMs)
+    .catch(() => 0);
 }
 
 function trimAround(text: string, max: number): string {
@@ -101,7 +100,7 @@ async function contentText(backend: Backend, query: SearchQuery): Promise<string
     const hit2 = { path: hit.path, line: hit.line, text: text, kind: hit.kind };
     const row = rows[hit.path];
     if (row === undefined) {
-      const fresh: Row = { path: hit.path, hits: [hit2], mtimeMs: mtimeMs(`${query.path}/${hit.path}`) };
+      const fresh: Row = { path: hit.path, hits: [hit2], mtimeMs: 0 };
       rows[hit.path] = fresh;
       order.push(hit.path);
     } else {
@@ -115,6 +114,8 @@ async function contentText(backend: Backend, query: SearchQuery): Promise<string
   if (query.signal.aborted) {
     return "Aborted by user";
   }
+  // When each file last changed, all at once: the newest first among equal hit counts.
+  await Promise.all(order.map(async (p) => ((rows[p] as Row).mtimeMs = await mtimeMs(`${query.path}/${p}`))));
 
   order.sort((a: string, b: string) => {
     const aRow = rows[a];
@@ -210,7 +211,7 @@ function looksLikeGlob(pattern: string): boolean {
 }
 
 /** Everything cheap that can refuse the request before a backend is started. */
-function validate(args: SearchArgs, ctx: ToolContext): null | string {
+async function validate(args: SearchArgs, ctx: ToolContext): Promise<null | string> {
   const pattern = args.pattern;
   if (typeof pattern !== "string" || pattern === "") {
     return "ERROR: search: pattern must be a non-empty string";
@@ -222,12 +223,11 @@ function validate(args: SearchArgs, ctx: ToolContext): null | string {
   const raw = typeof args.path === "string" && args.path !== "" ? args.path : ".";
   // resolve() keeps absolute paths and `..` working, instead of gluing them onto the cwd.
   const path = resolve(ctx.cwd, raw);
-  let dir = false;
-  try {
-    dir = statSync(path).isDirectory();
-  } catch {
-    return `ERROR: search: path not found: ${raw}`;
-  }
+  const dir = await Bun.file(path)
+    .stat()
+    .then((st) => st.isDirectory())
+    .catch(() => undefined);
+  if (dir === undefined) return `ERROR: search: path not found: ${raw}`;
   if (!dir) {
     return `ERROR: search: not a directory: ${raw} (search walks a directory tree)`;
   }
@@ -235,7 +235,7 @@ function validate(args: SearchArgs, ctx: ToolContext): null | string {
 }
 
 async function searchRun(args: SearchArgs, ctx: ToolContext): Promise<string> {
-  const refused = validate(args, ctx);
+  const refused = await validate(args, ctx);
   if (refused !== null) {
     return refused;
   }

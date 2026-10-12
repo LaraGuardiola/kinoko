@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { budget } from "./budget";
 import type { Tool, ToolContext } from "../types";
 
@@ -33,18 +32,28 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
   }
   const timeoutMs = typeof args.timeout === "number" && args.timeout > 0 ? Math.trunc(args.timeout) : DEFAULT_TIMEOUT_MS;
 
-  // No stdin: a command waiting for input would otherwise wait forever.
-  const child = spawn("sh", ["-c", cmd], { detached: true, cwd: ctx.cwd, stdio: ["ignore", "pipe", "pipe"] });
-  const pid = child.pid ?? -1;
+  // No stdin: a command waiting for input would otherwise wait forever. Its own process group
+  // (detached), so a kill reaches whatever it started too.
+  let child;
+  try {
+    child = Bun.spawn(["sh", "-c", cmd], { detached: true, cwd: ctx.cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  } catch (e) {
+    return `ERROR: bash: could not start sh: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  const pid = child.pid;
 
   const chunks: string[] = [];
-  const collect = (s: string): void => {
-    chunks.push(s);
-    ctx.onOutput?.(s);
-  };
   // utf8 decoding per stream: a multi-byte character split across two chunks stays whole.
-  child.stdout.setEncoding("utf8").on("data", collect);
-  child.stderr.setEncoding("utf8").on("data", collect);
+  const read = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
+    const decoder = new TextDecoder();
+    for await (const bytes of stream) {
+      const s = decoder.decode(bytes, { stream: true });
+      if (s === "") continue;
+      chunks.push(s);
+      ctx.onOutput?.(s);
+    }
+  };
+  const drained = Promise.all([read(child.stdout), read(child.stderr)]).catch(() => undefined);
 
   const killGroup = (): void => {
     try {
@@ -59,31 +68,28 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
     return "Aborted by user";
   }
 
-  return new Promise<string>((resolve) => {
-    const finish = (value: string): void => resolve(value);
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    killGroup();
+  }, timeoutMs);
+  // Esc answers at once: the group is killed, and the run does not wait for its pipes to close.
+  const aborted = Promise.withResolvers<"aborted">();
+  const onAbort = (): void => {
+    killGroup();
+    aborted.resolve("aborted");
+  };
+  ctx.signal.addEventListener("abort", onAbort, { once: true });
+  const ended = await Promise.race([Promise.all([child.exited, drained]).then(() => "ended" as const), aborted.promise]);
+  clearTimeout(timer);
+  ctx.signal.removeEventListener("abort", onAbort);
+  if (ended === "aborted") return "Aborted by user";
 
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killGroup();
-    }, timeoutMs);
-
-    const onAbort = (): void => {
-      killGroup();
-      finish("Aborted by user");
-    };
-    ctx.signal.addEventListener("abort", onAbort);
-
-    child.on("close", async (code: number | null) => {
-      clearTimeout(timer);
-      ctx.signal.removeEventListener("abort", onAbort);
-      const raw = chunks.join("");
-      // A failed command says so at the end, where the budget's head+tail always keeps it.
-      const exit = code !== null && code !== 0 ? `\n[exit code ${code}]` : "";
-      const suffix = timedOut ? `\n[timed out after ${timeoutMs}ms — process group killed]` : exit;
-      finish(await budget(raw + suffix, { maxTokens: DEFAULT_MAX_TOKENS, id: crypto.randomUUID() }));
-    });
-  });
+  // A signal (the timeout's kill) leaves no exit code, as a normal end of 0 adds nothing.
+  const code = child.exitCode;
+  const exit = code !== null && code !== 0 ? `\n[exit code ${code}]` : "";
+  const suffix = timedOut ? `\n[timed out after ${timeoutMs}ms — process group killed]` : exit;
+  return budget(chunks.join("") + suffix, { maxTokens: DEFAULT_MAX_TOKENS, id: crypto.randomUUID() });
 }
 
 export const bashTool: Tool = {

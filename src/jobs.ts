@@ -3,9 +3,8 @@
 // in memory, and when it ends the agent is told (main wakes it, or tells it mid-run). Esc does not
 // stop a job: the jobs page does (Del twice), and so does quitting kinoko.
 
-import { spawn } from "node:child_process";
-import { createWriteStream, mkdirSync } from "node:fs";
-import type { WriteStream } from "node:fs";
+import { closeSync, mkdirSync, openSync } from "node:fs";
+import type { FileSink } from "bun";
 import { join } from "node:path";
 
 export type JobState = "running" | "done" | "failed" | "killed";
@@ -29,7 +28,7 @@ const TAIL_CHARS = 64 * 1024;
 export class Jobs {
   #dir: string;
   #onEnd: (job: Job) => void;
-  #jobs: Array<{ job: Job; tail: string; out: WriteStream; ended: Promise<void> }> = [];
+  #jobs: Array<{ job: Job; tail: string; out: FileSink; ended: Promise<void> }> = [];
   #listeners = new Set<() => void>();
   #next = 1;
   #stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
@@ -44,29 +43,51 @@ export class Jobs {
     mkdirSync(this.#dir, { recursive: true, mode: 0o700 });
     const id = this.#next++;
     const log = join(this.#dir, `${this.#stamp}-${id}.log`);
-    const child = spawn("sh", ["-c", command], { detached: true, cwd, stdio: ["ignore", "pipe", "pipe"] });
-    const job: Job = { id, command, cwd, pid: child.pid ?? -1, started: Date.now(), state: "running", log };
-    const out = createWriteStream(log, { mode: 0o600 });
+    // The log is the user's alone (0600); Bun writes it through the descriptor, closed at the end.
+    const fd = openSync(log, "w", 0o600);
+    const out = Bun.file(fd).writer();
     const ended = Promise.withResolvers<void>();
+    const job: Job = { id, command, cwd, pid: -1, started: Date.now(), state: "running", log };
     const entry = { job, tail: "", out, ended: ended.promise };
     this.#jobs.push(entry);
     const take = (chunk: string): void => {
       out.write(chunk);
+      out.flush();
       entry.tail = (entry.tail + chunk).slice(-TAIL_CHARS);
       this.#changed();
     };
-    child.stdout.setEncoding("utf8").on("data", take);
-    child.stderr.setEncoding("utf8").on("data", take);
-    child.on("error", (e) => take(`\n[could not start: ${e.message}]\n`));
-    child.on("close", (code) => {
+    const finish = async (code: number | null): Promise<void> => {
       job.ended = Date.now();
       job.code = code;
       if (job.state === "running") job.state = code === 0 ? "done" : "failed";
-      out.end();
+      await out.end();
+      closeSync(fd);
       this.#changed();
       ended.resolve();
       this.#onEnd({ ...job });
-    });
+    };
+    // Its own process group (detached): stopping it stops what it started too.
+    let child;
+    try {
+      child = Bun.spawn(["sh", "-c", command], { detached: true, cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    } catch (e) {
+      take(`\n[could not start: ${e instanceof Error ? e.message : String(e)}]\n`);
+      void finish(null);
+      return { ...job };
+    }
+    job.pid = child.pid;
+    const read = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
+      const decoder = new TextDecoder();
+      for await (const bytes of stream) {
+        const text = decoder.decode(bytes, { stream: true });
+        if (text !== "") take(text);
+      }
+    };
+    // Ended once it exited and its output is all read (a signal leaves no exit code).
+    const proc = child;
+    void Promise.all([proc.exited, read(proc.stdout), read(proc.stderr)])
+      .catch(() => undefined)
+      .then(() => finish(proc.exitCode));
     this.#changed();
     return { ...job };
   }

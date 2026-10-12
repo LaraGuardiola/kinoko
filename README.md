@@ -172,8 +172,8 @@ Anthropic: `"provider": "anthropic"` with a Console API key (`apiKey`, or `$ANTH
 | `search` | one tool for grep + glob + find: smart-case, .gitignore aware, token budgeted |
 | `todo` | the model's plan: the whole list each call (pending, in progress, done), shown in the side panel |
 
-`search` has three backends and no index: `rg` from `PATH`, a pinned ripgrep downloaded once to
-`~/.kinoko/bin`, or a pure-Bun fallback. `bun run scripts/probe-engine.ts` tells you what your local
+`search` has two backends and no index: `rg` from `PATH` (install ripgrep for speed), or a pure-Bun
+scan. kinoko never downloads anything on its own. `bun run scripts/probe-engine.ts` tells you what your local
 engine can do.
 
 ## Sessions, context and compaction

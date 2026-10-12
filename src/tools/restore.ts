@@ -5,7 +5,6 @@
 // it since, and a read is still required.
 
 import { resolve } from "node:path";
-import { readFile, stat } from "node:fs/promises";
 import type { Message } from "../types.ts";
 import { hashOf, tracker } from "./tracker.ts";
 
@@ -61,11 +60,12 @@ export async function restoreTracker(messages: Message[], cwd: string): Promise<
   let restored = 0;
   for (const [path, content] of known) {
     if (content === undefined) continue;
+    const file = Bun.file(path);
     // oxlint-disable-next-line no-await-in-loop -- a handful of small files, once, at resume
-    const disk = await readFile(path, "utf8").catch(() => undefined);
+    const disk = await file.text().catch(() => undefined);
     if (disk === undefined || body(disk) !== body(content)) continue;
     // oxlint-disable-next-line no-await-in-loop -- same pass
-    const st = await stat(path);
+    const st = await file.stat();
     tracker.record(path, { mtimeMs: st.mtimeMs, hash: hashOf(disk) });
     restored++;
   }
