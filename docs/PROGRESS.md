@@ -806,3 +806,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Tests: the certificate (valid, self-signed, 20 years, fingerprint = X509's), kept and 0600, LAN address filtering; the hub over TLS (health, pairing with lan, wss hello with lan, plain http refused). App: the fingerprint of a certificate made by tls.ts matches the one kinoko computes, the pin accepts it and refuses others, the QR and hello parse lan. 495 pass here.
 - With Tailscale stopped (the user had turned it off), the QR's main address is the LAN one: away from home it cannot be reached. The startup says so in yellow; the app explains a home-network address it cannot reach (join that Wi-Fi, or `tailscale up`, restart, new code).
 - For the user: UFW blocks the port; `sudo ufw allow from 192.168.1.0/24 to any port 7879 proto tcp` (their subnet).
+
+## fix/serve-renderers: the phone draws ```mermaid with what is switched on now (branch fix/serve-renderers)
+- Reported by the user: mermaid switched on (outside the psilocybe profile) and the app still showed the source. `kinoko serve` loaded the extensions' renderers once at startup (theirs started at 02:41, mermaid off then) and never again.
+- `src/serve/renderers.ts`: before each drawing the hub looks at the mtimes of `~/.kinoko/disabled.json` and `~/.kinoko/ext` (two stats), and loads the extensions again when they changed (one load at a time). `render` in the server may now be async.
+- Not done: an extension updated in place (same folder) is not seen until the hub restarts (Bun keeps the imported module).
+- Tests: a renderer off at start, switched on, then off again, without a new hub. 496 pass.

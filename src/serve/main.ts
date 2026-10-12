@@ -10,10 +10,10 @@
 import { unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { Extensions, loadExtensions } from "../ext.ts";
-import { renderMarkdown, setFenceRenderers } from "../tui/markdown.ts";
+import { renderMarkdown } from "../tui/markdown.ts";
 import { Devices } from "./devices.ts";
 import { qrText } from "./qr.ts";
+import { fenceRenderers } from "./renderers.ts";
 import { identity, lanAddresses } from "./tls.ts";
 import { serve } from "./server.ts";
 import { Bridge } from "./bridge.ts";
@@ -34,8 +34,6 @@ interface State {
   lan?: { url: string; fingerprint: string };
 }
 
-/** Markdown as the TUI draws it, `width` columns wide: what the phone shows for a block. */
-const render = (text: string, width: number): string[] => renderMarkdown(text, { width }).split("\n");
 const time = (): string => new Date().toTimeString().slice(0, 8);
 const out = (line = ""): void => void process.stdout.write(`${line}\n`);
 const dim = (text: string): string => `\x1b[2m${text}\x1b[0m`;
@@ -120,10 +118,13 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   const lanUrls = local || argv.includes("--no-lan") ? [] : lanAddresses().map((ip) => `https://${ip}:${lanPort}`);
   const lanIdentity = lanUrls.length > 0 ? await identity(join(HOME, "tls")) : undefined;
   // The extensions, loaded only for their renderers (```mermaid…): the phone gets blocks drawn as
-  // the TUI draws them.
-  const ext = new Extensions(() => undefined);
-  await loadExtensions(ext, { cwd: process.env.HOME ?? homedir() });
-  setFenceRenderers((lang) => ext.renderer(lang));
+  // the TUI draws them, with what is switched on now.
+  const renderers = fenceRenderers(process.env.HOME ?? homedir());
+  await renderers.fresh();
+  const render = async (text: string, width: number): Promise<string[]> => {
+    await renderers.fresh();
+    return renderMarkdown(text, { width }).split("\n");
+  };
   const hub = serve({ port, ...(lanIdentity ? { lan: { port: lanPort, identity: lanIdentity, urls: lanUrls } } : {}), devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
 
   // Telegram (set up from the TUI's /integrations): it answers while the hub runs.
