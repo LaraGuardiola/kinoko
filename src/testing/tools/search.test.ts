@@ -144,7 +144,9 @@ describe("search tool", () => {
     process.env.KINOKO_RG_BACKEND = "";
     expect(rg.includes("hidden.txt")).toBe(false);
     expect(bun.includes("hidden.txt")).toBe(false);
-    const forced = await searchTool.run({ no_ignore: true, pattern: "needle" }, ctx(dir));
-    expect(forced.includes("hidden.txt")).toBe(true);
+    // no_ignore: both backends find it (CI machines have no rg: there the bun one answers).
+    const [forcedRg, forcedBun] = await bothBackends({ no_ignore: true, pattern: "needle" }, dir);
+    expect(forcedRg.includes("hidden.txt")).toBe(true);
+    expect(forcedBun.includes("hidden.txt")).toBe(true);
   });
 });
