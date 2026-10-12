@@ -63,6 +63,8 @@ import { hubRunning } from "../serve/link.ts";
 
 export interface AppOptions {
   agent: Agent;
+  /** Extensions' slash commands: in the menu, run by `/name args`. */
+  extensionCommands?: { list: () => Array<{ name: string; description: string }>; get: (name: string) => ((args: string) => string | Promise<string>) | undefined };
   write: (text: string) => void;
   /** 0-based model id shown in the status line. */
   model: string;
@@ -146,6 +148,7 @@ export class App {
   #apply: AppOptions["apply"];
   #capabilities: AppOptions["capabilities"];
   #jobs: Jobs | undefined;
+  #extensionCommands: AppOptions["extensionCommands"];
   /** The block with the [Capabilities] lines as printed (the startup panel, or a fresh copy). */
   #panel: { text: string; gap: boolean } | undefined;
   #panelStale = false; // changed while scrolled off screen: printed again when the menu closes
@@ -218,6 +221,7 @@ export class App {
     });
     this.#capabilities = opts.capabilities;
     this.#jobs = opts.jobs;
+    this.#extensionCommands = opts.extensionCommands;
     this.#jobs?.on(() => this.render()); // the label counts them
     this.#newSessionOf = opts.newSession;
     this.#resumeOf = opts.resumeSession;
@@ -925,8 +929,22 @@ export class App {
         await this.#shell(input.replace(/^\/?shell\s*/, ""));
         return true;
       default:
-        return false;
+        return this.#extensionCommand(name, input.replace(/^\/?\S+\s*/, ""));
     }
+  }
+
+  /** An extension's command: what it answers, printed here; one that throws says so. */
+  async #extensionCommand(name: string, args: string): Promise<boolean> {
+    const run = this.#extensionCommands?.get(name);
+    if (run === undefined) return false;
+    this.#print("system", `${ANSI.dim}/${name}${args ? ` ${args}` : ""}…${ANSI.reset}`);
+    this.render();
+    const answer = await Promise.resolve()
+      .then(() => run(args))
+      .catch((e: unknown) => `/${name} failed: ${e instanceof Error ? e.message : String(e)}`);
+    this.#print("system", answer);
+    this.render();
+    return true;
   }
 
   // ---- the slash menu ----
@@ -934,7 +952,9 @@ export class App {
   /** The root is open while the editor holds only a slash command being typed. */
   #rootItems(): MenuItem[] | undefined {
     if (this.#menu.page !== undefined || !/^\/\S*$/.test(this.#editor.text)) return undefined;
-    return filterRoot(ROOT, this.#editor.text);
+    // The built-in ones, then what extensions add (a built-in name keeps its own).
+    const added = (this.#extensionCommands?.list() ?? []).filter((c) => !ROOT.some((r) => r.name === c.name));
+    return filterRoot([...ROOT, ...added], this.#editor.text);
   }
 
   #menuRows(): string[] {

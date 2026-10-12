@@ -68,7 +68,8 @@ export type ExtensionFactory = (k: Kinoko) => void | Promise<void>;
 export interface Kinoko {
   on<E extends ExtEvent>(event: E, handler: ExtHandlers[E]): void;
   registerTool(tool: Tool): void;
-  registerCommand(name: string, handler: CommandHandler): void;
+  /** `/name args` in the TUI (listed in its slash menu with `description`), and `kinoko /name args`. */
+  registerCommand(name: string, handler: CommandHandler, description?: string): void;
   registerRenderer(lang: string, render: FenceRenderer): void;
   log(message: string): void;
 }
@@ -89,6 +90,7 @@ export class Extensions implements Kinoko {
   #tools: Tool[] = [];
   #commands = new Map<string, CommandHandler>();
   #renderers = new Map<string, FenceRenderer>();
+  #described = new WeakMap<CommandHandler, string>();
   #log: (line: string) => void;
   // Who registered what, so one extension can be taken back (unload) while kinoko runs.
   #owner = "";
@@ -111,8 +113,9 @@ export class Extensions implements Kinoko {
     this.#ownerOf.set(tool, this.#owner);
   }
 
-  registerCommand(name: string, handler: CommandHandler): void {
+  registerCommand(name: string, handler: CommandHandler, description?: string): void {
     this.#commands.set(name, handler);
+    if (description) this.#described.set(handler, description);
     this.#ownerOf.set(handler, this.#owner);
   }
 
@@ -194,6 +197,14 @@ export class Extensions implements Kinoko {
 
   commandNames(): string[] {
     return [...this.#commands.keys()].toSorted();
+  }
+
+  /** The commands extensions add, with what each says it does: the TUI's slash menu lists them. */
+  commandList(): Array<{ name: string; description: string }> {
+    return this.commandNames().map((name) => {
+      const handler = this.#commands.get(name);
+      return { name, description: (handler && this.#described.get(handler)) ?? "an extension's command" };
+    });
   }
 
   emit<E extends ExtEvent>(event: E, payload: Parameters<ExtHandlers[E]>[0]): void {

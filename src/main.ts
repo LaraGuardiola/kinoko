@@ -258,6 +258,7 @@ if (tui) {
   const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), ...(await faceOf()), integrations: await integrationsLine() });
   const app = new App({
     agent: agent,
+    extensionCommands: { list: () => ext.commandList(), get: (name) => ext.command(name) },
     write: (text) => term.write(text),
     model: start.model,
     contextWindow: startWindow,

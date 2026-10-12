@@ -98,6 +98,7 @@ async function harness(
     integrations?: AppOptions["integrations"];
     capabilities?: AppOptions["capabilities"];
     jobs?: Jobs;
+    extensionCommands?: AppOptions["extensionCommands"];
     handOver?: AppOptions["handOver"];
     /** /sessions' R: the harness loads the session and restarts the agent, as main does. */
     resume?: boolean;
@@ -150,6 +151,7 @@ async function harness(
     integrations: opts.integrations ?? { home: ROOT, hubRunning: async () => false },
     capabilities: opts.capabilities,
     jobs: opts.jobs,
+    extensionCommands: opts.extensionCommands,
     handOver: opts.handOver,
     resumeSession: opts.resume
       ? async (path) => {
@@ -664,6 +666,33 @@ describe("TUI app with the agent", () => {
     h.press("/bogus\r");
     await new Promise((r) => setTimeout(r, 10));
     expect(h.screen()).toContain("unknown command /bogus");
+    expect(h.agent.messages).toHaveLength(0);
+  });
+
+  test("12b. an extension's command: in the slash menu, run with its arguments, its answer printed; never the model", async () => {
+    const asked: string[] = [];
+    const commands = new Map<string, (args: string) => Promise<string>>([
+      ["searxng", async (args) => (asked.push(args), `SearXNG: ${args || "status"}`)],
+      ["help", async () => "not this one"], // a built-in name keeps its own
+      ["broken", async () => Promise.reject(new Error("no docker"))],
+    ]);
+    const h = await harness([[{ type: "text", delta: "hi" }, { type: "done", stop: "end" }]], {
+      extensionCommands: { list: () => [{ name: "searxng", description: "Set up SearXNG" }, { name: "help", description: "x" }], get: (name) => commands.get(name) },
+    });
+    h.press("/sear");
+    await new Promise((r) => setTimeout(r, 40));
+    h.app.render();
+    expect(h.screen()).toContain("Set up SearXNG"); // listed with what it does
+    h.press("\r");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.screen()).toContain("SearXNG: status");
+    h.press("/searxng setup now\r");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(asked).toEqual(["", "setup now"]);
+    expect(h.screen()).toContain("SearXNG: setup now");
+    h.press("/broken\r");
+    await new Promise((r) => setTimeout(r, 10));
+    expect(h.screen()).toContain("/broken failed: no docker");
     expect(h.agent.messages).toHaveLength(0);
   });
 
