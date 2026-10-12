@@ -37,7 +37,7 @@ describe("the hub's own certificate", () => {
       wlo1: [nic("192.168.1.42"), nic("fe80::1", "IPv6")],
       eno1: [nic("10.0.0.7")],
       docker0: [nic("172.17.0.1")],
-      tailscale0: [nic("100.91.163.46")],
+      tailscale0: [nic("100.64.0.7")],
       enp5: [nic("8.8.8.8")],
     } as never);
     expect(found).toEqual(["192.168.1.42", "10.0.0.7"]);

@@ -112,8 +112,8 @@ describe("context discovery", () => {
   });
 
   test("5b. frontmatter joins multi-line values: > and | blocks, wrapped plain text", () => {
-    const folded = "---\nname: flux-send\ndescription: >\n  Send files to the phones.\n\n  Triggers: flux, OnePlus.\nother: z\n---\n";
-    expect(frontmatter(folded)).toEqual({ name: "flux-send", description: "Send files to the phones. Triggers: flux, OnePlus." });
+    const folded = "---\nname: send-files\ndescription: >\n  Send files to the phone.\n\n  Triggers: send, phone.\nother: z\n---\n";
+    expect(frontmatter(folded)).toEqual({ name: "send-files", description: "Send files to the phone. Triggers: send, phone." });
     expect(frontmatter("---\ndescription: |-\n  line one\n  line two\n---\n").description).toBe("line one line two");
     expect(frontmatter("---\ndescription: starts here\n  and wraps\nname: n\n---\n")).toEqual({
       description: "starts here and wraps",
