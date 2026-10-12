@@ -34,8 +34,8 @@ jobs:
           bun build --compile --outfile "rel/kinoko-$os-$arch" src/main.ts
           if [ "$os" = darwin ]; then codesign --force --sign - "rel/kinoko-$os-$arch"; fi
           cd rel && { sha256sum kinoko-* 2>/dev/null || shasum -a 256 kinoko-*; } > SHA256SUMS && cd ..
-          (cd rel && python3 -m http.server 8799 >/dev/null 2>&1 &)
-          sleep 2
+          (cd rel && python3 -m http.server 8799 --bind 127.0.0.1 >/dev/null 2>&1 &)
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8799/SHA256SUMS >/dev/null && break; sleep 1; done
           KINOKO_DOWNLOAD_URL=http://127.0.0.1:8799 KINOKO_INSTALL_DIR="$RUNNER_TEMP/kbin" KINOKO_NO_MODIFY_PATH=1 sh install.sh
           "$RUNNER_TEMP/kbin/kinoko" --version
       - name: install.ps1, end to end
@@ -46,8 +46,8 @@ jobs:
           bun build --compile --outfile rel/kinoko-windows-x64.exe src/main.ts
           $hash = (Get-FileHash rel/kinoko-windows-x64.exe -Algorithm SHA256).Hash.ToLower()
           Set-Content rel/SHA256SUMS "$hash  kinoko-windows-x64.exe"
-          Start-Process python -ArgumentList '-m', 'http.server', '8799' -WorkingDirectory (Resolve-Path rel) -WindowStyle Hidden
-          Start-Sleep 3
+          Start-Process python -ArgumentList '-m', 'http.server', '8799', '--bind', '127.0.0.1' -WorkingDirectory (Resolve-Path rel) -WindowStyle Hidden
+          foreach ($i in 1..30) { try { Invoke-WebRequest http://127.0.0.1:8799/SHA256SUMS -UseBasicParsing | Out-Null; break } catch { Start-Sleep 1 } }
           $env:KINOKO_DOWNLOAD_URL = 'http://127.0.0.1:8799'
           $env:KINOKO_INSTALL_DIR = "$env:RUNNER_TEMP\kbin"
           ./install.ps1
