@@ -36,7 +36,7 @@ export const PROFILES: Profile[] = [
     title: "Shiitake",
     description: "The coder: checks, GitHub, other agents, diagrams, the web",
     extensions: ["check-early", "github", "delegate", "mermaid", "web", "notify", "permission-gate", "herdr"],
-    skills: ["write-kinoko-extension", "diagnose-crash"],
+    skills: ["write-kinoko-extension"],
     thinking: "medium",
   },
   {
@@ -44,7 +44,7 @@ export const PROFILES: Profile[] = [
     title: "Psilocybe",
     description: "Media and the desktop: pictures, music on the speaker, video tools, files to the phone",
     extensions: ["vision", "cliamp", "telegram", "web", "notify", "permission-gate", "herdr"],
-    skills: ["ffmpeg", "torrente", "flux-send", "omarchy", "bluetooth"],
+    skills: ["bluetooth"],
     thinking: "low",
   },
   {
@@ -52,7 +52,7 @@ export const PROFILES: Profile[] = [
     title: "Morchella",
     description: "The reviewer: reads, plans and explains; writes nothing",
     extensions: ["plan-mode", "github", "web", "mermaid", "vision", "herdr"],
-    skills: ["diagnose-crash"],
+    skills: [],
     thinking: "high",
   },
   {
