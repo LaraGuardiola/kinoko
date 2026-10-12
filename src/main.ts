@@ -125,10 +125,22 @@ if (config.provider === "anthropic") {
   if (info && config.contextWindow === DEFAULTS.contextWindow) config.contextWindow = info.contextWindow;
   if (info && config.maxOutputTokens === DEFAULTS.maxOutputTokens) config.maxOutputTokens = Math.min(info.maxOutput, 64_000);
 }
-if (!config.apiKey) {
-  process.stderr.write("no apiKey: set it in ~/.kinoko/config.json, ./.kinoko/config.json, or --api-key\n");
+// Nothing set up (no config.json or flag names a model, endpoint or key): the model last added in
+// /models, so what is set up from the TUI holds from then on. Nothing there either: the TUI starts
+// without a model and leads to /models; the other modes cannot, and say how.
+const setUp = config.apiKey !== "" || config.model !== DEFAULTS.model || config.baseUrl !== DEFAULTS.baseUrl;
+const lastAdded = setUp ? undefined : (await loadSavedModels()).at(-1);
+if (lastAdded) {
+  Object.assign(config, { model: lastAdded.model, baseUrl: lastAdded.baseUrl, apiKey: lastAdded.apiKey, provider: lastAdded.provider ?? "openai-compat" });
+  if (lastAdded.contextWindow) config.contextWindow = lastAdded.contextWindow;
+  if (lastAdded.label) config.label = lastAdded.label;
+}
+const noModel = !setUp && lastAdded === undefined;
+if (noModel && !tui) {
+  process.stderr.write("no model set up yet: open kinoko (no arguments) and add one in /models, or write ~/.kinoko/config.json\n");
   process.exit(1);
 }
+if (noModel) config.model = "";
 
 // Sessions are kept per directory: `--session <id>` (or a unique prefix) is looked up in this
 // directory's sessions only, `--continue` takes its newest one.
@@ -264,6 +276,7 @@ if (tui) {
   const startup = startupPanel({ context, skills, extensions: [...loadedExtensions], version: VERSION, profile: await profileLine(), ...(await faceOf()), integrations: await integrationsLine() });
   const app = new App({
     agent: agent,
+    noModel,
     extensionCommands: { list: () => ext.commandList(), get: (name) => ext.command(name) },
     write: (text) => term.write(text),
     model: start.model,
@@ -274,12 +287,12 @@ if (tui) {
     budgets: config.thinkingBudget !== undefined,
     models: {
       endpoint: start.baseUrl,
-      saved: [configured, ...saved],
+      saved: noModel ? saved : [configured, ...saved], // no model yet: nothing configured to offer
       connect: connect,
       discover: listModels,
       // The configured model stays first: it is always there to go back to, and cannot be removed.
-      save: async (entry) => [configured, ...(await saveModel(entry))],
-      remove: async (entry) => [configured, ...(await removeModel(entry))],
+      save: async (entry) => [...(noModel ? [] : [configured]), ...(await saveModel(entry))],
+      remove: async (entry) => [...(noModel ? [] : [configured]), ...(await removeModel(entry))],
       fixed: (entry) => entry.baseUrl === configured.baseUrl && entry.model === configured.model,
     },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
@@ -346,6 +359,7 @@ if (tui) {
   term.start();
   term.write(`${ansi.clearScreen}${ansi.hide}\n`);
   app.intro(startup);
+  app.noModelHint();
   if (previous) app.replay(agent.messages, `resumed session ${session.meta.id}`);
   app.locate(); // where the region sits on the screen: the side column is drawn from its top row
   // While `kinoko serve` runs, this terminal shows up in the phone app (KINOKO_LINK=0: it does not).

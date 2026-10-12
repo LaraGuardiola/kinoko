@@ -62,8 +62,17 @@ import { userHome } from "../home.ts";
 
 
 
+/** What a first run without any model says. */
+const NO_MODEL = [
+  "No model set up yet. Open /models and pick \"+ add provider\":",
+  "  a local server (llama.cpp, Ollama, LM Studio: its URL, no key), or an API (its URL and key).",
+  "kinoko lists what it serves; the one you pick is kept for the next start.",
+].join("\n");
+
 export interface AppOptions {
   agent: Agent;
+  /** Started with no model set up anywhere: the status says so, and a prompt leads to /models. */
+  noModel?: boolean;
   /** Extensions' slash commands: in the menu, run by `/name args`. */
   extensionCommands?: { list: () => Array<{ name: string; description: string }>; get: (name: string) => ((args: string) => string | Promise<string>) | undefined };
   write: (text: string) => void;
@@ -150,6 +159,7 @@ export class App {
   #capabilities: AppOptions["capabilities"];
   #jobs: Jobs | undefined;
   #extensionCommands: AppOptions["extensionCommands"];
+  #noModel = false;
   /** The block with the [Capabilities] lines as printed (the startup panel, or a fresh copy). */
   #panel: { text: string; gap: boolean } | undefined;
   #panelStale = false; // changed while scrolled off screen: printed again when the menu closes
@@ -223,6 +233,7 @@ export class App {
     this.#capabilities = opts.capabilities;
     this.#jobs = opts.jobs;
     this.#extensionCommands = opts.extensionCommands;
+    this.#noModel = opts.noModel === true;
     this.#jobs?.on(() => this.render()); // the label counts them
     this.#newSessionOf = opts.newSession;
     this.#resumeOf = opts.resumeSession;
@@ -365,7 +376,7 @@ export class App {
   get statusLine(): string {
     return statusLine({
       running: this.#running,
-      model: this.#model,
+      model: this.#noModel ? "no model yet" : this.#model,
       tokens: this.#tokens,
       contextWindow: this.#window,
       cost: this.#cost,
@@ -462,6 +473,12 @@ export class App {
     if (text.startsWith("/")) {
       this.#editor.clear();
       if (!(await this.command(text))) this.#print("system", `unknown command ${text}: try /help`);
+      this.render();
+      return;
+    }
+    // No model yet: what was typed stays, and /models opens to set one up.
+    if (this.#noModel) {
+      this.#openModels();
       this.render();
       return;
     }
@@ -932,6 +949,12 @@ export class App {
       default:
         return this.#extensionCommand(name, input.replace(/^\/?\S+\s*/, ""));
     }
+  }
+
+  /** Started with no model: the panel is followed by how to set one up. */
+  noModelHint(): void {
+    if (this.#noModel) this.#print("system", NO_MODEL);
+    this.render();
   }
 
   /** An extension's command: what it answers, printed here; one that throws says so. */
@@ -1517,6 +1540,7 @@ export class App {
 
   /** Switches to a model, and to its endpoint when it is served elsewhere; then its window. */
   #useModel(entry: SavedModel): void {
+    this.#noModel = false;
     if (entry.baseUrl !== this.#endpoint && this.#host) {
       this.#agent.setProvider(this.#host.connect(entry));
       this.#endpoint = entry.baseUrl;

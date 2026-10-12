@@ -99,6 +99,7 @@ async function harness(
     capabilities?: AppOptions["capabilities"];
     jobs?: Jobs;
     extensionCommands?: AppOptions["extensionCommands"];
+    noModel?: boolean;
     handOver?: AppOptions["handOver"];
     /** /sessions' R: the harness loads the session and restarts the agent, as main does. */
     resume?: boolean;
@@ -152,6 +153,7 @@ async function harness(
     capabilities: opts.capabilities,
     jobs: opts.jobs,
     extensionCommands: opts.extensionCommands,
+    noModel: opts.noModel,
     handOver: opts.handOver,
     resumeSession: opts.resume
       ? async (path) => {
@@ -694,6 +696,19 @@ describe("TUI app with the agent", () => {
     await new Promise((r) => setTimeout(r, 10));
     expect(h.screen()).toContain("/broken failed: no docker");
     expect(h.agent.messages).toHaveLength(0);
+  });
+
+  test("12c. no model set up: the status says so, a prompt keeps its text and opens /models, never the model", async () => {
+    const h = await harness([[{ type: "done", stop: "end" }]], { noModel: true, modelsHost: { endpoint: "", saved: [], connect: () => ({}) as never, discover: async () => [], save: async () => [], remove: async () => [] } });
+    expect(h.app.statusLine).toContain("no model yet");
+    h.app.noModelHint();
+    expect(h.screen()).toContain("No model set up yet");
+    h.press("hola\r");
+    await new Promise((r) => setTimeout(r, 10));
+    h.app.render();
+    expect(h.screen()).toContain("+ add provider");
+    expect(h.app.editorText).toBe("hola"); // kept for when a model is there
+    expect(h.calls()).toHaveLength(0);
   });
 
   test("13. /compact is a no-op on a short history and compacts a long one", async () => {
