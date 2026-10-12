@@ -287,9 +287,12 @@ export function thinkingBlock(text: string): string {
 
 /** Keeps a live row inside the terminal margin: terminals wrap a margin write on the next byte. */
 function region(rows: string[], row: number, col: number, width: number | undefined, upper: number): Region {
-  if (width === undefined) return { lines: rows, row, col, upper };
+  // One row is one terminal row: a raw newline (a job's multi-line command in a menu) would draw
+  // rows the renderer does not count, and every repaint would leave a copy of the region above.
+  const flat = rows.map((line) => line.replace(/\r?\n|\r/g, " ↵ "));
+  if (width === undefined) return { lines: flat, row, col, upper };
   const max = Math.max(1, width - 2);
-  return { lines: rows.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max), upper };
+  return { lines: flat.map((line) => clipAnsi(line, max)), row, col: Math.min(col, max), upper };
 }
 
 export function statusLine(parts: {

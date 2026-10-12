@@ -46,6 +46,15 @@ describe("live region", () => {
     expect(region.lines.map(stripAnsi)).toContain("[steer] [kinoko] Background job #3 finished (exit 0) after 0s …");
   });
 
+  test("no row of the region holds a raw newline, whatever a menu puts there (a job's multi-line command)", () => {
+    const menu = ["Background jobs", "#2 running 5m · bash -c '\nCURRENT=x\nfor i in 1 2; do", "#1 done\r\nin 0s"];
+    for (const viewportCols of [undefined, 60]) {
+      const region = liveRegion(input({ viewportRows: 20, viewportCols, menu }));
+      expect(region.lines.every((line) => !/[\r\n]/.test(line))).toBe(true);
+      expect(region.lines.map(stripAnsi)).toContain("#2 running 5m · bash -c ' ↵ CURRENT=x ↵ for i in 1 2; do");
+    }
+  });
+
   test("the path is cream and the branch amanita red", () => {
     const region = liveRegion(input({ place: "~/p (master)" }));
     expect(region.lines.at(-2)).toBe("\x1b[38;2;238;222;186m~/p\x1b[0m \x1b[38;2;232;36;36m(master)\x1b[0m");

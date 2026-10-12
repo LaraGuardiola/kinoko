@@ -905,4 +905,6 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## fix/steer-multiline: a queued job note no longer smears the screen (branch fix/steer-multiline)
 - Seen live (screenshot): a background job ended while the model was thinking; its end note, queued as a steer, has several lines, and the live region drew `[steer] <note>` as ONE row with raw newlines in it. The renderer counted fewer rows than the terminal showed, so every repaint left a copy of the streaming thinking above ("The", "The user", "The user also wants me"...).
 - Now a queued message shows its first line, with " …" when there is more (the whole text still goes to the model). Test: no region row holds a newline.
-- Not done: seen by eye in a real terminal (the region test covers the cause); the user's check.
+- Then the same, seen with the jobs menu open (screenshot: the editor and its rules copied down the screen, one copy a second as the elapsed time ticked): a job's multi-line command in its row. Fixed where every row passes (view.ts region()): a raw newline in any row becomes " ↵ ", so no menu or note can do it again.
+- Seen by eye (foot): a 3-line `bash -c` job in /jobs is one row, nothing copied after 8 s of ticking.
+- Not done: the scrollback already smeared by old copies stays so (it is the terminal's); resizing to half a screen was not retried here.
