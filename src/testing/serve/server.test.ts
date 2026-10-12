@@ -91,7 +91,7 @@ function client(url: string, token: string): { next: (type: string) => Promise<R
 describe("serve: the hub", () => {
   test("pairing, then a device starts an agent, prompts it, sees it stream, attaches again, stops it", async () => {
     const devices = new Devices(join(dir, "serve.json"));
-    const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: join(dir, "sessions"), version: "t", spawn: fakeSpawn, render: (text, width) => [`${width}:${text}`] });
+    const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: join(dir, "sessions"), version: "t", spawn: fakeSpawn, render: (text, width) => [`${width}:${text}`], profile: () => "amanita" });
     const base = `http://127.0.0.1:${hub.server.port}`;
     try {
       expect(await (await fetch(`${base}/v1/health`)).json()).toEqual({ name: "kinoko", version: "t", protocol: 1 });
@@ -101,7 +101,11 @@ describe("serve: the hub", () => {
       const { token } = (await (await fetch(`${base}/v1/pair`, { method: "POST", body: JSON.stringify({ code: await devices.code(), name: "phone" }) })).json()) as { token: string };
 
       const c = client(`ws://127.0.0.1:${hub.server.port}/v1/ws`, token);
-      expect((await c.next("hello")).device).toMatchObject({ name: "phone" });
+      const hello = await c.next("hello");
+      expect(hello.device).toMatchObject({ name: "phone" });
+      expect(hello.profile).toBe("amanita"); // its mushroom on the phone
+      hub.announce({ type: "profile", profile: "psilocybe" });
+      expect(await c.next("profile")).toEqual({ type: "profile", profile: "psilocybe" });
       c.send({ id: "1", type: "start", cwd: dir });
       const started = (await c.next("ok")) as { agent: { id: string } };
       const id = started.agent.id;

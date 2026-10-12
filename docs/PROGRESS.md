@@ -828,3 +828,14 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Seen live (sandbox hub 7979, emulator, the local Qwen): the model started two shells, the label said 2 shells, the list had both, #1's window followed its ticks (28 → 32), back returned to the list. Nothing left running after the hub stopped.
 - Not done: stopping a shell from the phone (not asked); the list itself does not refresh while open.
 - Tests: /jobs listed only with jobs, the only one's output at once, the list's order and state, a window, an unknown one. 500 pass.
+
+## feat/magic: Kinoko with the face of each profile (branch feat/magic; kinoko-android too)
+- Asked by the user: our mushroom instead of 🍄 on the phone's agents list, and a Kinoko per profile (Amanita super saiyan with a golden aura, Psilocybe "in Narnia"; the rest the same mushroom with other faces), in the TUI too if possible.
+- App (`ui/Mushroom.kt`): the launcher icon's shapes drawn in Canvas, framed on the mushroom; faces: Amanita angry (brows, clenched teeth, 💢 on the cap) in rising golden flames; Psilocybe heavy-lidded with a grin and tongue, rainbow spots, stars around; Shiitake glasses; Morchella round gold glasses and a raised brow; Cordyceps the conductor (baton, bow tie, notes around); Mycena eyes shut with joy and speed lines; none or a user's own profile: the plain smile. On the agents list's header (the profile in use) and beside each profile in /profile.
+- Hub: `hello` carries `profile`; a `profile` message when ~/.kinoko/profile.json changes (looked at every 3 s). Seen live: switching the file switched the phone's header within seconds.
+- TUI (`src/tui/mushroom-art.ts`): the same faces as 20×18 pixel art (▀▄, 24-bit colour) on the startup panel, the profile's description beside it. The panel's rewritten section now starts at its top, so switching profile in /profile redraws the face (seen live: amanita → psilocybe).
+- Not done: the launcher icon stays the plain one; no art in /profile's list in the TUI.
+- Tests: the art (sizes, each face, unknown → plain), hello's profile and the profile message. 502 pass.
+- Second pass, after the user's review: Morchella's TUI face was lopsided (a monocle): round gold glasses on both eyes, in the app too. Cordyceps' wink read as an extra black pixel and the headset did not say "orchestrator": now a conductor with a baton and music notes (and a bow tie in the app; in pixels it read as red trousers, left out).
+- App bug found meanwhile: an agent started from the phone opened its chat without asking for its slash commands, so "/" showed no menu (opened from the list it did). The chat now asks for them on "/" when it has none (a starting agent could not answer the first time either). Seen on the emulator: new agent, "/", the menu.
+- Third pass (app only, the TUI ones approved as they are): Shiitake has a small laptop beside it, code on its screen. A Dragon Ball aura for Amanita was tried and dropped: the user preferred its flames.
