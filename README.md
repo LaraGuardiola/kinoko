@@ -156,7 +156,7 @@ warning: when a setting seems to do nothing, check its spelling and type first.
 | `contextWindow` | `128000` | compaction fires at `contextWindow - 16384` |
 | `maxOutputTokens` | `8192` | |
 | `reasoningEffort` | the engine's | `off` · `low` · `medium` · `high` |
-| `thinkingBudget` | the engine's | hard cap on thinking tokens per reply |
+| `thinkingBudget` | the engine's | hard cap on thinking tokens per reply (local engines get each `/thinking` level's own) |
 | `thinkingReplay` | `"turn"` | `"turn"` or `"none"`, see above |
 | `maxTurns` | `500` | tool rounds per run |
 | `maxCost` | `5` | USD per run |
@@ -235,6 +235,10 @@ images there, in a user message right after the results).
 `registerRenderer(lang, render)` draws a fence of that language (```` ```mermaid ````) in the
 transcript: rows at most `width` wide, or undefined to show the source. It is called once the fence
 is closed, its drawing kept while the reply streams; one that throws or draws too wide shows the source.
+Two names are for math, which models write outside fences: `math` gets the TeX of a `$$…$$` or
+`\[…\]` block (drawn centred, with a Math ⧉ label to copy it), `math-inline` that of `$…$` or
+`\(…\)` inside a line (kept when it answers one row). A `$` opens only before a non-space and closes
+after one, not before a digit, so "$5 and $10" stays text; `\$` is a dollar sign.
 
 Events: `session_start`, `context` (rewrite the messages before a request), `before_provider_request`,
 `tool_call` (mutate args, block, or `{ask: true, reason}` to ask the user first), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
@@ -242,7 +246,7 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 
 The extensions live in their own repository,
 [kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, cliamp,
-delegate, github, herdr, mermaid, notify, permission-gate, plan-mode, telegram, vision, web. `/` then **extensions** lists them (the repository is fetched with
+delegate, github, herdr, latex, mermaid, notify, permission-gate, plan-mode, telegram, vision, web. `/` then **extensions** lists them (the repository is fetched with
 git into `~/.kinoko/registry/extensions/`); Enter installs one into `~/.kinoko/ext/<name>/`, running
 `bun install` there when it has dependencies; Del twice removes it. Both take effect at once: the
 extension is loaded (or taken back) while kinoko runs. One that adds or removes tools changes every

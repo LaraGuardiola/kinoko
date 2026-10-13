@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+Thinking levels that reach llama.cpp, each tool call on its own row, and LaTeX math.
+
+### Thinking
+- `/thinking` works with llama.cpp: `off` really turns thinking off (as `enable_thinking: false`;
+  `"off"` still goes for Strata), each level sends its token budget to local engines (2,048 / 4,096 /
+  8,192), and `extreme` is no cap at all (it used to end the thinking at once there). Cloud APIs get
+  neither field.
+
+### The TUI
+- Several tool calls in one reply each get their own row: as the model writes them, then the
+  waiting ones dim under the one running, instead of one line rewritten for every call.
+- Math: `$$…$$` and `\[…\]` formulas are drawn centred as LaTeX sets them (fractions stacked, roots,
+  sums with their limits, matrices), with a Math ⧉ label: a click or `/copy` copies the TeX. Inline
+  `$…$` and `\(…\)` come out on one line (x², a/b, √x). Needs the `latex` extension; without it the
+  text is as before. `\$` is a dollar sign.
+
+### Extensions (installing one again from `/extensions` updates it)
+- latex (new): TeX math drawn in Unicode, for the formulas above and ```` ```math ```` /
+  ```` ```latex ```` fences. What it cannot read stays as source.
+
 ## 0.2.1
 
 Fixes found using 0.2.0: shells left running, a screen that smeared, a todo list written to a file.
