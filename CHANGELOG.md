@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
 Thinking levels that reach llama.cpp, each tool call on its own row, and LaTeX math.
 

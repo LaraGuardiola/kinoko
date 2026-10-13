@@ -950,3 +950,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Then, from the user's own session ("still ugly"): every formula sat in a full-width code panel with a Math label, six rows for one line of math. Now a `$$`/`\[` block or a math/latex/tex fence is set centred on the text, in cream, no panel (and so no /copy for it); the extension's root bar is a low line on the radicand.
 - Then the user missed the Math label and copying it: a formula now has the Math ⧉ label above it on the right (no panel), a click copies the TeX (code.ts formulaBlock, kept like a panel's rows), and /copy lists `$$`/`\[` formulas (snippets.ts). Checked live: /copy offered the quadratic formula's TeX and copied it.
 - Docs: CHANGELOG (Unreleased: thinking, tool rows, math), README (math renderer names, latex in the list, thinkingBudget for local engines), protocol.md (tool_pending's index).
+
+## release/v0.2.2: thinking levels on llama.cpp, a row per tool call, LaTeX math (branch release/v0.2.2)
+- package.json 0.2.2; the CHANGELOG's Unreleased section became 0.2.2 (thinking levels, tool rows, math; the latex extension).
+- Tag v0.2.2 on main: release.yml builds and publishes.
