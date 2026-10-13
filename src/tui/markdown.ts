@@ -21,6 +21,7 @@ const DIM = `${ESC}2m`;
 const CODE = `${ESC}38;2;137;220;235m`;
 const RED = `${ESC}38;2;232;36;36m`;
 const CREAM = `${ESC}38;2;238;222;186m`;
+const MATH = CREAM; // formulas: the cream of kinoko's own text accents
 const QUOTE = `${ESC}38;2;150;156;182m`;
 const LINK_URL = `${ESC}38;2;120;126;154m`;
 
@@ -85,7 +86,8 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
       const body = lines.slice(i + 1, end);
       // Still streaming (no closing fence yet): the source, drawn once it is whole.
       const rows = color && end < lines.length ? drawn(lang, body.join("\n"), width - 3) : undefined;
-      out.push(...(rows === undefined ? codeBlock(body, { lang, width, color }) : drawnBlock(rows, { lang, width, code: body.join("\n") })));
+      const drawnRows = rows === undefined ? undefined : MATH_FENCES.has(lang.toLowerCase()) ? formula(rows, width) : drawnBlock(rows, { lang, width, code: body.join("\n") });
+      out.push(...(drawnRows ?? codeBlock(body, { lang, width, color })));
       i = end + 1;
       continue;
     }
@@ -93,9 +95,9 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
     // $$…$$ or \[…\] (one line or several): drawn by the math renderer when one is installed and
     // it can read it; otherwise the lines go on as text.
     const math = mathBlock(lines, i);
-    const mathRows = math && color ? drawn("math", math.source, width - 3) : undefined;
+    const mathRows = math && color ? drawn("math", math.source, width - 4) : undefined;
     if (math && mathRows) {
-      out.push(...drawnBlock(mathRows, { lang: "math", width, code: math.source }));
+      out.push(...formula(mathRows, width));
       i = math.end + 1;
       continue;
     }
@@ -157,6 +159,16 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
     out.push(...wrapWords(fmt(line), width));
   }
   return out.join("\n");
+}
+
+/** Fences that hold math: drawn as a formula, like $$, not in a code panel. */
+const MATH_FENCES = new Set(["math", "latex", "tex", "katex"]);
+
+/** A display formula as LaTeX sets it: centred on the text, in the formula colour, no panel. */
+function formula(rows: string[], width: number): string[] {
+  const w = Math.max(...rows.map(visibleLength));
+  const left = " ".repeat(Math.max(2, Math.floor((width - w) / 2)));
+  return rows.map((r) => (r.trim() === "" ? "" : `${left}${MATH}${r.trimEnd()}${RESET}`));
 }
 
 /** What closes a display-math block `line` opens and leaves open ($$ or \]), else undefined. */
