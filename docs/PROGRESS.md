@@ -947,3 +947,4 @@ Deferred, for whenever an Anthropic model is actually needed:
 - The `latex` extension (kinoko-extensions): parser + box layout in Unicode; installed by hand in ~/.kinoko/ext/latex for now.
 - Checked live (tmux, MiniCPM on :8085): inline `x² + bx + c`, `∑ₖ₌₁ⁿ k`, θ; `$$` blocks stacked (quadratic formula, Gauss's sum with its limits, a pmatrix with tall brackets).
 - Not done: thinking blocks keep the TeX as written; no colour for math.
+- Then, from the user's own session ("still ugly"): every formula sat in a full-width code panel with a Math label, six rows for one line of math. Now a `$$`/`\[` block or a math/latex/tex fence is set centred on the text, in cream, no panel (and so no /copy for it); the extension's root bar is a low line on the radicand.
