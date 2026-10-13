@@ -34,7 +34,7 @@ import type { SavedModel } from "../config.ts";
 import type { Served } from "../providers/openai-compat.ts";
 import type { Provider } from "../types.ts";
 import { actionFor } from "./keys.ts";
-import type { BlockKind, OpenBlock, QueuedView, Region, ToolView } from "./view.ts";
+import type { BlockKind, OpenBlock, QueuedView, Region, ToolLine, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Session } from "../session.ts";
@@ -190,7 +190,9 @@ export class App {
   #thinkingSeen = false; // this message already streamed its thinking
   #printedAny = false; // something is already in the scrollback: every later block gets a blank row above
   #tool: ToolView | undefined;
-  #pending: { name: string; args: string } | undefined; // a call the model is still writing
+  // The reply's calls not started yet, in order: written so far while it streams, then all of them.
+  #calls: Array<{ id?: string; index?: number; name: string; args: string }> = [];
+  #written = false; // the reply is over: #calls holds all of its calls, the first one next
   #queued: QueuedView[] = [];
   #approval: ApprovalView | undefined; // a call waiting for the user's answer
   #toolBlocksFull = false; // ctrl+t
@@ -626,16 +628,27 @@ export class App {
         this.#thinkingSeen = true;
         this.#append("thinking", e.delta);
         return;
-      case "tool_pending":
+      case "request_start":
+        // A request starts afresh: calls left from the last reply (an unknown tool's) are gone.
+        this.#calls = [];
+        this.#written = false;
+        return;
+      case "tool_pending": {
         // The text before the call is final; the call itself shows at once, its bullet pulsing.
         this.#closeBlock();
         // Its name first, then what it acts on as soon as that arg is complete (a write's path).
-        this.#pending = { name: e.name, args: e.args ? toolSummary(e.name, e.args, false) : "" };
+        // Each call of the reply has its own row: a new index is a new call.
+        const args = e.args ? toolSummary(e.name, e.args, false) : "";
+        const same = this.#calls.find((c) => c.index === e.index);
+        if (same) Object.assign(same, { name: e.name }, args === "" ? {} : { args });
+        else this.#calls.push({ index: e.index, name: e.name, args });
         this.render();
         return;
-      case "tool_start":
+      }
+      case "tool_start": {
         this.#closeBlock();
-        this.#pending = undefined;
+        const at = this.#calls.findIndex((c) => c.id === e.call.id);
+        this.#calls.splice(at < 0 ? 0 : at, 1);
         this.#side.toolCall(e.call);
         this.#tool = {
           name: e.call.name,
@@ -645,6 +658,7 @@ export class App {
         };
         this.render();
         return;
+      }
       case "tool_output":
         if (this.#tool) {
           this.#tool.output = e.output;
@@ -679,7 +693,7 @@ export class App {
       case "retry":
         // What streamed before the failure stays on screen; the model starts that reply over.
         this.#closeBlock();
-        this.#pending = undefined;
+        this.#calls = [];
         this.#thinkingSeen = false;
         this.#marker = `${e.error} · retry ${e.attempt}/${e.of} in ${Math.round(e.inMs / 1000)}s`;
         this.#retrying = true;
@@ -721,13 +735,23 @@ export class App {
       this.#cost += usage.cost ?? 0;
     }
     this.#closeBlock();
-    // A call cut off before its args were complete never starts: drop its pulsing line.
-    if (!message.toolCalls?.length) this.#pending = undefined;
+    // The calls as written, each on its row until it runs; one cut off before its args were complete
+    // never starts, so its pulsing line goes.
+    if (message.role === "assistant") this.#written = true;
+    if (message.role === "assistant") this.#calls = (message.toolCalls ?? []).map((tc) => ({ id: tc.id, name: tc.name, args: toolSummary(tc.name, tc.args) }));
     // A provider that only reports the reasoning at the end (no deltas): better late than lost.
     const thinking = message.thinking ?? "";
     if (!this.#thinkingSeen && thinking.trim() !== "") this.#print("thinking", formatBlock("thinking", thinking));
     this.#thinkingSeen = false;
     this.render();
+  }
+
+  /** One row per call: the running one first, then those waiting; while the reply streams, the newest is live,
+   *  once it is over the next to run. */
+  #toolLines(): ToolLine[] {
+    const running = this.#tool ? [{ name: this.#tool.name, args: this.#tool.args, live: true }] : [];
+    const last = this.#calls.length - 1;
+    return [...running, ...this.#calls.map((c, i) => ({ name: c.name, args: c.args, live: !this.#tool && i === (this.#written ? 0 : last) }))];
   }
 
   #printTool(): void {
@@ -754,7 +778,7 @@ export class App {
     this.#refreshPlace();
     if (this.#side.visible(this.#viewportCols)) this.#side.refresh();
     this.#running = false;
-    this.#pending = undefined;
+    this.#calls = [];
     this.#queued = [];
     this.#closeBlock();
     this.#thinkingSeen = false;
@@ -882,9 +906,9 @@ export class App {
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
       open: this.#open,
-      tool: this.#tool ?? (this.#pending === undefined ? undefined : { ...this.#pending, output: "", aborted: false }),
+      tools: this.#toolLines(),
       // Until the result is in, the bullet fades in and out (the render timer repaints each step).
-      pulse: this.#tool || this.#pending !== undefined ? pulseLevel(Date.now()) : undefined,
+      pulse: this.#tool || this.#calls.length > 0 ? pulseLevel(Date.now()) : undefined,
       toolGap: this.#printedAny,
       // While compacting: mushrooms and how far it is (the clock moves them on each frame).
       marker: this.#compacting ? compactingNote(this.#compacting, Date.now()) : this.#marker,

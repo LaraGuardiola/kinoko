@@ -479,6 +479,44 @@ describe("TUI app with the agent", () => {
     await settle(h.agent);
   });
 
+  test("8g. several calls in one reply: a row each as they stream, then the waiting ones stay under the running one", async () => {
+    const { promise: release, resolve: go } = Promise.withResolvers<void>();
+    const gated = (name: string): Tool => ({ ...slow, name, run: async () => (await release, "ok") });
+    const h = await harness(
+      [
+        [
+          { type: "tool_pending", name: "bash", index: 0 },
+          { type: "tool_pending", name: "bash", args: { command: "ls" }, index: 0 },
+          { type: "tool_pending", name: "read", index: 1 },
+          { type: "tool_pending", name: "read", args: { path: "a.ts" }, index: 1 },
+          { type: "tool_call", call: { id: "c1", name: "bash", args: { command: "ls" } } },
+          { type: "tool_call", call: { id: "c2", name: "read", args: { path: "a.ts" } } },
+          { type: "done", stop: "tool_use" },
+        ],
+        [{ type: "text", delta: "done" }, { type: "done", stop: "end" }],
+      ],
+      { tools: [gated("bash"), gated("read")], pace: 50 },
+    );
+    h.press("go\r");
+    await new Promise((r) => setTimeout(r, 175)); // both names are out, the second still being written
+    h.app.render();
+    const rows = (): string[] => h.screen().split("\n").map((l) => l.trim());
+    expect(rows()).toContain("● bash ls");
+    expect(rows()).toContain("● read …");
+    await new Promise((r) => setTimeout(r, 300)); // the reply is over: bash runs, read waits under it
+    h.app.render();
+    const running = rows().lastIndexOf("● bash ls …"); // the screen holds every frame: the newest
+    expect(running).toBeGreaterThanOrEqual(0);
+    expect(rows()[running + 1]).toBe("● read a.ts");
+    go();
+    await settle(h.agent);
+    h.app.render();
+    // The newest frame (after the one before's status line): no call is left waiting.
+    const all = rows();
+    const statuses = all.flatMap((r, i) => (/^(RUNNING|READY|IDLE)\b/.test(r) ? [i] : []));
+    expect(all.slice(statuses.at(-2) ?? 0).join("\n")).not.toContain("…");
+  });
+
   test("8e. the place line picks up a new repository after the tool call, while the run goes on", async () => {
     let branch = "";
     const { promise: initDone, resolve: ran } = Promise.withResolvers<void>();

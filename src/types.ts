@@ -45,7 +45,8 @@ export type StreamEvent =
   | { type: "thinking"; delta: string }
   // A tool call is streaming: its name, then again each time one of its string args completes
   // (for display only: the call itself is the later tool_call).
-  | { type: "tool_pending"; name: string; args?: Record<string, string> }
+  // `index`: which call of the reply, when several are written in one.
+  | { type: "tool_pending"; name: string; args?: Record<string, string>; index?: number }
   | { type: "tool_call"; call: ToolCall } // emitted ONLY when its JSON args are complete
   | { type: "replay"; data: unknown } // the finished message as the provider wants it back
   | { type: "progress"; done: number; total: number } // prompt tokens read so far (llama.cpp's return_progress)

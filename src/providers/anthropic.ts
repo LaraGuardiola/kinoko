@@ -127,7 +127,7 @@ export function anthropic(opts: AnthropicOptions): Provider {
               blocks[i] = { ...ev.content_block };
               // Say a call is coming as soon as its name is known: its input may take minutes.
               const block = ev.content_block as { type?: string; name?: string };
-              if (block.type === "tool_use" && block.name) yield { type: "tool_pending", name: block.name };
+              if (block.type === "tool_use" && block.name) yield { type: "tool_pending", name: block.name, index: i };
             }
             if (ev.type === "content_block_delta") {
               const block = blocks[i];
@@ -147,7 +147,7 @@ export function anthropic(opts: AnthropicOptions): Provider {
                 const args = watchers.get(i) ?? watchers.set(i, new ArgsWatcher()).get(i)!;
                 const done = args.push(d.partial_json ?? "");
                 const name = (block as { name?: string }).name;
-                if (done && name) yield { type: "tool_pending", name, args: done };
+                if (done && name) yield { type: "tool_pending", name, args: done, index: i };
               }
             }
           }
