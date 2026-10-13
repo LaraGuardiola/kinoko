@@ -21,6 +21,11 @@ describe("snippets", () => {
 
   test("a block still open (the reply cut short) is offered up to the end", () => {
     expect(snippets([reply("```sh\necho hi")])).toEqual([{ lang: "sh", code: "echo hi" }]);
+    // Formulas too, so /copy offers their TeX: $$ on one line or several, and \[ … \].
+    expect(snippets([reply("see\n$$x^2$$\nand\n\\[\na = b\n\\]")])).toEqual([
+      { lang: "math", code: "a = b" },
+      { lang: "math", code: "x^2" },
+    ]);
   });
 
   test("the copy page names each by language and first line; picking one copies its code", () => {

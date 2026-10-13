@@ -6,7 +6,7 @@
 // every block here is seen whole or, while it is still streaming, from its start.
 
 import type { FenceRenderer } from "../ext.ts";
-import { codeBlock, drawnBlock } from "./code.ts";
+import { codeBlock, drawnBlock, formulaBlock } from "./code.ts";
 import { isTableStart, renderTable } from "./table.ts";
 import { visibleLength, wrapWords } from "./style.ts";
 import { isTreeLine, treeRows } from "./tree.ts";
@@ -21,7 +21,6 @@ const DIM = `${ESC}2m`;
 const CODE = `${ESC}38;2;137;220;235m`;
 const RED = `${ESC}38;2;232;36;36m`;
 const CREAM = `${ESC}38;2;238;222;186m`;
-const MATH = CREAM; // formulas: the cream of kinoko's own text accents
 const QUOTE = `${ESC}38;2;150;156;182m`;
 const LINK_URL = `${ESC}38;2;120;126;154m`;
 
@@ -86,7 +85,7 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
       const body = lines.slice(i + 1, end);
       // Still streaming (no closing fence yet): the source, drawn once it is whole.
       const rows = color && end < lines.length ? drawn(lang, body.join("\n"), width - 3) : undefined;
-      const drawnRows = rows === undefined ? undefined : MATH_FENCES.has(lang.toLowerCase()) ? formula(rows, width) : drawnBlock(rows, { lang, width, code: body.join("\n") });
+      const drawnRows = rows === undefined ? undefined : MATH_FENCES.has(lang.toLowerCase()) ? formulaBlock(rows, { width, code: body.join("\n") }) : drawnBlock(rows, { lang, width, code: body.join("\n") });
       out.push(...(drawnRows ?? codeBlock(body, { lang, width, color })));
       i = end + 1;
       continue;
@@ -97,7 +96,7 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
     const math = mathBlock(lines, i);
     const mathRows = math && color ? drawn("math", math.source, width - 4) : undefined;
     if (math && mathRows) {
-      out.push(...formula(mathRows, width));
+      out.push(...formulaBlock(mathRows, { width, code: math.source }));
       i = math.end + 1;
       continue;
     }
@@ -164,13 +163,6 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
 /** Fences that hold math: drawn as a formula, like $$, not in a code panel. */
 const MATH_FENCES = new Set(["math", "latex", "tex", "katex"]);
 
-/** A display formula as LaTeX sets it: centred on the text, in the formula colour, no panel. */
-function formula(rows: string[], width: number): string[] {
-  const w = Math.max(...rows.map(visibleLength));
-  const left = " ".repeat(Math.max(2, Math.floor((width - w) / 2)));
-  return rows.map((r) => (r.trim() === "" ? "" : `${left}${MATH}${r.trimEnd()}${RESET}`));
-}
-
 /** What closes a display-math block `line` opens and leaves open ($$ or \]), else undefined. */
 export function mathOpener(line: string): string | undefined {
   const t = line.trim();
@@ -181,7 +173,7 @@ export function mathOpener(line: string): string | undefined {
 
 /** A whole display-math block starting at line `i`: its TeX and its last line. Open (still
  *  streaming, or never closed): undefined. */
-function mathBlock(lines: string[], i: number): { source: string; end: number } | undefined {
+export function mathBlock(lines: string[], i: number): { source: string; end: number } | undefined {
   const t = (lines[i] ?? "").trim();
   const open = t.startsWith("$$") ? "$$" : t.startsWith("\\[") ? "\\[" : undefined;
   if (open === undefined) return undefined;

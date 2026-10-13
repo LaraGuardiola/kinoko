@@ -24,9 +24,10 @@ export const COPY = "⧉";
 const copies = new Map<string, string[]>();
 const KEPT_ROWS = 8;
 
-function keep(code: string, rows: string[]): void {
+/** `under`: where the rows under the label start (a panel has a padding row above its label). */
+function keep(code: string, rows: string[], under = 2): void {
   copies.delete(code);
-  copies.set(code, rows.slice(2, 2 + KEPT_ROWS).map((r) => stripAnsi(r).trim()));
+  copies.set(code, rows.slice(under, under + KEPT_ROWS).map((r) => stripAnsi(r).trim()));
   if (copies.size > 200) copies.delete(copies.keys().next().value ?? "");
 }
 
@@ -91,6 +92,19 @@ export function drawnBlock(drawn: string[], opts: { lang: string; width: number;
   const inner = Math.max(12, opts.width) - 2;
   const rows = [row("", inner), row(label(opts.lang, inner), inner), ...drawn.map((line) => row(` ${line}`, inner)), row("", inner)];
   keep(opts.code, rows);
+  return rows;
+}
+
+const FORMULA = `${ESC}38;2;238;222;186m`; // cream, like kinoko's own text accents
+
+/** A display formula as LaTeX sets it: centred on the text in cream, no panel; the Math label and
+ *  its ⧉ above it on the right, so a click (or /copy) copies the TeX. */
+export function formulaBlock(drawn: string[], opts: { width: number; code: string }): string[] {
+  const w = Math.max(...drawn.map(visibleLength));
+  const left = " ".repeat(Math.max(2, Math.floor((opts.width - w) / 2)));
+  // The mark in the same column as a panel's: the label row is one column short of the width.
+  const rows = [label("math", opts.width - 1), ...drawn.map((r) => (r.trim() === "" ? "" : `${left}${FORMULA}${r.trimEnd()}${RESET}`))];
+  keep(opts.code, rows, 1);
   return rows;
 }
 
