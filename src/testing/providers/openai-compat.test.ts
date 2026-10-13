@@ -81,6 +81,12 @@ function mkReq(signal: AbortSignal): ProviderRequest {
   };
 }
 
+/** One request at a thinking level; what the server received. */
+async function send(url: string, effort: ProviderRequest["effort"], budget: number): Promise<Record<string, unknown>> {
+  for await (const _ of openaiCompat({ baseUrl: url, apiKey: "k" }).stream({ ...mkReq(new AbortController().signal), effort, budget })) void _;
+  return lastBody;
+}
+
 async function collect(signal: AbortSignal): Promise<StreamEvent[]> {
   const out: StreamEvent[] = [];
   for await (const ev of openaiCompat({ baseUrl, apiKey: "k" }).stream(mkReq(signal))) out.push(ev);
@@ -171,6 +177,27 @@ describe("openai-compat: truncation, thinking and effort", () => {
     expect(messages[0]).toEqual({ role: "user", content: "hi" });
     expect(lastBody.reasoning_effort).toBe("off");
     expect(lastBody.reasoning_budget_tokens).toBe(2048);
+  });
+
+  test("thinking levels reach llama.cpp: off as its own switch, a level's budget, no cap as -1; a cloud API gets neither", async () => {
+    setMode("text");
+    // "off" stays for Strata (its switch); llama.cpp only turns thinking off with enable_thinking false.
+    expect(await send(baseUrl, "off", 0)).toMatchObject({ reasoning_effort: "off", chat_template_kwargs: { enable_thinking: false } });
+    expect(await send(baseUrl, "low", 2048)).toMatchObject({ reasoning_effort: "low", reasoning_budget_tokens: 2048 });
+    expect((await send(baseUrl, "low", 2048)).chat_template_kwargs).toBeUndefined();
+    // Kinoko's 0 is "no cap"; llama.cpp would end the thinking at once on 0.
+    expect((await send(baseUrl, "high", 0)).reasoning_budget_tokens).toBe(-1);
+    const realFetch = globalThis.fetch;
+    const cloud = "https://api.openai.com/v1";
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => realFetch(String(input).replace(cloud, baseUrl), init)) as typeof fetch;
+    try {
+      const body = await send(cloud, "off", 0);
+      expect(body.reasoning_effort).toBe("off");
+      expect(body.chat_template_kwargs).toBeUndefined();
+      expect(body.reasoning_budget_tokens).toBeUndefined();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 
   test("with tools, several calls per reply are asked for; without tools, nothing is said about them", async () => {

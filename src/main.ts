@@ -1,7 +1,7 @@
 import { DEFAULTS, loadConfig, loadSavedModels, removeModel, resumeModel, saveModel, thinkingLabel } from "./config.ts";
 import type { SavedModel } from "./config.ts";
 import type { Provider } from "./types.ts";
-import { listModels, openaiCompat } from "./providers/openai-compat.ts";
+import { isLocal, listModels, openaiCompat } from "./providers/openai-compat.ts";
 import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
 import type { AgentEvent } from "./loop.ts";
@@ -204,6 +204,8 @@ const connect = (entry: SavedModel): Provider =>
   (entry.provider === "anthropic" ? anthropic : openaiCompat)({ ...providerOptions, baseUrl: entry.baseUrl, apiKey: entry.apiKey });
 // A resumed session starts with the model it last switched to (endpoint and window too), not the default.
 const start = resumeModel(session.model, [configured, ...saved]) ?? configured;
+// The engine takes a thinking budget: a configured one says so, and local engines (llama.cpp, Strata) do.
+const budgets = config.thinkingBudget !== undefined || isLocal(start.baseUrl);
 const startWindow = start.contextWindow ?? config.contextWindow;
 // Background jobs (bash background: true): when one ends the agent is told, woken when idle.
 // Print mode ends with its run, so it has none.
@@ -259,7 +261,7 @@ const startedAt = Date.now();
 // The profile chosen last (/profile): its thinking level and how approvals go, from the start.
 const startProfile = mode === "print" ? undefined : await activeProfile(userHome());
 const startThinking = THINKING.find((p) => p.name === startProfile?.thinking);
-if (startThinking) agent.setThinking(startThinking.effort, config.thinkingBudget !== undefined ? startThinking.budget : undefined);
+if (startThinking) agent.setThinking(startThinking.effort, budgets ? startThinking.budget : undefined);
 if (startProfile?.approvals === "auto") agent.setAutoApprove(true);
 /** The panel's profile line: which, and whether it asks. */
 const profileLine = async (): Promise<string | undefined> => {
@@ -287,10 +289,9 @@ if (tui) {
     write: (text) => term.write(text),
     model: start.model,
     contextWindow: startWindow,
-    thinking: startThinking ? profileLabel(startThinking, config.thinkingBudget !== undefined) : thinkingLabel(config.reasoningEffort, config.thinkingBudget),
+    thinking: startThinking ? profileLabel(startThinking, budgets) : thinkingLabel(config.reasoningEffort, config.thinkingBudget),
     thinkingProfile: startThinking?.name ?? THINKING.find((p) => p.effort === config.reasoningEffort && (!config.thinkingBudget || p.budget === config.thinkingBudget))?.name,
-    // A configured budget says the engine takes one: then the menu's profiles send theirs.
-    budgets: config.thinkingBudget !== undefined,
+    budgets,
     models: {
       endpoint: start.baseUrl,
       saved: noModel ? saved : [configured, ...saved], // no model yet: nothing configured to offer
@@ -399,7 +400,7 @@ if (tui) {
       set: (name) => {
         const chosen = THINKING.find((p) => p.name === name);
         if (chosen === undefined) return `no thinking profile ${name}`;
-        agent.setThinking(chosen.effort, config.thinkingBudget !== undefined ? chosen.budget : undefined);
+        agent.setThinking(chosen.effort, budgets ? chosen.budget : undefined);
         profile = chosen.name;
         return `thinking: ${chosen.name} from the next request`;
       },

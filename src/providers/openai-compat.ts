@@ -358,6 +358,10 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
     return [one, { role: "user", content: [{ type: "text", text: `[the image${images.length > 1 ? "s" : ""} from the tool result above]` }, ...parts] }];
   });
   const messages = req.system ? [{ role: "system", content: req.system }, ...wired] : wired;
+  const local = isLocal(opts.baseUrl);
+  const effort = req.effort ?? opts.reasoningEffort;
+  // Kinoko's budget 0 is "no cap"; llama.cpp reads 0 as "end the thinking at once" and -1 as no cap.
+  const budget = req.budget ?? opts.thinkingBudget;
   return {
     model: req.model,
     stream: true,
@@ -365,14 +369,15 @@ function body(req: ProviderRequest, opts: OpenAiCompatOptions): object {
     // llama.cpp reports how far it has read the prompt; OpenAI's own API rejects fields it does not know.
     ...(isLocal(opts.baseUrl) ? { return_progress: true } : {}),
     messages,
-    ...((req.effort ?? opts.reasoningEffort) ? { reasoning_effort: req.effort ?? opts.reasoningEffort } : {}),
+    ...(effort ? { reasoning_effort: effort } : {}),
+    // llama.cpp turns thinking off only on "none" or this kwarg; "off" is Strata's switch, so both go.
+    ...(local && effort === "off" ? { chat_template_kwargs: { enable_thinking: false } } : {}),
     ...(opts.maxOutputTokens ? { max_tokens: opts.maxOutputTokens } : {}),
-    // A request's budget wins (0 is "no cap" there, so it is sent); otherwise the configured one.
-    ...(req.budget !== undefined
-      ? { reasoning_budget_tokens: req.budget }
-      : opts.thinkingBudget
-        ? { reasoning_budget_tokens: opts.thinkingBudget }
-        : {}),
+    // A request's budget wins over the configured one. Local engines only, or where one is configured:
+    // OpenAI itself rejects the field.
+    ...(budget !== undefined && (local || opts.thinkingBudget !== undefined)
+      ? { reasoning_budget_tokens: budget === 0 ? -1 : budget }
+      : {}),
     tools: req.tools.length
       ? req.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.schema } }))
       : undefined,
