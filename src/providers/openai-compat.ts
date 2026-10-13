@@ -183,10 +183,10 @@ export function openaiCompat(opts: OpenAiCompatOptions): Provider {
               // Say a call is coming as soon as its name is known (its args may take minutes), and
               // again as each string arg completes, so a path shows the moment it is written.
               const name = pending.get(index)?.name;
-              if (fresh && name) yield { type: "tool_pending", name };
+              if (fresh && name) yield { type: "tool_pending", name, index };
               const args = watchers.get(index) ?? watchers.set(index, new ArgsWatcher()).get(index)!;
               const done = args.push(tc.function?.arguments ?? "");
-              if (done && name) yield { type: "tool_pending", name, args: done };
+              if (done && name) yield { type: "tool_pending", name, args: done, index };
             }
             if (choice.finish_reason) finish = choice.finish_reason;
           }

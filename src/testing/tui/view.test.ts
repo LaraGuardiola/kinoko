@@ -9,7 +9,7 @@ const stripAnsi = (line: string): string => line.replace(new RegExp(`${String.fr
 function input(over: Partial<RegionInput> = {}): RegionInput {
   return {
     open: undefined,
-    tool: undefined,
+    tools: [],
     marker: "",
     queued: [],
     editorLines: [""],
@@ -146,7 +146,7 @@ describe("live region", () => {
   test("a running tool and queued messages sit between the block and the editor", () => {
     const region = liveRegion(
       input({
-        tool: { name: "bash", args: "{}", output: "", aborted: false },
+        tools: [{ name: "bash", args: "{}", live: true }],
         queued: [{ kind: "followUp", text: "next" }],
         marker: "Interrupted",
       }),
@@ -192,10 +192,10 @@ describe("tool in progress", () => {
   });
 
   test("the running line takes the pulse colour; without a pulse the bullet keeps its own", () => {
-    const tool = { name: "write", args: "", output: "", aborted: false };
-    const lit = liveRegion(input({ tool, pulse: 0 }));
+    const tools = [{ name: "write", args: "", live: true }];
+    const lit = liveRegion(input({ tools, pulse: 0 }));
     expect(lit.lines.find((l) => l.includes("write"))).toStartWith("\x1b[38;2;70;58;22m●");
-    const plain = liveRegion(input({ tool }));
+    const plain = liveRegion(input({ tools }));
     expect(plain.lines.find((l) => l.includes("write"))).toStartWith("\x1b[38;5;221m●");
   });
 });
@@ -338,8 +338,20 @@ describe("tool blocks", () => {
   });
 
   test("the tool dot is yellow, like the name", () => {
-    const region = liveRegion(input({ tool: { name: "bash", args: "ls", output: "", aborted: false } }));
+    const region = liveRegion(input({ tools: [{ name: "bash", args: "ls", live: true }] }));
     expect(region.lines[0]?.startsWith("\x1b[38;5;221m●")).toBe(true);
+  });
+
+  test("several calls: one row each, in order; only the live one pulses and trails …, the rest wait dim", () => {
+    const tools = [
+      { name: "read", args: "a.ts", live: true },
+      { name: "read", args: "b.ts", live: false },
+      { name: "bash", args: "ls", live: false },
+    ];
+    const region = liveRegion(input({ tools, pulse: 1 }));
+    expect(region.lines.slice(0, 3).map(stripAnsi)).toEqual(["● read a.ts …", "● read b.ts", "● bash ls"]);
+    expect(region.lines[0]).toStartWith(pulseDot(1));
+    expect(region.lines[1]).toStartWith("\x1b[2m●");
   });
 });
 

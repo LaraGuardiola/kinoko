@@ -103,8 +103,9 @@ describe("anthropic provider", () => {
     expect(calls).toEqual([{ type: "tool_call", call: { id: "tu_1", name: "read", args: { path: "src/main.ts" } } }]);
     expect(events.at(-1)).toMatchObject({ type: "done", stop: "tool_use" });
     // The name is announced at the block start, then the path as soon as it is complete.
-    expect(events[0]).toEqual({ type: "tool_pending", name: "read" });
-    expect(events[1]).toEqual({ type: "tool_pending", name: "read", args: { path: "src/main.ts" } });
+    // Each with its block's index: several calls of one reply each get their own row.
+    expect(events[0]).toEqual({ type: "tool_pending", name: "read", index: 0 });
+    expect(events[1]).toEqual({ type: "tool_pending", name: "read", args: { path: "src/main.ts" }, index: 0 });
   });
 
   test("usage counts the whole prompt and prices it from models.json", async () => {

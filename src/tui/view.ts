@@ -3,7 +3,7 @@
 //
 // Model of the screen: everything that is FINISHED lives in the terminal's own scrollback, in the
 // order it happened (user, thinking, answer, tool, thinking, answer...). The live region only
-// holds what is still moving: the one block being streamed, the running tool, queued messages,
+// holds what is still moving: the one block being streamed, the reply's calls, queued messages,
 // the editor and the status line.
 
 import { fenceOpener, isClosing, renderMarkdown } from "./markdown.ts";
@@ -42,6 +42,13 @@ export interface Tokens {
   output: number;
 }
 
+/** A call on its row: `live` is the one running or being written; the others wait their turn, dim. */
+export interface ToolLine {
+  name: string;
+  args: string;
+  live: boolean;
+}
+
 /** The block that is being streamed right now. At most one exists at any time. */
 export interface OpenBlock {
   kind: "thinking" | "assistant";
@@ -52,10 +59,11 @@ export interface OpenBlock {
 
 export interface RegionInput {
   open: OpenBlock | undefined;
-  tool: ToolView | undefined;
-  /** A blank row goes before the running tool line. */
+  /** The calls of this reply not yet in the transcript, in order: one row each. */
+  tools: ToolLine[];
+  /** A blank row goes before the tool rows. */
   toolGap?: boolean;
-  /** How lit the bullet of the tool in progress is (0..1): it fades in and out until the result. */
+  /** How lit the bullet of the live call is (0..1): it fades in and out until the result. */
   pulse?: number;
   marker: string;
   /** The marker reports an interruption: red, like the input rules. */
@@ -188,9 +196,10 @@ export function liveRegion(input: RegionInput): Region {
       tail.push(...text.split("\n"));
     }
   }
-  if (input.tool !== undefined) {
-    if (input.toolGap) tail.push("");
-    tail.push(`${toolHead(input.tool, input.pulse === undefined ? undefined : pulseDot(input.pulse))} ${ANSI.dim}…${ANSI.reset}`);
+  if (input.tools.length > 0 && input.toolGap) tail.push("");
+  for (const tool of input.tools) {
+    if (tool.live) tail.push(`${toolHead(tool, input.pulse === undefined ? undefined : pulseDot(input.pulse))} ${ANSI.dim}…${ANSI.reset}`);
+    else tail.push(`${ANSI.dim}● ${tool.name}${tool.args === "" ? "" : ` ${tool.args}`}${ANSI.reset}`);
   }
   if (input.marker !== "") {
     // A blank row keeps the note off whatever was streamed before it.

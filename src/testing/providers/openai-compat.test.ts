@@ -114,8 +114,8 @@ describe("openai-compat", () => {
     // The name is announced on the first chunk, then the path the moment its closing quote arrives,
     // both long before the call itself.
     expect(events.filter((e) => e.type === "tool_pending")).toEqual([
-      { type: "tool_pending", name: "read" },
-      { type: "tool_pending", name: "read", args: { path: "src/main.ts" } },
+      { type: "tool_pending", name: "read", index: 0 },
+      { type: "tool_pending", name: "read", args: { path: "src/main.ts" }, index: 0 },
     ]);
     expect(events.findIndex((e) => e.type === "tool_pending")).toBe(0);
   });

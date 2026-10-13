@@ -930,3 +930,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Test: off/low/no cap on a local server, and the same request to api.openai.com (fetch redirected to the fake server) carries no kwarg or budget.
 - Checked live (rpc, MiniCPM on :8085): off 0 thinking chars, low/medium/extreme think; `--thinking-budget 40` cut the thinking at ~40 tokens and it answered.
 - Not done: Strata was not running, so "off" + the kwarg and -1 were not tried against it (its doc says "off" is its switch; -1 is llama.cpp's no cap). A switch from /models to another endpoint keeps the starting endpoint's `budgets`.
+
+## feat/tool-lines: each call of a reply on its own row (branch feat/tool-lines, on top of fix/thinking-levels)
+- Asked by the user: with several calls in one reply only one line showed, its text replaced as each call streamed and then as each ran (the transcript was right afterwards).
+- `tool_pending` carries `index` (which call of the reply; openai-compat's tool_calls index, Anthropic's block index). The TUI keeps the reply's calls not started yet (`#calls`): a row each while they stream (the newest pulsing), then from message_end all of them as written; tool_start takes its call out (by id) and it runs on the top row, pulsing with "…", the rest dim under it; each finished one goes to the scrollback as before. request_start, retry and run_end clear the list (an unknown tool's call never starts).
+- view.ts: RegionInput `tool` became `tools: ToolLine[]` ({name, args, live}).
+- Tests: view (three rows, only the live one pulses and trails …), app 8g (rows while streaming; bash running with read waiting under it; nothing left after); the providers' pending events with their index.
+- Checked live (tmux, MiniCPM on :8085): three bash calls: a row each as written, then a/b/c ran in turn with the others waiting under the running one.
+- Not done: app.ts was already past the ~300-line rule (1705 lines); this adds ~25.
