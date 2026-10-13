@@ -922,3 +922,11 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## release/v0.2.1: the fixes found using 0.2.0 (branch release/v0.2.1)
 - package.json 0.2.1; CHANGELOG section: job leftovers, the todo list, one-row queued messages and /jobs commands, the scrollback after a resize; the extensions' fixes (permission-gate, cliamp) listed for reinstalling from /extensions.
 - Tag v0.2.1 on main: release.yml builds and publishes.
+
+## fix/thinking-levels: /thinking reaches llama.cpp (branch fix/thinking-levels)
+- Seen live with MiniCPM-V 4.7 on llama.cpp :8085: /thinking changed nothing. Three causes, checked in llama.cpp's server-common.cpp: it turns thinking off only on `reasoning_effort: "none"` or `chat_template_kwargs.enable_thinking: false` (kinoko sent "off"); a budget of 0 there means "end the thinking at once" (kinoko's 0 is "no cap", so extreme was off wherever a budget was configured); and the profiles' budgets were sent only with `thinkingBudget` configured, while a template that ignores the effort (MiniCPM's) has only the budget to tell the levels apart.
+- Now, for a local endpoint (isLocal): off also sends `enable_thinking: false` ("off" stays: it is Strata's switch); the profile's budget is sent (local engines take `reasoning_budget_tokens`); 0 goes as -1. A cloud endpoint gets neither the kwarg nor a budget unless one is configured (OpenAI rejects the field).
+- `budgets` (main.ts) is now "a budget is configured, or the starting endpoint is local", so the labels show LOW · 2048 etc. there.
+- Test: off/low/no cap on a local server, and the same request to api.openai.com (fetch redirected to the fake server) carries no kwarg or budget.
+- Checked live (rpc, MiniCPM on :8085): off 0 thinking chars, low/medium/extreme think; `--thinking-budget 40` cut the thinking at ~40 tokens and it answered.
+- Not done: Strata was not running, so "off" + the kwarg and -1 were not tried against it (its doc says "off" is its switch; -1 is llama.cpp's no cap). A switch from /models to another endpoint keeps the starting endpoint's `budgets`.
