@@ -938,3 +938,15 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Tests: view (three rows, only the live one pulses and trails …), app 8g (rows while streaming; bash running with read waiting under it; nothing left after); the providers' pending events with their index.
 - Checked live (tmux, MiniCPM on :8085): three bash calls: a row each as written, then a/b/c ran in turn with the others waiting under the running one.
 - Not done: app.ts was already past the ~300-line rule (1705 lines); this adds ~25.
+
+## feat/latex: math handed to renderers (branch feat/latex, on top of feat/tool-lines; kinoko-extensions feat/latex)
+- Asked by the user: LaTeX like mermaid. Models write math as `$$…$$`, `\[…\]` and inline `$…$` / `\(…\)`, rarely as a fence, so the fence hook alone would not reach it.
+- markdown.ts: a closed `$$` or `\[` block (one line or several) goes to the `math` renderer and is drawn like a fence (Math label, /copy copies the TeX); inline `$…$`, `$$…$$` and `\(…\)` go to `math-inline` and are kept when it answers one row. A `$` opens only before a non-space and closes after one, not before a digit ("$5 and $10" stays money); `\$` is a literal $. With no renderer, or when it gives up, the text is as before.
+- view.ts splitStable: an open `$$`/`\[` block is not cut, like a fence (committed half-written it would never be drawn).
+- The extension API is unchanged: renderers are looked up by name ("math", "math-inline").
+- The `latex` extension (kinoko-extensions): parser + box layout in Unicode; installed by hand in ~/.kinoko/ext/latex for now.
+- Checked live (tmux, MiniCPM on :8085): inline `x² + bx + c`, `∑ₖ₌₁ⁿ k`, θ; `$$` blocks stacked (quadratic formula, Gauss's sum with its limits, a pmatrix with tall brackets).
+- Not done: thinking blocks keep the TeX as written; no colour for math.
+- Then, from the user's own session ("still ugly"): every formula sat in a full-width code panel with a Math label, six rows for one line of math. Now a `$$`/`\[` block or a math/latex/tex fence is set centred on the text, in cream, no panel (and so no /copy for it); the extension's root bar is a low line on the radicand.
+- Then the user missed the Math label and copying it: a formula now has the Math ⧉ label above it on the right (no panel), a click copies the TeX (code.ts formulaBlock, kept like a panel's rows), and /copy lists `$$`/`\[` formulas (snippets.ts). Checked live: /copy offered the quadratic formula's TeX and copied it.
+- Docs: CHANGELOG (Unreleased: thinking, tool rows, math), README (math renderer names, latex in the list, thinkingBudget for local engines), protocol.md (tool_pending's index).

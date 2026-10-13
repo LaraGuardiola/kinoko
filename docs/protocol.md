@@ -190,7 +190,7 @@ Message {
 | `first_token` | `at` | the model started answering |
 | `thinking_delta` | `delta` | append to the thinking (dim, foldable) |
 | `message_delta` | `delta` | append to the reply (markdown) |
-| `tool_pending` | `name`, `args?` | a tool call being written |
+| `tool_pending` | `name`, `args?`, `index?` | a tool call being written; `index` tells the calls of one reply apart |
 | `tool_start` | `call {id, name, args}` | the call, running |
 | `tool_output` | `call`, `output` | its result (`ERROR: …` is a failure) |
 | `tool_end` | `call` | done |

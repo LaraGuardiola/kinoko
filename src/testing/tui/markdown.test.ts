@@ -8,6 +8,8 @@ const ESC = String.fromCharCode(27);
 const strip = (text: string): string => text.replace(new RegExp(`${ESC}\\[[0-9;]*m`, "g"), "");
 const plain = (text: string, width = 80): string => renderMarkdown(text, { color: false, width });
 const rows = (text: string, width = 40): string[] => renderMarkdown(text, { width }).split("\n");
+/** A stand-in inline math renderer: marks what it drew, gives up on "bad". */
+const inlineMath = (source: string): string[] | undefined => (source === "bad" ? undefined : [`m<${source}>`]);
 
 describe("markdown: inline", () => {
   test("bold, italic, strike and inline code drop their markers", () => {
@@ -200,6 +202,37 @@ describe("markdown: fences an extension draws", () => {
     } finally {
       setFenceRenderers(() => undefined);
     }
+  });
+
+  test("math: $$ and \\[ blocks go to the math renderer, $…$ and \\(…\\) inline to math-inline; money stays", () => {
+    const seen: string[] = [];
+    const block = (source: string): string[] => (seen.push(source), [`BLOCK<${source}>`]);
+    setFenceRenderers((lang) => (lang === "math" ? block : lang === "math-inline" ? inlineMath : undefined));
+    try {
+      // A formula as LaTeX sets it: centred, no code panel; the Math label and its ⧉ above, on the right.
+      const [labelRow, formulaRow] = strip(renderMarkdown("$$x^2$$", { width: 40 })).split("\n");
+      expect(labelRow).toBe(`${" ".repeat(33)}Math ⧉`);
+      expect(formulaRow).toBe(`${" ".repeat(15)}BLOCK<x^2>`);
+      // A click on that ⧉ copies the TeX: the rows under it are the formula's.
+      expect(copyFor([formulaRow!])).toBe("x^2");
+      expect(strip(renderMarkdown("$$\n\\frac{a}{b}\n$$", { width: 40 }))).toContain("BLOCK<\\frac{a}{b}>");
+      expect(strip(renderMarkdown("\\[\na = b\n\\]", { width: 40 }))).toContain("BLOCK<a = b>");
+      expect(strip(renderMarkdown("$$\nx = 1", { width: 40 }))).not.toContain("BLOCK"); // still streaming
+      expect(seen).toEqual(["x^2", "\\frac{a}{b}", "a = b"]);
+      // A math fence is a formula too: its label is the first row (a panel has a padding row above it).
+      expect(strip(renderMarkdown("```math\nx\n```", { width: 40 })).split("\n")[0]).toContain("Math ⧉");
+      expect(copyFor([`${" ".repeat(15)}BLOCK<x>`])).toBe("x");
+      expect(strip(renderMarkdown("area $\\pi r^2$ and \\(e^x\\)"))).toBe("area m<\\pi r^2> and m<e^x>");
+      expect(strip(renderMarkdown("costs $5 and $10 today"))).toBe("costs $5 and $10 today");
+      expect(strip(renderMarkdown("a \\$ sign, $ alone"))).toBe("a $ sign, $ alone");
+      expect(strip(renderMarkdown("left $bad$ as it is"))).toBe("left $bad$ as it is"); // the renderer gave up
+      expect(strip(renderMarkdown("`$x$` in code"))).toBe("$x$ in code");
+    } finally {
+      setFenceRenderers(() => undefined);
+    }
+    // No math extension: nothing changes.
+    expect(strip(renderMarkdown("area $\\pi r^2$"))).toBe("area $\\pi r^2$");
+    expect(strip(renderMarkdown("$$x^2$$"))).toBe("$$x^2$$");
   });
 
   test("a renderer that gives up, throws or draws too wide leaves the source", () => {

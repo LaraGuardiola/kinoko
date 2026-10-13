@@ -6,7 +6,7 @@
 // holds what is still moving: the one block being streamed, the reply's calls, queued messages,
 // the editor and the status line.
 
-import { fenceOpener, isClosing, renderMarkdown } from "./markdown.ts";
+import { fenceOpener, isClosing, mathOpener, renderMarkdown } from "./markdown.ts";
 import { ANSI, clipAnsi, visibleLength, wrapAnsi, wrapWords } from "./style.ts";
 import { pulseDot, toolHead } from "./tools.ts";
 import { modelName } from "../prompt.ts";
@@ -149,14 +149,17 @@ export function splitStable(
   const total = lines.reduce((sum, line) => sum + rowsOf(line), 0);
   if (total <= limit || lines.length < 2) return undefined;
 
-  // inFence[i]: line i is inside a fence (its body or its closing line).
+  // inFence[i]: line i is inside a fence or a $$ block (its body or its closing line): a block
+  // committed half-written would never be drawn whole.
   const inFence: boolean[] = [];
   let marker: string | undefined;
   for (const line of lines) {
     inFence.push(marker !== undefined);
-    if (marker !== undefined) {
+    if (marker === "$$" || marker === "\\]") {
+      if (line.trim().endsWith(marker)) marker = undefined;
+    } else if (marker !== undefined) {
       if (isClosing(line, marker)) marker = undefined;
-    } else marker = fenceOpener(line);
+    } else marker = fenceOpener(line) ?? mathOpener(line);
   }
   // Two neighbouring rows with pipes are (or are becoming) one table.
   const cutOk = (cut: number): boolean => !inFence[cut] && !((lines[cut - 1] ?? "").includes("|") && (lines[cut] ?? "").includes("|"));

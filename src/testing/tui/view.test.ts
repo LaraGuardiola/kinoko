@@ -272,6 +272,16 @@ describe("splitStable", () => {
     expect(split?.commit.endsWith("```")).toBe(true);
   });
 
+  test("an open $$ block stays live as a whole, like a fence; closed, it moves at once", () => {
+    const body = Array.from({ length: 30 }, (_, i) => `a_${i} &= ${i} \\\\`);
+    const open = splitStable(["intro", "", "$$", "", ...body].join("\n"), 80);
+    expect(open?.commit).toBe("intro"); // the blank line inside the block is not a paragraph end
+    expect(open?.rest.startsWith("$$")).toBe(true);
+    const closed = splitStable(["$$", ...body, "$$", "", "after"].join("\n"), 80);
+    expect(closed?.rest).toBe("after");
+    expect(closed?.commit.endsWith("$$")).toBe(true);
+  });
+
   test("a table is never cut between its rows", () => {
     const rows = ["| a | b |", "| - | - |", ...Array.from({ length: 30 }, (_, i) => `| ${i} | x |`)];
     expect(splitStable(["intro", "", ...rows].join("\n"), 80)?.commit).toBe("intro");

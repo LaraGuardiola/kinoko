@@ -6,7 +6,7 @@
 // every block here is seen whole or, while it is still streaming, from its start.
 
 import type { FenceRenderer } from "../ext.ts";
-import { codeBlock, drawnBlock } from "./code.ts";
+import { codeBlock, drawnBlock, formulaBlock } from "./code.ts";
 import { isTableStart, renderTable } from "./table.ts";
 import { visibleLength, wrapWords } from "./style.ts";
 import { isTreeLine, treeRows } from "./tree.ts";
@@ -85,8 +85,19 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
       const body = lines.slice(i + 1, end);
       // Still streaming (no closing fence yet): the source, drawn once it is whole.
       const rows = color && end < lines.length ? drawn(lang, body.join("\n"), width - 3) : undefined;
-      out.push(...(rows === undefined ? codeBlock(body, { lang, width, color }) : drawnBlock(rows, { lang, width, code: body.join("\n") })));
+      const drawnRows = rows === undefined ? undefined : MATH_FENCES.has(lang.toLowerCase()) ? formulaBlock(rows, { width, code: body.join("\n") }) : drawnBlock(rows, { lang, width, code: body.join("\n") });
+      out.push(...(drawnRows ?? codeBlock(body, { lang, width, color })));
       i = end + 1;
+      continue;
+    }
+
+    // $$…$$ or \[…\] (one line or several): drawn by the math renderer when one is installed and
+    // it can read it; otherwise the lines go on as text.
+    const math = mathBlock(lines, i);
+    const mathRows = math && color ? drawn("math", math.source, width - 4) : undefined;
+    if (math && mathRows) {
+      out.push(...formulaBlock(mathRows, { width, code: math.source }));
+      i = math.end + 1;
       continue;
     }
 
@@ -149,6 +160,54 @@ export function renderMarkdown(text: string, opts: MarkdownOptions = {}): string
   return out.join("\n");
 }
 
+/** Fences that hold math: drawn as a formula, like $$, not in a code panel. */
+const MATH_FENCES = new Set(["math", "latex", "tex", "katex"]);
+
+/** What closes a display-math block `line` opens and leaves open ($$ or \]), else undefined. */
+export function mathOpener(line: string): string | undefined {
+  const t = line.trim();
+  if (t.startsWith("$$")) return t.length > 4 && t.endsWith("$$") ? undefined : "$$";
+  if (t.startsWith("\\[")) return t.length > 4 && t.endsWith("\\]") ? undefined : "\\]";
+  return undefined;
+}
+
+/** A whole display-math block starting at line `i`: its TeX and its last line. Open (still
+ *  streaming, or never closed): undefined. */
+export function mathBlock(lines: string[], i: number): { source: string; end: number } | undefined {
+  const t = (lines[i] ?? "").trim();
+  const open = t.startsWith("$$") ? "$$" : t.startsWith("\\[") ? "\\[" : undefined;
+  if (open === undefined) return undefined;
+  const close = open === "$$" ? "$$" : "\\]";
+  if (t.length > 4 && t.endsWith(close)) return { source: t.slice(2, -2).trim(), end: i };
+  for (let end = i + 1; end < lines.length; end++) {
+    const last = (lines[end] ?? "").trim();
+    if (!last.endsWith(close)) continue;
+    const body = [t.slice(2), ...lines.slice(i + 1, end), last.slice(0, -2)];
+    return { source: body.join("\n").trim(), end };
+  }
+  return undefined;
+}
+
+/** Inline math at `i` ($…$, $$…$$, \(…\)): its TeX and where it ends. A $ only opens before a
+ *  non-space and closes after one, not before a digit, so "$5 and $10" stays money. */
+function inlineMath(text: string, i: number): { source: string; end: number } | undefined {
+  if (text.startsWith("\\(", i)) {
+    const close = text.indexOf("\\)", i + 2);
+    return close > i + 2 ? { source: text.slice(i + 2, close), end: close + 2 } : undefined;
+  }
+  if (text.startsWith("$$", i)) {
+    const close = text.indexOf("$$", i + 2);
+    return close > i + 2 ? { source: text.slice(i + 2, close), end: close + 2 } : undefined;
+  }
+  if (/\s/.test(text[i + 1] ?? " ")) return undefined;
+  for (let j = text.indexOf("$", i + 1); j > i + 1; j = text.indexOf("$", j + 1)) {
+    if (text[j - 1] === "\\" || /\s/.test(text[j - 1] ?? "")) continue;
+    if (/\d/.test(text[j + 1] ?? "")) return undefined;
+    return { source: text.slice(i + 1, j), end: j + 1 };
+  }
+  return undefined;
+}
+
 /** The marker (``` or ~~~...) when `line` opens a fence. */
 export function fenceOpener(line: string): string | undefined {
   return FENCE.exec(line)?.[1];
@@ -171,7 +230,17 @@ export function inline(text: string, outer = ""): string {
   while (i < text.length) {
     const rest = text.slice(i);
     const ch = text[i] ?? "";
-    if (ch === "\\" && /^\\[\\`*_~[\]()#|>-]/.test(rest)) {
+    // Inline math, before the escapes: \( is math, not an escaped parenthesis.
+    if (ch === "$" || rest.startsWith("\\(")) {
+      const math = inlineMath(text, i);
+      const rows = math && drawn("math-inline", math.source, 1000);
+      if (math && rows?.length === 1) {
+        out += rows[0];
+        i = math.end;
+        continue;
+      }
+    }
+    if (ch === "\\" && /^\\[\\`*_~[\]()#|>$-]/.test(rest)) {
       out += text[i + 1] ?? "";
       i += 2;
       continue;
