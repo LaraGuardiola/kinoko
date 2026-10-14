@@ -28,13 +28,6 @@ import { snippets } from "./snippets.ts";
 import type { ThinkingProfile } from "./menu-pages.ts";
 import type { CommandHost } from "../commands.ts";
 import type { Catalog, Entry, Outcome, Change } from "../catalog.ts";
-import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
-import type { ModelChoice, ModelsView } from "./models-menu.ts";
-import { mismatchNote } from "./model-check.ts";
-import { DEFAULTS } from "../config.ts";
-import type { SavedModel } from "../config.ts";
-import type { Served } from "../providers/openai-compat.ts";
-import type { Provider } from "../types.ts";
 import { actionFor } from "./keys.ts";
 import type { QueuedView, Region, ToolLine, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -50,6 +43,8 @@ import { compactingNote } from "./sprout.ts";
 import { ANSI, cells, stripAnsi } from "./style.ts";
 import { Marker } from "./marker.ts";
 import { Scrollback } from "./scrollback.ts";
+import { ModelSwitch } from "./model-switch.ts";
+import type { ModelsHost } from "./model-switch.ts";
 import { COPY, copyFor } from "./code.ts";
 import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
@@ -132,23 +127,7 @@ export interface AppOptions {
   integrations?: Partial<Pick<IntegrationsHost, "home" | "apiBase" | "hubRunning" | "filesExtension">>;
 }
 
-/** What the models page needs from outside the TUI: other endpoints, and somewhere to save them. */
-export interface ModelsHost {
-  /** The endpoint in use at start. */
-  endpoint: string;
-  /** Models to offer besides the engine's own: the configured one, and those added before. */
-  saved: SavedModel[];
-  connect: (entry: SavedModel) => Provider;
-  discover: (baseUrl: string, apiKey: string, signal: AbortSignal) => Promise<Served[]>;
-  /** Saves one entry; answers with the list to offer from now on. */
-  save: (entry: SavedModel) => Promise<SavedModel[]>;
-  /** Removes one saved entry; answers with the list to offer from now on. */
-  remove: (entry: SavedModel) => Promise<SavedModel[]>;
-  /** Entries that cannot be removed from the TUI (the configured model, the default). */
-  fixed: (entry: SavedModel) => boolean;
-  /** Makes one the model new sessions start with; answers with the list to offer from now on. */
-  setDefault?: (entry: SavedModel) => Promise<SavedModel[]>;
-}
+export type { ModelsHost } from "./model-switch.ts";
 
 export class App {
   #agent: Agent;
@@ -156,26 +135,21 @@ export class App {
   #scrollback: Scrollback;
   #parser = new KeyParser();
   #editor: Editor;
-  #model: string;
-  #window: number;
   #thinking: string | undefined;
   #profile: string | undefined;
   #budgets: boolean;
   #menu = new Menu();
-  #host: ModelsHost | undefined;
+  #models: ModelSwitch;
   #catalogs: { extensions?: Catalog; skills?: Catalog };
   #apply: AppOptions["apply"];
   #capabilities: AppOptions["capabilities"];
   #jobs: Jobs | undefined;
   #extensionCommands: AppOptions["extensionCommands"];
-  #noModel = false;
   /** The block with the [Capabilities] lines as printed (the startup panel, or a fresh copy). */
   #panel: { text: string; gap: boolean } | undefined;
   #panelStale = false; // changed while scrolled off screen: printed again when the menu closes
   #newSessionOf: AppOptions["newSession"];
   #resumeOf: AppOptions["resumeSession"];
-  #endpoint: string;
-  #saved: SavedModel[];
   #viewportRows: number | undefined;
   #viewportCols: number | undefined;
   #session: Session | undefined;
@@ -222,12 +196,9 @@ export class App {
     });
     this.#scrollback = new Scrollback({ renderer: this.#renderer, state: () => this.#state(), columns: () => this.#printCols });
     this.#editor = new Editor({ history: opts.history?.sent, onRemember: opts.history?.add });
-    this.#model = opts.model;
-    this.#window = opts.contextWindow;
     this.#thinking = opts.thinking;
     this.#profile = opts.thinkingProfile;
     this.#budgets = opts.budgets ?? false;
-    this.#host = opts.models;
     this.#catalogs = { extensions: opts.extensions, skills: opts.skills };
     // Every install, removal or switch also brings the [Capabilities] lines up to date.
     const apply = opts.apply;
@@ -239,15 +210,24 @@ export class App {
     this.#capabilities = opts.capabilities;
     this.#jobs = opts.jobs;
     this.#extensionCommands = opts.extensionCommands;
-    this.#noModel = opts.noModel === true;
     this.#jobs?.on(() => this.render()); // the label counts them
     this.#newSessionOf = opts.newSession;
     this.#resumeOf = opts.resumeSession;
-    this.#endpoint = opts.models?.endpoint ?? "";
-    this.#saved = opts.models?.saved ?? [];
     this.#viewportRows = opts.viewportRows;
     this.#viewportCols = opts.viewportCols;
     this.#session = opts.session;
+    this.#models = new ModelSwitch({
+      agent: () => this.#agent,
+      host: opts.models,
+      model: opts.model,
+      contextWindow: opts.contextWindow,
+      noModel: opts.noModel === true,
+      menu: this.#menu,
+      marker: this.#marker,
+      session: () => this.#session,
+      closeMenu: () => this.#closeMenu(),
+      render: () => this.render(),
+    });
     this.#rebuild = opts.rebuild;
     this.#onQuit = opts.onQuit;
     this.#handOver = opts.handOver;
@@ -379,9 +359,9 @@ export class App {
   get statusLine(): string {
     return statusLine({
       running: this.#running,
-      model: this.#noModel ? "no model yet" : this.#model,
+      model: this.#models.noModel ? "no model yet" : this.#models.model,
       tokens: this.#tokens,
-      contextWindow: this.#window,
+      contextWindow: this.#models.contextWindow,
       cost: this.#cost,
     });
   }
@@ -480,8 +460,8 @@ export class App {
       return;
     }
     // No model yet: what was typed stays, and /models opens to set one up.
-    if (this.#noModel) {
-      this.#openModels();
+    if (this.#models.noModel) {
+      this.#models.open();
       this.render();
       return;
     }
@@ -887,7 +867,7 @@ export class App {
         this.render();
         return true;
       case "model":
-        this.#scrollback.print("system", `model: ${modelName(this.#model)}  context: ${this.#window} tokens`);
+        this.#scrollback.print("system", `model: ${modelName(this.#models.model)}  context: ${this.#models.contextWindow} tokens`);
         this.render();
         return true;
       case "compact": {
@@ -923,16 +903,13 @@ export class App {
 
   /** Started with no model: the panel is followed by how to set one up. */
   noModelHint(): void {
-    if (this.#noModel) this.#scrollback.print("system", NO_MODEL);
+    if (this.#models.noModel) this.#scrollback.print("system", NO_MODEL);
     this.render();
   }
 
   /** At start: says so when the model in use is not one its endpoint serves (see model-check.ts). */
   async checkModel(): Promise<void> {
-    if (this.#noModel) return;
-    const model = this.#model;
-    const served = await this.#agent.models(AbortSignal.timeout(5_000)).catch(() => [] as string[]);
-    const note = this.#model === model ? mismatchNote(model, served, this.#endpoint === "" ? "the engine" : hostOf(this.#endpoint)) : undefined; // a pick came first
+    const note = await this.#models.mismatch();
     if (note === undefined) return;
     const block = (width: number): string => `${ANSI.cream}${formatBlock("system", note, width)}${ANSI.reset}`;
     this.#scrollback.print("system", block(this.#scrollback.width), this.#scrollback.printedAny, undefined, block); // wrapped by words, again on a resize
@@ -1238,7 +1215,7 @@ export class App {
 
   #openRoot(item: MenuItem): void {
     if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
-    else if (item.name === "models") this.#openModels();
+    else if (item.name === "models") this.#models.open();
     else if (item.name === "extensions" || item.name === "skills") this.#openCatalog(item.name);
     else if (item.name === "sessions") openSessions(this.#sessionsHost());
     else if (item.name === "jobs") this.#openJobs();
@@ -1307,17 +1284,11 @@ export class App {
         },
       },
       models: {
-        // The saved models (any endpoint) and what the engine in use serves, once each.
-        list: async (signal) => {
-          const items = new Map(this.#saved.map((e) => [e.model, { name: e.model, description: e.label ?? hostOf(e.baseUrl) }]));
-          for (const m of await this.#agent.models(signal).catch(() => [] as string[])) if (!items.has(m)) items.set(m, { name: m, description: `served by ${hostOf(this.#endpoint)}` });
-          return [...items.values()];
-        },
+        list: (signal) => this.#models.list(signal),
         set: (name) => {
-          const current = this.#saved.find((e) => e.baseUrl === this.#endpoint);
-          this.#useModel(this.#saved.find((e) => e.model === name) ?? { model: name, baseUrl: this.#endpoint, apiKey: current?.apiKey ?? "" });
+          const note = this.#models.useByName(name);
           this.render();
-          return this.#marker.text;
+          return note;
         },
       },
       clear: () => {
@@ -1333,7 +1304,7 @@ export class App {
       session: () => {
         const s = this.#session;
         if (s === undefined) return "no session";
-        const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#tokens.context, window: this.#window };
+        const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#tokens.context, window: this.#models.contextWindow };
         return stripAnsi(sessionLines(facts, 60).join("\n"));
       },
       told: (note) => {
@@ -1342,51 +1313,6 @@ export class App {
         this.render();
       },
     };
-  }
-
-  #openModels(): void {
-    // Every provider is asked what it serves (the one in use through the agent), in parallel; the
-    // page fills in as they answer.
-    const served = new Map<string, Served[]>();
-    const others = [...new Map(this.#saved.filter((m) => m.baseUrl !== this.#endpoint).map((m) => [m.baseUrl, m])).values()];
-    let pending = 1 + (this.#host ? others.length : 0);
-    const view = (): ModelsView => ({
-      model: this.#model,
-      endpoint: this.#endpoint,
-      served,
-      loading: pending > 0,
-      saved: this.#saved,
-      canAdd: this.#host !== undefined,
-      fixed: this.#host?.fixed,
-      canDefault: this.#host?.setDefault !== undefined,
-    });
-    const choose = (choice: ModelChoice): void => {
-      if (choice.kind === "add") this.#addProvider();
-      // The redrawn page becomes the one later answers refresh.
-      else if (choice.kind === "remove") this.#removeModel(choice.entry, () => (page = modelsPage(view(), choose)));
-      else if (choice.kind === "default") this.#defaultModel(choice.entry, () => (page = modelsPage(view(), choose)));
-      else this.#useModel(choice.entry);
-    };
-    let page = modelsPage(view(), choose);
-    this.#menu.open(page);
-    const answered = (baseUrl: string, list: Served[]): void => {
-      pending--;
-      if (list.length > 0) served.set(baseUrl, list);
-      const next = modelsPage(view(), choose);
-      this.#menu.refresh(page, next);
-      page = next;
-      this.render();
-    };
-    void this.#agent
-      .models(AbortSignal.timeout(10_000))
-      .catch(() => [])
-      .then((names) => answered(this.#endpoint, names.map((id) => ({ id }))));
-    for (const entry of this.#host ? others : []) {
-      void this.#host
-        ?.discover(entry.baseUrl, entry.apiKey, AbortSignal.timeout(10_000))
-        .catch(() => [])
-        .then((list) => answered(entry.baseUrl, list));
-    }
   }
 
   /** A catalog's page: what is on disk at once, the repository's news after; install and remove. */
@@ -1465,141 +1391,11 @@ export class App {
       .then(redraw);
   }
 
-  /** Forgets a saved model; the models page stays open, redrawn without it. */
-  #removeModel(entry: SavedModel, redraw: () => ListPage): void {
-    const page = this.#menu.page;
-    void this.#host
-      ?.remove(entry)
-      .then((saved) => {
-        this.#saved = saved;
-        if (page) this.#menu.refresh(page, redraw());
-        this.#marker.inform(`removed ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}`);
-      })
-      .catch(() => this.#marker.warn(`could not remove ${modelName(entry.model)}`))
-      .finally(() => this.render());
-  }
-
-  /** Makes a model the default for new sessions (config.json); the models page stays open, redrawn. */
-  #defaultModel(entry: SavedModel, redraw: () => ListPage): void {
-    const page = this.#menu.page;
-    void this.#host
-      ?.setDefault?.(entry)
-      .then((saved) => {
-        this.#saved = saved;
-        if (page) this.#menu.swap(page, redraw()); // the same model stays selected
-        this.#marker.inform(`default: ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}, for new sessions`);
-      })
-      .catch(() => this.#marker.warn(`could not make ${modelName(entry.model)} the default`))
-      .finally(() => this.render());
-  }
-
-  /** Its name, endpoint, API key, then one of the models it serves (or its id typed by hand). */
-  #addProvider(): void {
-    this.#menu.open(
-      labelPage((typedLabel) => {
-        const label = typedLabel.trim();
-        if (label === "") return; // nothing typed: stay on this step
-        this.#menu.open(
-          endpointPage((typed) => {
-            const baseUrl = endpointOf(typed);
-            if (baseUrl === undefined) return;
-            this.#menu.open(keyPage((apiKey) => this.#discover(label, baseUrl, apiKey.trim())));
-          }),
-        );
-      }),
-    );
-  }
-
-  #discover(label: string, baseUrl: string, apiKey: string): void {
-    const host = hostOf(baseUrl);
-    const keep = (served: Served): void => {
-      const entry: SavedModel = { model: served.id, baseUrl, apiKey, contextWindow: served.contextWindow, label };
-      this.#closeMenu();
-      this.#useModel(entry);
-      void this.#host
-        ?.save(entry)
-        .then((saved) => {
-          this.#saved = saved;
-          this.#marker.inform(`model: ${modelName(entry.model)} at ${host}, saved`);
-        })
-        .catch(() => this.#marker.warn(`model: ${modelName(entry.model)} at ${host} (could not save it)`))
-        .finally(() => this.render());
-    };
-    const asking = servedPage(host, undefined, keep);
-    this.#menu.open(asking);
-    // An endpoint that answers but lists nothing, and one that does not answer at all, both lead
-    // to typing the id; only the second is probably a mistake (a wrong port, a server not started).
-    const byHand = (reachable: boolean): void => {
-      this.#menu.refresh(asking, namePage(host, reachable, (id) => id.trim() && keep({ id: id.trim() })));
-    };
-    void this.#host
-      ?.discover(baseUrl, apiKey, AbortSignal.timeout(10_000))
-      .then((served) => (served.length > 0 ? this.#menu.refresh(asking, servedPage(host, served, keep)) : byHand(true)))
-      .catch(() => byHand(false))
-      .finally(() => this.render());
-  }
-
-  /** Switches to a model, and to its endpoint when it is served elsewhere; then its window. */
-  #useModel(entry: SavedModel): void {
-    this.#noModel = false;
-    if (entry.baseUrl !== this.#endpoint && this.#host) {
-      this.#agent.setProvider(this.#host.connect(entry));
-      this.#endpoint = entry.baseUrl;
-    }
-    this.#agent.setModel(entry.model);
-    this.#model = entry.model;
-    this.#marker.inform(`model: ${modelName(entry.model)}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`);
-    if (entry.contextWindow) this.#useWindow(entry.contextWindow);
-    else this.#learnWindow(entry);
-    this.#recordModel(entry, entry.contextWindow);
-  }
-
-  /** The session remembers the switch (and the window, once known), so a resume starts with it. */
-  #recordModel(entry: SavedModel, contextWindow: number | undefined): void {
-    const record = { model: entry.model, baseUrl: entry.baseUrl, ...(contextWindow ? { contextWindow } : {}) };
-    void this.#session?.setModel(record).catch(() => undefined);
-  }
-
-  #useWindow(window: number): void {
-    this.#agent.setContextWindow(window);
-    this.#window = window;
-  }
-
-  /**
-   * A model picked without a known window (typed by hand, or served by the engine in use): ask its
-   * endpoint, use what it says, and keep it on a saved entry so the next pick knows it at once.
-   * Until then the previous window stands; if it never says (or does not answer), the default one,
-   * as a fresh start has, and the marker says so.
-   */
-  #learnWindow(entry: SavedModel): void {
-    const host = this.#host;
-    if (!host || entry.baseUrl === "") return;
-    void host
-      .discover(entry.baseUrl, entry.apiKey, AbortSignal.timeout(10_000))
-      .catch(() => [] as Served[])
-      .then(async (served) => {
-        const window = served.find((s) => s.id === entry.model)?.contextWindow;
-        if (this.#model !== entry.model) return; // another pick came first
-        if (!window) {
-          // The last model's window says nothing about this one: the default, as a fresh start has.
-          this.#useWindow(DEFAULTS.contextWindow);
-          this.#marker.inform(`model: ${modelName(entry.model)} (its context window is unknown: ${DEFAULTS.contextWindow.toLocaleString("en-US")}, the default)`);
-          return;
-        }
-        this.#useWindow(window);
-        this.#recordModel(entry, window);
-        const saved = this.#saved.some((m) => m.baseUrl === entry.baseUrl && m.model === entry.model && !host.fixed(m));
-        if (saved) this.#saved = await host.save({ ...entry, contextWindow: window });
-      })
-      .catch(() => undefined)
-      .finally(() => this.render());
-  }
-
   #sessionsHost(): SessionsHost {
     const s = this.#session;
     return {
       dir: s ? dirname(s.path) : sessionDir(this.#cwd),
-      current: s ? { id: s.meta.id, context: this.#tokens.context, window: this.#window } : undefined,
+      current: s ? { id: s.meta.id, context: this.#tokens.context, window: this.#models.contextWindow } : undefined,
       resume: this.#resumeOf
         ? (path) => {
             this.#closeMenu();
