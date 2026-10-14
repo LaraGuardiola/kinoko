@@ -1138,3 +1138,17 @@ Deferred, for whenever an Anthropic model is actually needed:
 - package.json 0.4.0, CHANGELOG 0.4.0 (Kinoko Lab; the voice extension; Alt+X stops tools; the
   extension hooks; the new events and inspect), README lists voice, handoff.md's next steps (the APK's
   size, the voice on the phone). 0.4.0 and not 0.3.1: two new features and a changed key.
+
+## docs/phone-voice: the voice on the phone, the design
+- docs/phone-voice.md: the app asks the hub for each sentence's audio (POST /v1/speech, raw PCM
+  streamed from the computer's TTS backend, the same "tts" of ~/.kinoko/voice.json), plays it with
+  an AudioTrack while the reply streams; a speaker button, the stops, audio focus, the cost. Option
+  B, chosen by the owner. Not built.
+- Decisions in: the speaker button in each chat's bar; terminal agents read too.
+
+## The voice ducks again (kinoko-extensions feat/voice-duck)
+- At the owner's request, back: the moment anyone speaks while kinoko talks, its voice drops to 15 %
+  (the player fed a quarter of a second ahead), until they stop; then it stops (said "kinoko…") or
+  comes back up. Without it, its own voice covered the owner's. Kept the hang protection (end waits
+  the last quarter second plus 3 s). Checked: a whole reply recorded from the output, transcribed
+  whole.
