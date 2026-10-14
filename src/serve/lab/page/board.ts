@@ -103,8 +103,11 @@ export class Board {
       const d = beltPoints(plan, belt)
         .map((p, i) => `${i === 0 ? "M" : "L"}${this.#px(p).join(" ")}`)
         .join(" ");
-      el("path", { d, class: "belt-bed" }, belts);
-      this.#belts.set(`${belt.from}>${belt.to}`, el("path", { d, class: "belt" }, belts));
+      // Each belt keeps its own bed: one lit is raised above the others, so a lane they share
+      // shows the lit one whole instead of the dashes of whichever was laid last.
+      const group = el("g", {}, belts);
+      el("path", { d, class: "belt-bed" }, group);
+      this.#belts.set(`${belt.from}>${belt.to}`, el("path", { d, class: "belt" }, group));
     }
 
     // Items ride under the machines: they vanish into one and come out of the next, as in Factorio.
@@ -183,7 +186,11 @@ export class Board {
     el("circle", { r: 6.5 }, node);
     if (move.label && move.kind === "call") el("text", { y: -11, "text-anchor": "middle", class: "item-label" }, node).textContent = move.label;
     const belts = move.route.slice(1).flatMap((to, i) => this.#belts.get(`${move.route[i]}>${to}`) ?? []);
-    for (const belt of belts) belt.classList.add("running");
+    for (const belt of belts) {
+      belt.classList.add("running");
+      const group = belt.parentNode;
+      group?.parentNode?.appendChild(group); // on top of the belts it shares a lane with
+    }
     this.#riding.push({ node, points, lengths, total, start: performance.now(), duration, to: move.route.at(-1) as MachineId, belts });
     if (this.#frame === 0) this.#frame = requestAnimationFrame((t) => this.#tick(t));
   }

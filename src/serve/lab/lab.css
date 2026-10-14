@@ -177,7 +177,7 @@ main {
   stroke-width: 1;
 }
 
-/* Belts: a bed, and a dashed line that runs while something rides it. */
+/* Belts: a bed, and a dashed line that runs, cream, while something rides it. */
 .belt-bed {
   fill: none;
   stroke: #232636;
@@ -194,7 +194,7 @@ main {
   stroke-linejoin: round;
 }
 .belt.running {
-  stroke: color-mix(in srgb, var(--text) 55%, transparent);
+  stroke: color-mix(in srgb, var(--text) 75%, transparent);
   animation: belt-run 0.6s linear infinite;
 }
 @keyframes belt-run {
