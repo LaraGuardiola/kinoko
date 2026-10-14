@@ -13,6 +13,7 @@ import { Extensions, extensionName, loadExtensions, loadOne } from "./ext.ts";
 import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
 import type { Change } from "./catalog.ts";
 import { App } from "./tui/app.ts";
+import { addToPromptHistory, loadPromptHistory } from "./tui/prompt-history.ts";
 import { THINKING, profileLabel } from "./tui/menu-pages.ts";
 import { activeProfile } from "./profiles.ts";
 import { mushroomArt } from "./tui/mushroom-art.ts";
@@ -285,6 +286,8 @@ if (tui) {
   const app = new App({
     agent: agent,
     noModel,
+    // What you sent in earlier runs, as a shell keeps it: a failed write only loses that line.
+    history: { sent: await loadPromptHistory(userHome()), add: (text) => void addToPromptHistory(userHome(), text).catch(() => undefined) },
     extensionCommands: { list: () => ext.commandList(), get: (name) => ext.command(name) },
     write: (text) => term.write(text),
     model: start.model,

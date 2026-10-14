@@ -989,3 +989,12 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Tests: model-check (served, silent endpoint, one name, several), app (told with what it serves; nothing when it is served).
 - Checked live (tmux, the test HOME with Qwen3.6 in config, :8085 serving MiniCPM): the note under the intro.
 - Not done: only the TUI says it (an rpc agent from the phone does not).
+
+## feat/persistent-history: the messages you sent, kept across runs (branch feat/persistent-history)
+- Idea 2 of the 0.3.0 list: ↑ only remembered this kinoko's messages.
+- src/tui/prompt-history.ts (new): ~/.kinoko/history.jsonl, one JSON string per line (a message may hold newlines), 0600. `loadPromptHistory` gives the newest 200 (a line cut short is skipped; past 1000 lines the file is cut back to 200 when read); `addToPromptHistory` appends one.
+- Editor: `onRemember` is told each line it adds (not a blank, not a repeat). App option `history: { sent, add }`; main.ts loads it at start and appends without waiting (a failed write only loses that line).
+- Global like a shell's, not per project: a resumed session's prompts are in it because they were sent from here. Several kinokos at once each append; each reads the file only at start.
+- Tests: prompt-history (order, several lines, 0600, a cut line, the cut back), editor 11b (told once, earlier runs reachable with ↑).
+- Checked live (tmux, test HOME): sent a message, quit, a new kinoko brought it back with ↑.
+- Not done: messages typed on the phone are not in it (they never pass the editor).

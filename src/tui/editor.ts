@@ -24,6 +24,8 @@ export interface EditorView {
 export interface EditorOptions {
   history?: string[];
   maxHistory?: number;
+  /** Told each line added to the history (to keep it across runs). */
+  onRemember?: (line: string) => void;
 }
 
 const DEFAULT_MAX_HISTORY = 200;
@@ -48,11 +50,13 @@ export class Editor {
   #maxHistory: number;
   #saved = ""; // the in-progress line while browsing history
   #index = 0; // #history.length means "the live buffer"
+  #onRemember: ((line: string) => void) | undefined;
 
   constructor(opts: EditorOptions = {}) {
     this.#history = opts.history ?? [];
     this.#maxHistory = opts.maxHistory ?? DEFAULT_MAX_HISTORY;
     this.#index = this.#history.length;
+    this.#onRemember = opts.onRemember;
   }
 
   get text(): string {
@@ -91,6 +95,7 @@ export class Editor {
     this.#history.push(value);
     if (this.#history.length > this.#maxHistory) this.#history.shift();
     this.#resetIndex();
+    this.#onRemember?.(value);
   }
 
   setText(text: string, cursor = text.length): void {

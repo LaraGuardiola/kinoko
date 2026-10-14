@@ -176,6 +176,20 @@ describe("tui editor", () => {
     expect(editor.text).toBe("b");
   });
 
+  test("11b. each line added to the history is told (to keep it), not a blank nor a repeat", () => {
+    const told: string[] = [];
+    const editor = new Editor({ history: ["from an earlier run"], onRemember: (line) => told.push(line) });
+    editor.remember("a");
+    editor.remember("a");
+    editor.remember("   ");
+    editor.remember(" b ");
+    expect(told).toEqual(["a", "b"]);
+    editor.handle(key("up"));
+    editor.handle(key("up"));
+    editor.handle(key("up"));
+    expect(editor.text).toBe("from an earlier run");
+  });
+
   test("12. alt+up is reported to the TUI, which owns that binding", () => {
     const editor = new Editor({ history: ["older"] });
     typed(editor, "draft");
