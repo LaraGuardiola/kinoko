@@ -954,3 +954,9 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## release/v0.2.2: thinking levels on llama.cpp, a row per tool call, LaTeX math (branch release/v0.2.2)
 - package.json 0.2.2; the CHANGELOG's Unreleased section became 0.2.2 (thinking levels, tool rows, math; the latex extension).
 - Tag v0.2.2 on main: release.yml builds and publishes.
+
+## feat/history-arrows: ↑ and ↓ reach the messages you sent (branch feat/history-arrows)
+- Asked by the user: walk the messages sent with the arrows, as in a shell, from the start of the cursor (or the end when there is text).
+- editor.ts `#arrow`: Up/Down still move between lines; on the first (last) line the cursor goes to its start (end); from either end of the text the arrow goes to the previous (next) message, Ctrl-P/Ctrl-N as before. A recalled one-line message keeps going with ↑ (its cursor sits at the end); one of several lines is walked line by line first. The draft being typed comes back past the newest one.
+- Tests: editor 5 (the edges now go to the line's start/end instead of staying put), 12b (empty, several lines, mid-text, the draft back). Help page and README say it.
+- Not done: the history is still this kinoko's only (not kept across runs nor taken from a resumed session).

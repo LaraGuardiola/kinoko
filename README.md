@@ -74,7 +74,7 @@ an `AbortSignal`, nothing blocks the event loop, and the keyboard always wins:
 | `Ctrl-T` | expand or collapse tool output | same |
 | `Ctrl-V` | paste the clipboard image as `[Image #N]` | same |
 | `@` | reference a file: lists the directory as you type (Tab/Enter completes) | same |
-| `Ctrl-P` / `Ctrl-N` | previous / next history entry | same |
+| `↑` / `↓` at the start or end of the text, or `Ctrl-P` / `Ctrl-N` | previous / next message you sent | same |
 | `Shift+Enter` / `Ctrl-J` | newline inside the editor | same |
 | `Ctrl-O` | unfold the plan over the side column, scroll it with ↑↓ PgUp PgDn, Esc folds it (narrow window: prints it) | same |
 

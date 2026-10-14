@@ -144,7 +144,7 @@ const KEYS: Array<[string, string]> = [
   ["Alt+Up", "Pull the last queued message back into the input"],
   ["Alt+X", "Send the waiting steer now: cuts the reply being written (thinking included)"],
   ["Alt+C", "Cancel the queued messages: they go back into the input"],
-  ["Ctrl-P / Ctrl-N", "Previous / next history entry"],
+  ["↑↓ / Ctrl-P Ctrl-N", "Previous / next message you sent (arrows: from the start or end of the text)"],
   ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],
   ["!command", "Run it in your shell, here (sudo asks as usual); its output stays above"],
   ["@", "Reference a file: lists the directory as you type; arrows, Tab or Enter to complete"],
