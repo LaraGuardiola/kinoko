@@ -259,8 +259,8 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 
 For the TUI, an extension can also take a key the TUI leaves free (`registerKey("ctrl-space", handler,
 description)`, listed in /help), send text as the user (`send(text)` is Enter; `send(text, {as:
-"steer_now"})` is Alt+X, cutting the reply being streamed) and show what it is doing at the start of
-the status line (`status("● listening")`, `status(undefined)` to clear it). Where nobody types (print
+"steer_now"})` is Alt+X, cutting the reply being streamed) and show what it is doing on the rule above
+the input, right side (`status("● listening")`, `status(undefined)` to clear it). Where nobody types (print
 and rpc modes) `send` returns false and `status` shows nothing. The voice extension (docs/voice.md) is what they are for.
 
 The extensions live in their own repository,

@@ -83,6 +83,8 @@ export interface RegionInput {
   thinking?: string;
   /** Background jobs running ("⚙ 2 shells"), left of the thinking level: a click opens them. */
   jobs?: string;
+  /** What an extension says it is doing ("● listening"), leftmost of the rule's labels. */
+  extension?: string;
   /** The slash menu's rows, between the rule under the editor and the place line. */
   menu?: string[];
   /** Columns for the rows above the input's rule (the streamed text), when a side column takes the rest. */
@@ -228,7 +230,7 @@ export function liveRegion(input: RegionInput): Region {
   const ruleWidth = Math.max(1, (input.viewportCols ?? 80) - 2);
   const rule = `${ANSI.amanita}${"─".repeat(ruleWidth)}${ANSI.reset}`;
   // A blank row keeps the transcript off the input.
-  let head = ["", labelledRule(ruleWidth, input.thinking, input.jobs)];
+  let head = ["", labelledRule(ruleWidth, input.thinking, input.jobs, input.extension)];
   let foot = [rule, ...(input.menu ?? []), ...(input.place ? [placeRow(input.place)] : []), input.status];
 
   const viewport = input.viewportRows;
@@ -261,11 +263,13 @@ export function liveRegion(input: RegionInput): Region {
 
 /** The path in amanita's cream stem, the branch in its red cap. */
 /** The rule above the editor, with `label` near its right end: "──────── LOW · 2048 ──". */
-function labelledRule(width: number, label: string | undefined, jobs?: string): string {
+function labelledRule(width: number, label: string | undefined, jobs?: string, extension?: string): string {
   const own = label ? `${ANSI.bold}${ANSI.cream}${label}${ANSI.reset}` : "";
   // The background jobs, left of the thinking level: orange, like the menu's names.
   const job = jobs ? `${JOBS_COLOR}${jobs}${ANSI.reset}` : "";
-  const labels = [job, own].filter((l) => l !== "");
+  // An extension's word, leftmost: cream, its leading dot red (a microphone open).
+  const ext = extension ? `${ANSI.cream}${extension.replace(/^●/, `${ANSI.amanita}●${ANSI.cream}`)}${ANSI.reset}` : "";
+  const labels = [ext, job, own].filter((l) => l !== "");
   const used = labels.reduce((n, l) => n + visibleLength(l) + 2, 0) + (labels.length > 1 ? 2 : 0) + 2;
   const left = width - used;
   if (labels.length === 0 || left < 4) return `${ANSI.amanita}${"─".repeat(width)}${ANSI.reset}`;

@@ -108,7 +108,7 @@ export class App {
   #handOver: AppOptions["handOver"];
   #onQuit: (() => void) | undefined;
   #extKeys: AppOptions["extensionKeys"];
-  /** What an extension says it is doing ("● listening"), at the start of the status line. */
+  /** What an extension says it is doing ("● listening"), on the rule above the editor. */
   #extStatus: string | undefined;
 
   constructor(opts: AppOptions) {
@@ -364,14 +364,13 @@ export class App {
   }
 
   get statusLine(): string {
-    const line = statusLine({
+    return statusLine({
       running: this.#run.running,
       model: this.#models.noModel ? "no model yet" : this.#models.model,
       tokens: this.#run.tokens,
       contextWindow: this.#models.contextWindow,
       cost: this.#run.cost,
     });
-    return this.#extStatus ? `${ANSI.cream}${this.#extStatus}${ANSI.reset}${ANSI.dim} | ${ANSI.reset}${line}` : line;
   }
 
   /** An extension speaking for the user (k.send): see PromptInput.send. */
@@ -379,7 +378,7 @@ export class App {
     return this.#input.send(text, as === "steer_now");
   }
 
-  /** An extension's status line ("● listening"); undefined takes it away. */
+  /** An extension's word on the rule above the editor ("● listening"); undefined takes it away. */
   extensionStatus(text: string | undefined): void {
     if (text === this.#extStatus) return;
     this.#extStatus = text;
@@ -564,6 +563,7 @@ export class App {
       place: this.#place,
       thinking: this.#thinking.label,
       jobs: jobsLabel(this.#jobs?.running ?? 0),
+      extension: this.#extStatus,
       menu: this.#slash.rows(),
       tailCols,
       viewportRows: this.#viewportRows,
