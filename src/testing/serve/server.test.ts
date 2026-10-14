@@ -348,11 +348,15 @@ describe("serve: the hub", () => {
     }
   });
 
-  test("inspect: a client asks what the model sees, the agent answers, the hub hands it on", async () => {
+  test("Kinoko Lab: the page at /lab; inspect: a client asks what the model sees, the agent answers, the hub hands it on", async () => {
     const devices = new Devices(join(dir, "inspect.json"));
     const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: dir, version: "t", spawn: fakeSpawn });
     try {
       const base = `http://127.0.0.1:${hub.server.port}`;
+      // The Lab's page is there for anyone (it holds nothing); what it shows needs a paired token.
+      const page = await fetch(`${base}/lab`);
+      expect(page.status).toBe(200);
+      expect(await page.text()).toContain("<title>Kinoko Lab</title>");
       const { token } = (await (await fetch(`${base}/v1/pair`, { method: "POST", body: JSON.stringify({ code: await devices.code(), name: "lab" }) })).json()) as { token: string };
       const lab = client(`ws://127.0.0.1:${hub.server.port}/v1/ws`, token);
       const id = hub.agents.start({ cwd: dir }).id;

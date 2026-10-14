@@ -1,6 +1,7 @@
 // `kinoko serve`: the hub the phone app talks to.
 //   kinoko serve [--port 7878] [--public-port 8443] [--lan-port 7879] [--funnel | --local | --no-lan | --no-tailscale]
 //   kinoko serve pair          a QR code to pair a device (starting the hub when it is not running)
+//   kinoko serve lab           links to Kinoko Lab (a live view of the harness), paired once each
 //   kinoko serve devices       the paired devices
 //   kinoko serve revoke <id>   forget one
 // By default it is shared with your tailnet through Tailscale (`--funnel`: with the internet;
@@ -76,6 +77,37 @@ async function showPairing(devices: Devices, url: string, lan?: State["lan"]): P
   if (url.startsWith("http://127.0.0.1") && !lan) out(dim("this address is this computer only: without Tailscale the phone cannot reach it"));
 }
 
+/** The certificate's SHA-256 as a browser shows it (AB:12:…), from the base64url the app pins. */
+function fingerprintHex(fingerprint: string): string {
+  return [...Buffer.from(fingerprint, "base64url")].map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(":");
+}
+
+/** Kinoko Lab's links: one for this computer's browser, and a QR code for each way a phone or tablet
+ *  reaches the hub (the local network, Tailscale), each titled above it. Each pairs one browser, once. */
+async function showLab(devices: Devices, state: State): Promise<void> {
+  const link = async (base: string): Promise<string> => `${base}/lab?c=${await devices.code()}`;
+  out(`Kinoko Lab, a live look inside kinoko. On this computer: ${bold(await link(`http://127.0.0.1:${state.port}`))}`);
+  if (state.lan) {
+    const home = await link(state.lan.url);
+    out("");
+    out(bold("▼ AT HOME: this network, no Tailscale needed"));
+    out(qrText(home));
+    out(dim(home));
+    // Nobody can vouch for a certificate on 192.168.x: the browser warns once, and asks to go on.
+    out(dim("The browser warns about the certificate once: it is this hub's own. Its SHA-256 should read"));
+    out(dim(fingerprintHex(state.lan.fingerprint)));
+  }
+  if (!state.url.startsWith("http://127.0.0.1") && state.url !== state.lan?.url) {
+    const away = await link(state.url);
+    out("");
+    out(bold("▼ ANYWHERE: through Tailscale (the device needs it)"));
+    out(qrText(away));
+    out(dim(away));
+  }
+  out("");
+  out(dim("Each link works once, for ten minutes; a browser stays paired (`kinoko serve devices`)."));
+}
+
 export async function runServe(argv: string[], opts: { command: string[]; version: string }): Promise<void> {
   const devices = new Devices(join(HOME, "serve.json"));
   const sub = argv[0]?.startsWith("--") ? undefined : argv[0];
@@ -89,6 +121,16 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
       return;
     }
   }
+  if (sub === "lab") {
+    const state = await running();
+    if (state === undefined) {
+      out("kinoko serve is not running: start it first (`kinoko serve`), then `kinoko serve lab`.");
+      process.exitCode = 1;
+      return;
+    }
+    await showLab(devices, state);
+    return;
+  }
   if (sub === "devices") {
     const list = await devices.list();
     if (list.length === 0) out("no paired devices: `kinoko serve pair`");
@@ -101,7 +143,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
     return;
   }
   if (sub !== undefined && !pairNow) {
-    out(`unknown: kinoko serve ${sub} (pair, devices, revoke)`);
+    out(`unknown: kinoko serve ${sub} (pair, lab, devices, revoke)`);
     process.exitCode = 1;
     return;
   }

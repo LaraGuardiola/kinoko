@@ -3,18 +3,10 @@
 
 import { contextTokens, historyTokens } from "./compact.ts";
 import { estimateTokens } from "./tools/budget.ts";
+import type { RequestSize } from "./agent-events.ts";
 import type { Image, Message, ProviderRequest, Tool, ToolSpec } from "./types.ts";
 
 export type Inspectable = "request" | "system" | "tools";
-
-export interface RequestSize {
-  messages: number;
-  tools: number;
-  /** Everything the model reads: the system prompt, the tool schemas, the history. */
-  chars: number;
-  /** An estimate: the server's own count of the last reply when there is one, chars/4 otherwise. */
-  tokens: number;
-}
 
 export function requestSize(req: ProviderRequest): RequestSize {
   const schemas = JSON.stringify(toolSpecs(req.tools));

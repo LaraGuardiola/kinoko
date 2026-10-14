@@ -2,6 +2,7 @@
 // encrypted with its own certificate, on the local network. The
 // protocol is in docs/protocol.md: pairing over HTTP, then one WebSocket per device carrying JSON
 // messages both ways: the agent list, agents started, attached to, prompted, aborted, stopped.
+// It also serves Kinoko Lab's page at /lab (src/serve/lab), a client of that same protocol.
 
 import { chmodSync, mkdirSync, unlinkSync } from "node:fs";
 import { isPipe } from "./link.ts";
@@ -18,6 +19,7 @@ import type { Identity } from "./tls.ts";
 import { expandHome, folders } from "./dirs.ts";
 import { projects } from "./projects.ts";
 import { saveUploads, uploadsOf, withUploads } from "./uploads.ts";
+import lab from "./lab/index.html";
 
 export const PROTOCOL = 1;
 
@@ -182,6 +184,10 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Serve
   const listen = (where: { hostname: string; port: number; tls?: { cert: string; key: string } }): Server<Socket> =>
     Bun.serve<Socket>({
       ...where,
+      // Kinoko Lab: a page anyone may load (it holds nothing); it pairs like any device to see agents.
+      // Bun bundles it (TypeScript and CSS) once, and into the binary on `bun build --compile`.
+      development: false,
+      routes: { "/lab": lab },
       async fetch(req, srv) {
         const url = new URL(req.url);
         if (url.pathname === "/v1/health") return Response.json({ name: "kinoko", version: opts.version, protocol: PROTOCOL });

@@ -9,7 +9,7 @@
     "build": "bun build --compile --outfile kinoko-out/kinoko src/main.ts",
     "lint": "oxlint --deny-warnings",
     "test": "bun test",
-    "check": "oxlint --deny-warnings && tsc --noEmit && bun test"
+    "check": "oxlint --deny-warnings && tsc --noEmit && tsc --noEmit -p src/serve/lab && bun test"
   },
   "devDependencies": {
     "@types/bun": "^1.2.0",

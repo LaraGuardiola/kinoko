@@ -111,6 +111,15 @@ dropping a PNG, JPEG, GIF or WebP file path attaches that file. Each shows in th
   app unpairs it here too. A kinoko open in a terminal links itself to the hub too
   (a local socket): the phone follows it and talks to it, and the terminal shows what came from the
   phone as if typed there (`KINOKO_LINK=0` keeps a terminal out).
+- **Kinoko Lab** — a live look inside the harness, in the browser: the agent drawn as a factory
+  floor (the system prompt pressed, the request leaving, the engine reading it, the reply streaming,
+  each call through the extensions' gate and onto the workbench, the results riding back into the
+  history), with a sentence saying what is happening now and why. Tap a machine to see what it
+  holds: the exact system prompt in parts, the tools' schemas, the request as sent, the history.
+  With `kinoko serve` running, `kinoko serve lab` prints a link for this computer and a QR code for
+  each way a phone or tablet reaches the hub: the local network (the browser warns about the hub's
+  own certificate once; the command prints its SHA-256 to check) and Tailscale. Each pairs one
+  browser, once.
 
 ## Config
 

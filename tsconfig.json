@@ -17,5 +17,6 @@
     "noFallthroughCasesInSwitch": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "examples"]
+  "include": ["src", "examples"],
+  "exclude": ["src/serve/lab/page"]
 }
