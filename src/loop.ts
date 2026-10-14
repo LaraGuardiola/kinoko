@@ -1,10 +1,12 @@
 /* oxlint-disable no-await-in-loop -- the agent loop is linear by design: one provider request at
    a time, tools and log appends in order. Parallelism here would be a bug, not a speed-up. */
-import type { AgentEvent, RunResult } from "./agent-events.ts";
+import type { AgentEvent, AppendKind, GuardKind, RunResult } from "./agent-events.ts";
 import { Approvals } from "./approvals.ts";
 import type { ApprovalBy } from "./approvals.ts";
 import { compactHistory, isContextOverflow, shouldCompact } from "./compact.ts";
 import type { Extensions } from "./ext.ts";
+import { requestJson, requestSize, toolSpecs } from "./inspect.ts";
+import type { Inspectable } from "./inspect.ts";
 import { CallGuard, MAX_NUDGES, NUDGE_EMPTY, NUDGE_LENGTH, NUDGE_REPEAT, RepeatGuard, STOP_CALLS, WARN_CALLS, repeatNote, sameErrorNote } from "./guard.ts";
 import type { Session } from "./session.ts";
 import type {
@@ -54,6 +56,7 @@ export class Agent {
   #approvals: Approvals;
   #autoApprove = false;
   #background: ((command: string, cwd: string) => { id: number; pid: number; log: string }) | undefined;
+  #lastRequest: ProviderRequest | undefined; // what the model was last sent, for Kinoko Lab
 
   constructor(opts: {
     provider: Provider;
@@ -155,6 +158,14 @@ export class Agent {
     return (await this.#provider.models?.(signal)) ?? [];
   }
 
+  /** What the model sees, for a person to look at: the last request as sent, the system prompt,
+   *  the tools. Undefined for a request before the first one. */
+  inspect(what: Inspectable): unknown {
+    if (what === "system") return this.#system(this.#model);
+    if (what === "tools") return toolSpecs(this.#tools);
+    return this.#lastRequest ? requestJson(this.#lastRequest) : undefined;
+  }
+
   /** Something outside the loop the clients should hear of (the background jobs count). */
   announce(e: AgentEvent): void {
     this.#emit(e);
@@ -196,13 +207,13 @@ export class Agent {
 
   steer(text: string, images?: Image[]): void {
     if (!text.trim()) return;
-    this.#steerQueue.push({ text: text, images: images, seq: ++this.#queued });
+    this.#steerQueue.push({ text: text, images: images, seq: ++this.#queued, kind: "steer" });
     this.#notifyQueueChange();
   }
 
   followUp(text: string, images?: Image[]): void {
     if (!text.trim()) return;
-    this.#followUpQueue.push({ text: text, images: images, seq: ++this.#queued });
+    this.#followUpQueue.push({ text: text, images: images, seq: ++this.#queued, kind: "follow_up" });
     this.#notifyQueueChange();
   }
 
@@ -253,12 +264,12 @@ export class Agent {
   }
 
   async #run(initial: Queued): Promise<RunResult> {
+    this.#emit({ type: "run_start", prompt: initial.text });
     if (this.#notes.length > 0) {
       const notes = this.#notes.splice(0).map((n) => `[kinoko] ${n}`);
-      await this.#push({ id: crypto.randomUUID(), role: "user", content: notes.join("\n") });
+      await this.#push({ id: crypto.randomUUID(), role: "user", content: notes.join("\n") }, "note");
     }
-    await this.#push(userMessage(initial));
-    this.#emit({ type: "run_start", prompt: initial.text });
+    await this.#push(userMessage(initial), "prompt");
 
     let retries = 0; // transient failures in a row
     while (true) {
@@ -286,9 +297,11 @@ export class Agent {
         budget: this.#budget,
       };
       this.#ext?.emit("before_provider_request", req);
+      this.#lastRequest = { ...req, messages: [...req.messages] }; // the history grows on: keep it as sent
 
-      this.#emit({ type: "request_start", at: Date.now() });
+      this.#emit({ type: "request_start", at: Date.now(), model: req.model, ...requestSize(req) });
       let firstToken = false;
+      let prefillAt = 0; // when the last prefill event went: a few a second is enough to watch
       const streamEvents: StreamEvent[] = [];
       let stopReason: StopReason = "end";
       let usage: Usage | undefined;
@@ -314,6 +327,12 @@ export class Agent {
             looping = true;
             turn.abort();
             break;
+          }
+        } else if (ev.type === "progress") {
+          const now = Date.now();
+          if (now - prefillAt >= PREFILL_EVERY_MS || ev.done >= ev.total) {
+            prefillAt = now;
+            this.#emit({ type: "prefill", done: ev.done, total: ev.total });
           }
         } else if (ev.type === "tool_pending") {
           this.#emit({ type: "tool_pending", name: ev.name, args: ev.args, index: ev.index });
@@ -368,7 +387,7 @@ export class Agent {
       if (toolCalls.length > 0) assistantMsg.toolCalls = toolCalls;
       const replay = streamEvents.findLast((e) => e.type === "replay");
       if (replay?.type === "replay") assistantMsg.replay = replay.data;
-      await this.#push(assistantMsg);
+      await this.#push(assistantMsg, "reply");
       this.#ext?.emit("turn_end", assistantMsg);
       this.#emit({ type: "message_end", message: assistantMsg });
 
@@ -383,14 +402,15 @@ export class Agent {
         // done, so nudge instead of stopping.
         const empty = stopReason === "end" && text.trim() === "";
         if (looping || stopReason === "length" || empty) {
-          const [nudge, why] = looping
-            ? [NUDGE_REPEAT, "the model keeps repeating itself"]
+          const [nudge, why, what]: [string, string, GuardKind] = looping
+            ? [NUDGE_REPEAT, "the model keeps repeating itself", "repeat"]
             : empty
-              ? [NUDGE_EMPTY, "the model keeps replying with nothing"]
-              : [NUDGE_LENGTH, "output token limit (maxOutputTokens)"];
+              ? [NUDGE_EMPTY, "the model keeps replying with nothing", "empty"]
+              : [NUDGE_LENGTH, "output token limit (maxOutputTokens)", "length"];
+          this.#emit({ type: "guard", what, detail: why });
           if (this.#nudges >= MAX_NUDGES) return { reason: "limit", detail: why };
           this.#nudges++;
-          await this.#push({ id: crypto.randomUUID(), role: "user", content: nudge });
+          await this.#push({ id: crypto.randomUUID(), role: "user", content: nudge }, "nudge");
           continue;
         }
         const followUp = this.#followUpQueue.shift();
@@ -407,12 +427,16 @@ export class Agent {
 
       for (const tc of invalid) {
         this.#malformedCount++;
-        await this.#push({
-          id: crypto.randomUUID(),
-          role: "tool",
-          content: `ERROR: unknown tool ${tc.name}`,
-          toolCallId: tc.id,
-        });
+        this.#emit({ type: "guard", what: "unknown_tool", detail: `the model called ${tc.name}, a tool it does not have` });
+        await this.#push(
+          {
+            id: crypto.randomUUID(),
+            role: "tool",
+            content: `ERROR: unknown tool ${tc.name}`,
+            toolCallId: tc.id,
+          },
+          "result",
+        );
         if (this.#malformedCount >= 3) return { reason: "error", detail: "unknown tool calls" };
       }
 
@@ -423,10 +447,15 @@ export class Agent {
         const msg = await this.#runTool(tc);
         const repeats = this.#calls.record(tc, msg.content);
         const failures = this.#calls.failures(tc, msg.content);
-        if (repeats >= WARN_CALLS) msg.content += repeatNote(repeats, !this.#tools.find((t) => t.name === tc.name)?.readOnly);
-        else if (failures >= WARN_CALLS) msg.content += sameErrorNote(failures);
+        if (repeats >= WARN_CALLS) {
+          msg.content += repeatNote(repeats, !this.#tools.find((t) => t.name === tc.name)?.readOnly);
+          this.#emit({ type: "guard", what: "same_call", detail: `the same call returned the same result ${repeats} times` });
+        } else if (failures >= WARN_CALLS) {
+          msg.content += sameErrorNote(failures);
+          this.#emit({ type: "guard", what: "same_error", detail: `the same call failed ${failures} times` });
+        }
         stuck = Math.max(stuck, repeats);
-        await this.#push(msg);
+        await this.#push(msg, "result");
       }
 
       if (this.#abortController!.signal.aborted) {
@@ -451,20 +480,22 @@ export class Agent {
     const all = this.#steerQueue.splice(0);
     if (all.length <= 1) return all[0];
     const images = all.flatMap((q) => q.images ?? []);
-    return { text: all.map((q) => q.text).join("\n\n"), ...(images.length > 0 ? { images } : {}) };
+    return { text: all.map((q) => q.text).join("\n\n"), ...(images.length > 0 ? { images } : {}), kind: "steer" };
   }
 
   /** A queued message leaves the queue and becomes the next user message, in that order. */
   async #deliver(queued: Queued): Promise<void> {
     this.#notifyQueueChange();
-    await this.#push(userMessage(queued));
+    await this.#push(userMessage(queued), queued.kind ?? "prompt");
     this.#emit({ type: "delivered", text: queued.text });
   }
 
   /** Appends to the in-memory history and, when a session is open, to the append-only log. */
-  async #push(message: Message): Promise<Message> {
+  async #push(message: Message, kind: AppendKind): Promise<Message> {
     const stored = this.#session ? await this.#session.append(message) : message;
     this.#messages.push(stored);
+    const own = kind === "note" || kind === "nudge"; // the harness wrote it: say what
+    this.#emit({ type: "appended", role: message.role, kind, chars: message.content.length, ...(own ? { text: message.content } : {}) });
     return stored;
   }
 
@@ -511,16 +542,11 @@ export class Agent {
     const background = this.#background;
     const ctx: ToolContext = { signal: signal, cwd, ...(background ? { background: (command: string) => background(command, cwd) } : {}) };
 
-    // Extensions get the last word: they may rewrite args, or block the call outright.
-    if (this.#ext) {
-      const event = { name: tc.name, args: tc.args as Record<string, unknown>, signal: signal };
-      const decision = this.#ext.beforeTool(event);
-      const refused = decision === undefined ? undefined : "block" in decision ? decision.reason : await this.#ask(tc, decision.reason, signal);
-      if (refused !== undefined) {
-        this.#emit({ type: "tool_output", call: tc, output: refused });
-        this.#emit({ type: "tool_end", call: tc });
-        return { id: crypto.randomUUID(), role: "tool", content: refused, toolCallId: tc.id };
-      }
+    const refused = await this.#gate(tc, signal);
+    if (refused !== undefined) {
+      this.#emit({ type: "tool_output", call: tc, output: refused });
+      this.#emit({ type: "tool_end", call: tc });
+      return { id: crypto.randomUUID(), role: "tool", content: refused, toolCallId: tc.id };
     }
 
     try {
@@ -550,9 +576,30 @@ export class Agent {
     }
   }
 
+  /**
+   * Extensions get the last word on a call: they may rewrite its args, block it, or ask the user.
+   * Undefined when it may run, else what the model is told instead of its result.
+   */
+  async #gate(tc: ToolCall, signal: AbortSignal): Promise<string | undefined> {
+    const before = JSON.stringify(tc.args);
+    const decision = this.#ext?.beforeTool({ name: tc.name, args: tc.args as Record<string, unknown>, signal: signal });
+    const rewritten = JSON.stringify(tc.args) !== before ? { rewritten: true } : {};
+    if (decision === undefined) {
+      this.#emit({ type: "gate", call: tc, decision: "pass", ...rewritten });
+      return undefined;
+    }
+    const by = decision.by ? { by: decision.by } : {};
+    if ("block" in decision) {
+      this.#emit({ type: "gate", call: tc, decision: "block", reason: decision.reason, ...by, ...rewritten });
+      return decision.reason;
+    }
+    const skipped = this.#autoApprove ? "auto" : this.#approvals.remembered(tc) ? "remembered" : undefined;
+    this.#emit({ type: "gate", call: tc, decision: "ask", reason: decision.reason, ...by, ...rewritten, ...(skipped ? { skipped } : {}) });
+    return skipped ? undefined : this.#ask(tc, decision.reason, signal);
+  }
+
   /** Asks the user about a call and waits; undefined when allowed, else the tool's result. */
   async #ask(tc: ToolCall, reason: string, signal: AbortSignal): Promise<string | undefined> {
-    if (this.#autoApprove || this.#approvals.remembered(tc)) return undefined;
     const id = crypto.randomUUID();
     this.#emit({ type: "approval_request", id, call: tc, reason });
     const answer = await this.#approvals.wait(id, tc, signal);
@@ -575,7 +622,7 @@ export class Agent {
     };
     if (thinking) msg.thinking = thinking;
     if (calls.length > 0) msg.toolCalls = calls;
-    await this.#push(msg);
+    await this.#push(msg, "reply");
     this.#emit({ type: "message_end", message: msg });
   }
 
@@ -593,7 +640,11 @@ interface Queued {
   text: string;
   images?: Image[];
   seq?: number;
+  kind?: "steer" | "follow_up"; // which queue it waited in
 }
+
+/** Prefill progress is told at most this often (llama.cpp sends it per batch). */
+const PREFILL_EVERY_MS = 250;
 
 function userMessage(q: Queued): Message {
   const msg: Message = { id: crypto.randomUUID(), role: "user", content: q.text };

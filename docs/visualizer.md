@@ -48,13 +48,14 @@ What is missing (the harness does it, but nobody hears of it):
 
 | New event | Fields | Feeds |
 |---|---|---|
-| `request` | `messages` (count), `chars` (system + history), `tools` (count), `effort?` | Request: its size |
+| `request_start` (grown) | `model`, `messages`, `tools`, `chars`, `tokens` (an estimate) | Request: its size |
 | `prefill` | `done`, `total` (tokens; the provider's `progress` events, throttled to ~4/s) | Prefill |
-| `gate` | `call`, `decision: "pass" \| "block" \| "ask"`, `reason?` | Gate |
+| `gate` | `call`, `decision: "pass" \| "block" \| "ask"`, `by?`, `reason?`, `rewritten?`, `skipped?` | Gate |
 | `appended` | `role`, `kind: "prompt" \| "note" \| "nudge" \| "result" \| "reply" \| "steer"`, `chars` | History, Guards (a nudge is the guard's voice) |
 | `guard` | `what: "repeat" \| "empty" \| "length" \| "same_call" \| "same_error"`, `detail` | Guards |
 
-All are small (no message bodies, no request JSON), emitted at points the loop already passes, and
+(Built in feat/lab-events: request_start grew instead of a new `request` event; `run_start` now
+comes before the run's first `appended`.) All are small (no message bodies, no request JSON), emitted at points the loop already passes, and
 cost a JSON line each. They go to every client like any event; old clients ignore unknown types
 (the protocol already says so). No on/off switch is needed at that size.
 

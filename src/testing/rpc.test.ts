@@ -85,7 +85,7 @@ describe("rpc mode", () => {
     r.send({ type: "prompt", text: "hello", id: "1" });
     await r.settle();
     const events = r.events();
-    expect(events.slice(0, 3)).toEqual(["run_start", "request_start", "first_token"]);
+    expect(events.slice(0, 4)).toEqual(["run_start", "appended", "request_start", "first_token"]);
     expect(events).toContain("message_delta");
     expect(events).toContain("message_end");
     expect(events.at(-1)).toBe("run_end");
@@ -237,5 +237,19 @@ describe("rpc approve", () => {
     expect(lines.find((l) => l.id === "a2")?.type).toBe("error");
     expect(lines.find((l) => l.event?.type === "approval_end")?.event).toMatchObject({ allow: true, by: "app" });
     expect(agent.messages.find((m) => m.role === "tool")?.content).toBe("tool done");
+  });
+
+  test("inspect: what the model sees; nothing before the first request; a bad ask is answered", async () => {
+    const r = rig([]);
+    r.send({ id: "i1", type: "inspect", what: "request" });
+    r.send({ id: "i2", type: "inspect", what: "nonsense" });
+    r.send({ id: "i3", type: "inspect", what: "system" });
+    expect(r.replies().find((l) => l.id === "i1")).toMatchObject({ type: "error", detail: "nothing sent to the model yet" });
+    expect(r.replies().find((l) => l.id === "i2")?.type).toBe("error");
+    expect(r.replies().find((l) => l.id === "i3")).toMatchObject({ type: "ok", data: "" });
+    r.send({ id: "p", type: "prompt", text: "hi" });
+    await r.settle();
+    r.send({ id: "i4", type: "inspect", what: "request" });
+    expect(r.replies().find((l) => l.id === "i4")?.data).toMatchObject({ model: "rpc-model", messages: [{ role: "user", content: "hi" }] });
   });
 });

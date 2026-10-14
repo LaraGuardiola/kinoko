@@ -85,6 +85,7 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `rendered` | for `render` | `lines`: the rows, each `width` columns, with ANSI colours (24-bit and 256) |
 | `commands` | for `commands` | `agent`, `commands: [{name, description, kind: "list" \| "run"}]` |
 | `command_result` | for `command` | `agent`, `result: {title?, text?, items?, hint?, reset?}` |
+| `inspected` | for `inspect` | `agent`, `what`, `data`: the last request as sent (`{model, effort?, budget?, system, tools, messages}`, image bytes left out), the system prompt (a string) or the tools (`[{name, description, schema}]`) |
 | `error` | a command was refused | `id`, `detail` (a sentence for the user) |
 
 ### App → server
@@ -105,6 +106,7 @@ connection is the app's to reopen (back off, then `attach` again: nothing is los
 | `commands` | `agent` | the slash commands it takes → `commands` |
 | `render` | `text`, `width` | a fenced block or a table drawn as the TUI draws it → `rendered` |
 | `command` | `agent`, `name`, `arg?` | runs one → `command_result` |
+| `inspect` | `agent`, `what: "request" \| "system" \| "tools"` | what the model sees → `inspected` (Kinoko Lab, when a machine is opened: too big to send with every request); an error before the first request |
 | `approve` | `agent`, `request`, `allow`, `remember?` | answers the call waiting (`AgentInfo.approval.id`): `allow` runs it, `remember` allows the same call for the rest of the session; refused when another client answered first |
 
 `images`: `[{"mime": "image/jpeg", "data": "<base64>"}]`. Messages up to 32 MB.
@@ -188,15 +190,19 @@ Message {
 | `type` | Fields | Draw it as |
 |---|---|---|
 | `run_start` | `prompt` | the user's message; the agent is working |
-| `request_start` | `at` | "reading the prompt…" until the first token |
+| `request_start` | `at`, `model`, `messages`, `tools`, `chars`, `tokens` (an estimate) | "reading the prompt…" until the first token; what the request carries |
+| `prefill` | `done`, `total` | prompt tokens the engine has read so far (llama.cpp), a few times a second |
 | `first_token` | `at` | the model started answering |
 | `thinking_delta` | `delta` | append to the thinking (dim, foldable) |
 | `message_delta` | `delta` | append to the reply (markdown) |
 | `tool_pending` | `name`, `args?`, `index?` | a tool call being written; `index` tells the calls of one reply apart |
 | `tool_start` | `call {id, name, args}` | the call, running |
+| `gate` | `call`, `decision: pass \| block \| ask`, `by?` (the extension), `reason?`, `rewritten?`, `skipped?: auto \| remembered` | the extensions' word on the call, before it runs (`skipped`: an ask nobody is asked) |
 | `tool_output` | `call`, `output` | its result (`ERROR: …` is a failure) |
 | `tool_end` | `call` | done |
 | `message_end` | `message` | the finished message: replace what the deltas built |
+| `appended` | `role`, `kind: prompt \| steer \| follow_up \| reply \| result \| note \| nudge`, `chars`, `text?` | a message joined the history; `text` only for what the harness wrote itself (a note, a nudge) |
+| `guard` | `what: repeat \| empty \| length \| same_call \| same_error \| unknown_tool`, `detail` | a guard noticed something (a nudge or a warning follows) |
 | `queue_change` | `steer[]`, `followUp[]` | what waits to be said |
 | `delivered` | `text` | a queued steer reached the model |
 | `compacting` / `compacted` | `phase, done, total?` / `keep` | the history is being summarised |
@@ -207,4 +213,5 @@ Message {
 | `approval_end` | `id`, `allow`, `by: tui \| app \| telegram \| timeout \| abort` | answered: the card shows the outcome |
 | `run_end` | `reason: done \| aborted \| error \| limit`, `detail?` | idle again |
 
-New event types may appear: an app ignores what it does not know.
+`prefill`, `gate`, `appended` and `guard` are for Kinoko Lab: a chat need not draw them. New event
+types may appear: an app ignores what it does not know.
