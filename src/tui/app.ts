@@ -18,10 +18,10 @@ import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
 import { approvalKey, approvalRows } from "./approval.ts";
 import type { ApprovalView } from "./approval.ts";
-import { MENU_ROWS, Menu, filterRoot, listRows, listWindow, pageRows } from "./menu.ts";
+import { Menu } from "./menu.ts";
 import type { ListPage, MenuItem } from "./menu.ts";
 import { copyText } from "./clipboard.ts";
-import { ROOT, THINKING, copyPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { THINKING, copyPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
 import { snippets } from "./snippets.ts";
 import type { ThinkingProfile } from "./menu-pages.ts";
 import type { CommandHost } from "../commands.ts";
@@ -43,6 +43,7 @@ import { StartupPanel } from "./startup-panel.ts";
 import { ExtensionsMenu } from "./extensions-menu.ts";
 import { RunView } from "./run-view.ts";
 import { SessionActions } from "./session-actions.ts";
+import { SlashMenu } from "./slash-menu.ts";
 import type { ModelsHost } from "./model-switch.ts";
 import { COPY, copyFor } from "./code.ts";
 import { SidePanel } from "./side.ts";
@@ -137,6 +138,7 @@ export class App {
   #profile: string | undefined;
   #budgets: boolean;
   #menu = new Menu();
+  #slash: SlashMenu;
   #models: ModelSwitch;
   #catalogs: { extensions?: Catalog; skills?: Catalog };
   #apply: AppOptions["apply"];
@@ -201,7 +203,7 @@ export class App {
       menu: this.#menu,
       marker: this.#marker,
       session: () => this.#sessions.session,
-      closeMenu: () => this.#closeMenu(),
+      closeMenu: () => this.#slash.close(),
       render: () => this.render(),
     });
     this.#onQuit = opts.onQuit;
@@ -211,6 +213,18 @@ export class App {
     this.#cwd = opts.cwd ?? process.cwd();
     this.#files = new FilePicker(this.#cwd, () => this.render());
     this.#side = new SidePanel(this.#cwd, () => this.render(), opts.changes);
+    this.#slash = new SlashMenu({
+      menu: this.#menu,
+      editor: this.#editor,
+      files: this.#files,
+      extensionCommands: () => this.#extensionCommands?.list() ?? [],
+      regionTop: () => this.#renderer.top,
+      regionRows: () => this.#state().lines.length,
+      hasPlace: () => this.#place !== "",
+      openRoot: (item) => this.#openRoot(item),
+      closed: () => this.#startup.menuClosed(),
+      render: () => this.render(),
+    });
     this.#integrations = opts.integrations;
     this.#extensions = new ExtensionsMenu({
       catalogs: this.#catalogs,
@@ -251,7 +265,7 @@ export class App {
       clearScreen: () => this.#clearScreen(),
       intro: (text) => this.intro(text),
       replay: (messages, note) => this.replay(messages, note),
-      closeMenu: () => this.#closeMenu(),
+      closeMenu: () => this.#slash.close(),
       render: () => this.render(),
     });
     this.#refreshPlace();
@@ -272,7 +286,7 @@ export class App {
     if (this.#scrollback.held) return;
     this.#renderer.update(this.#state());
     this.#renderer.frame();
-    const menuOpen = this.#menu.page !== undefined || (this.#rootItems()?.length ?? 0) > 0;
+    const menuOpen = this.#slash.showing;
     if (menuOpen !== this.#mouse) {
       this.#mouse = menuOpen;
       // 1003: every motion too, so hovering an item selects it; 1000: clicks only. Turning 1003 off
@@ -362,7 +376,7 @@ export class App {
       return;
     }
     if (key.name === "mouse") {
-      if (this.#mouse) this.#menuMouse(key);
+      if (this.#mouse) this.#slash.mouse(key);
       else if (key.mouse?.press && key.mouse.button === 0 && key.mouse.wheel === undefined && !this.#clickJobs(key.mouse.x, key.mouse.y)) this.#clickCopy(key.mouse.x, key.mouse.y);
       return;
     }
@@ -374,8 +388,7 @@ export class App {
       return;
     }
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
-    if (this.#menuKey(key)) return;
-    if (this.#fileKey(key)) return;
+    if (this.#slash.key(key)) return;
     if (this.#planKey(key)) return;
     const action = actionFor(key, {
       running: this.#run.running || this.#agent.state === "running",
@@ -493,7 +506,7 @@ export class App {
    * run: its output would land in the middle of the shell's.
    */
   async #shell(command: string): Promise<void> {
-    this.#closeMenu();
+    this.#slash.close();
     if (this.#handOver === undefined) {
       this.#marker.warn("no terminal to lend here");
       this.render();
@@ -633,7 +646,7 @@ export class App {
       place: this.#place,
       thinking: this.#thinking,
       jobs: jobsLabel(this.#jobs?.running ?? 0),
-      menu: this.#menuRows(),
+      menu: this.#slash.rows(),
       tailCols,
       viewportRows: this.#viewportRows,
       viewportCols: cols,
@@ -716,26 +729,6 @@ export class App {
 
   // ---- the slash menu ----
 
-  /** The root is open while the editor holds only a slash command being typed. */
-  #rootItems(): MenuItem[] | undefined {
-    if (this.#menu.page !== undefined || !/^\/\S*$/.test(this.#editor.text)) return undefined;
-    // The built-in ones, then what extensions add (a built-in name keeps its own).
-    const added = (this.#extensionCommands?.list() ?? []).filter((c) => !ROOT.some((r) => r.name === c.name));
-    return filterRoot([...ROOT, ...added], this.#editor.text);
-  }
-
-  #menuRows(): string[] {
-    const page = this.#menu.page;
-    if (page) return pageRows(page, this.#menu.index, this.#menu.text, this.#menu.armed);
-    const items = this.#rootItems() ?? [];
-    this.#menu.clamp(items.length);
-    if (items.length > 0) return listRows(items, this.#menu.index);
-    this.#files.sync(this.#editor.text, this.#editor.cursor);
-    if (!this.#files.open) return [];
-    const empty = this.#files.entries === undefined ? "reading…" : "no matches";
-    return listRows(this.#files.items(), this.#files.index, `Files · ${this.#files.where}`, empty, undefined, "Tab or Enter to complete · Esc to close");
-  }
-
   /**
    * Ctrl+O unfolds the plan over the side column (or prints it, when the window is too narrow for
    * the column); unfolded, the arrows, PgUp/PgDn and Home/End scroll it by tasks and Esc folds it.
@@ -757,132 +750,6 @@ export class App {
     else return false;
     this.render();
     return true;
-  }
-
-  /** The keys the "@" file picker takes while it is open: arrows, Tab/Enter to complete, Esc. */
-  #fileKey(key: Key): boolean {
-    this.#files.sync(this.#editor.text, this.#editor.cursor);
-    if (!this.#files.open || key.alt) return false;
-    if (key.name === "up" || key.name === "down") {
-      this.#files.move(key.name === "up" ? -1 : 1);
-    } else if (key.name === "tab" || key.name === "enter") {
-      const edit = this.#files.accept();
-      if (edit === undefined) return key.name === "tab"; // nothing to complete: Enter sends as usual
-      const text = this.#editor.text;
-      this.#editor.setText(text.slice(0, edit.start) + edit.text + text.slice(edit.end), edit.start + edit.text.length);
-    } else if (key.name === "escape") {
-      this.#files.dismiss();
-    } else {
-      return false;
-    }
-    this.render();
-    return true;
-  }
-
-  /** The keys an open menu takes; false hands the key to the rest of the app. */
-  #menuKey(key: Key): boolean {
-    const page = this.#menu.page;
-    const items = page ? [] : (this.#rootItems() ?? []);
-    if (!page && items.length === 0) return false;
-    const count = page?.kind === "list" ? page.items.length : items.length;
-    if (page?.kind === "input" && key.name !== "escape") {
-      // An input page takes the typing; Enter hands the text over (it may open the next step).
-      if (key.name === "char" || key.name === "paste") this.#menu.type(key.char ?? "");
-      else if (key.name === "backspace") this.#menu.erase();
-      else if (key.name === "enter") page.submit(this.#menu.text);
-      else if (key.name === "ctrl-c") this.#closeMenu();
-    } else if (page?.kind === "list" && page.remove && (key.name === "delete" || key.name === "backspace")) {
-      // Del twice on a removable item: the first arms it, the second removes it.
-      const item = page.items[this.#menu.index];
-      if (item?.removable && item.key !== undefined) {
-        if (this.#menu.armed === item.key) page.remove(item);
-        else this.#menu.arm(item.key);
-      }
-    } else if (page?.kind === "info" && key.name === "char" && page.keys?.[key.char?.toLowerCase() ?? ""]) {
-      page.keys[key.char?.toLowerCase() ?? ""]?.();
-    } else if (page?.kind === "list" && key.name === "char" && page.keys?.[key.char?.toLowerCase() ?? ""]) {
-      const item = page.items[this.#menu.index];
-      if (item !== undefined && !item.header) page.keys[key.char?.toLowerCase() ?? ""]?.(item);
-    } else if (page?.kind === "list" && page.update && key.name === "char" && key.char?.toLowerCase() === "u") {
-      const item = page.items[this.#menu.index];
-      if (item !== undefined && !item.header) page.update(item);
-    } else if ((key.name === "up" || key.name === "down") && !key.alt) {
-      this.#menu.arm(undefined); // moving away cancels a pending removal
-      this.#menu.move(key.name === "up" ? -1 : 1, count, (i) => page?.kind === "list" && page.items[i]?.header === true);
-    } else if (key.name === "escape") {
-      // A page goes back to the root; the root closes, back to an empty input.
-      if (!this.#menu.back()) {
-        this.#editor.clear();
-        this.#startup.menuClosed();
-      }
-    } else if (key.name === "enter" && !key.alt) {
-      if (page?.kind === "list") {
-        const item = page.items[this.#menu.index];
-        if (item === undefined || item.header) return true;
-        page.pick(item);
-        // A pick that opened another page (add model) keeps the menu, as does a page that stays
-        // (switching things on and off); any other pick is done.
-        if (this.#menu.page === page && !page.stay) this.#closeMenu();
-      } else if (page?.kind === "info" && page.next) {
-        page.next();
-      } else if (page) {
-        this.#menu.back();
-      } else {
-        this.#openRoot(items[this.#menu.index]!);
-      }
-    } else if (page === undefined) {
-      this.#menu.close(); // typing narrows the root: start again from its first item
-      return false;
-    } else if (key.name === "ctrl-c") {
-      this.#closeMenu();
-    } // a page takes no typing
-    this.render();
-    return true;
-  }
-
-  /** The wheel moves through the open menu; a click on an item picks it, as Enter would. */
-  #menuMouse(key: Key): void {
-    const m = key.mouse;
-    if (m === undefined) return;
-    if (m.wheel !== undefined) {
-      this.#menuKey({ name: m.wheel === "up" ? "up" : "down" });
-      return;
-    }
-    const index = this.#menuItemAt(m.y);
-    if (index === undefined) return;
-    // Hovering an item selects it (bold, its arrow); a click picks it, as Enter would.
-    if (m.move) {
-      if (index !== this.#menu.index) {
-        this.#menu.select(index);
-        this.render();
-      }
-      return;
-    }
-    if (!m.press || m.button !== 0) return;
-    this.#menu.select(index);
-    this.#menuKey({ name: "enter" });
-  }
-
-  /** The menu item on screen row `y`, if there is one. */
-  #menuItemAt(y: number): number | undefined {
-    const top = this.#renderer.top;
-    const page = this.#menu.page;
-    const items = page?.kind === "list" ? page.items : page === undefined ? (this.#rootItems() ?? []) : undefined;
-    if (top === undefined || items === undefined) return undefined;
-    // The menu sits at the region's foot: its rows, then the place line (if any), then the status.
-    const rows = this.#state().lines.length;
-    const menu = this.#menuRows().length;
-    const end = top + rows - 1 - 1 - (this.#place ? 1 : 0);
-    const row = y - (end - menu + 1) - (page === undefined ? 0 : 1); // a page's first row is its title
-    const index = listWindow(items.length, this.#menu.index) + row;
-    if (row < 0 || row >= Math.min(items.length, MENU_ROWS) || items[index] === undefined || items[index]?.header) return undefined;
-    return index;
-  }
-
-  #closeMenu(): void {
-    this.#menu.close();
-    this.#editor.clear();
-    this.#startup.menuClosed();
   }
 
   #openJobs(): void {
@@ -956,7 +823,7 @@ export class App {
     else if (item.name === "profile") this.#extensions.openProfiles();
     else if (item.name === "copy") this.#menu.open(copyPage(snippets(this.#agent.messages), (s) => this.#copy(s.code)));
     else {
-      this.#closeMenu();
+      this.#slash.close();
       void this.command(`/${item.name}`).then(() => this.render());
     }
   }
