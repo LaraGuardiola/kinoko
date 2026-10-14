@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.2.3
+
+The messages you sent back with the arrows, a default model chosen from the menu, and the phone
+keeping up with the model in use.
+
+### The TUI
+- ↑ and ↓ walk the messages you sent, as in a shell: from the start of the text (or its end), ↑
+  brings the previous one and ↓ the next, and past the newest the draft you were typing comes back.
+  In the middle of the text the first ↑ goes to its start; in a message of several lines the arrows
+  still move between lines. Ctrl-P / Ctrl-N as before.
+- `/models`: D makes the selected model the default, the one new sessions and the phone's new agents
+  start with. It is written into `~/.kinoko/config.json` (made 0600: it holds the key); the model it
+  replaces stays in the list. The default is marked.
+- A model whose endpoint does not say its context window gets the default one (128k), not the window
+  of the model used before it.
+- Picking a model or a thinking level is told in cream, like the other notes, not on a white band.
+
+### The phone
+- The agents list says the model in use: a switch from the app, the TUI or Telegram reaches it at
+  once (it showed the model the agent started with).
+- The app (kinoko-android, main) draws LaTeX math like the TUI: `$$…$$` blocks centred with their
+  Math ⧉ label, inline `$…$` in the text. It needs the `latex` extension on the computer.
+
 ## 0.2.2
 
 Thinking levels that reach llama.cpp, each tool call on its own row, and LaTeX math.
