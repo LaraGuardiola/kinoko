@@ -77,17 +77,32 @@ async function showPairing(devices: Devices, url: string, lan?: State["lan"]): P
   if (url.startsWith("http://127.0.0.1") && !lan) out(dim("this address is this computer only: without Tailscale the phone cannot reach it"));
 }
 
-/** Kinoko Lab's links: one for this computer's browser, one (and its QR) for the phone. Each pairs once. */
+/** The certificate's SHA-256 as a browser shows it (AB:12:…), from the base64url the app pins. */
+function fingerprintHex(fingerprint: string): string {
+  return [...Buffer.from(fingerprint, "base64url")].map((b) => b.toString(16).padStart(2, "0").toUpperCase()).join(":");
+}
+
+/** Kinoko Lab's links: one for this computer's browser, and a QR code for each way a phone or tablet
+ *  reaches the hub (the local network, Tailscale). Each pairs one browser, once. */
 async function showLab(devices: Devices, state: State): Promise<void> {
   const here = `http://127.0.0.1:${state.port}/lab#c=${await devices.code()}`;
   out(`Kinoko Lab, a live look inside kinoko: open ${bold(here)}`);
-  if (!state.url.startsWith("http://127.0.0.1")) {
+  if (state.lan) {
+    const home = `${state.lan.url}/lab#c=${await devices.code()}`;
+    out("");
+    out(qrText(home));
+    out(`At home (this network, no Tailscale needed): scan it, or open ${home}`);
+    // Nobody can vouch for a certificate on 192.168.x: the browser warns once, and asks to go on.
+    out(dim(`The browser will warn about the certificate: it is this hub's own. Its SHA-256 should read`));
+    out(dim(fingerprintHex(state.lan.fingerprint)));
+  }
+  if (!state.url.startsWith("http://127.0.0.1") && state.url !== state.lan?.url) {
     const away = `${state.url}/lab#c=${await devices.code()}`;
     out("");
     out(qrText(away));
-    out(`On the phone (through Tailscale): scan it, or open ${away}`);
+    out(`Anywhere (through Tailscale): scan it, or open ${away}`);
   }
-  out(dim("Each link works once, for ten minutes; the browser stays paired (`kinoko serve devices`)."));
+  out(dim("Each link works once, for ten minutes; a browser stays paired (`kinoko serve devices`)."));
 }
 
 export async function runServe(argv: string[], opts: { command: string[]; version: string }): Promise<void> {

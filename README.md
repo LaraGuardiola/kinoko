@@ -117,7 +117,9 @@ dropping a PNG, JPEG, GIF or WebP file path attaches that file. Each shows in th
   history), with a sentence saying what is happening now and why. Tap a machine to see what it
   holds: the exact system prompt in parts, the tools' schemas, the request as sent, the history.
   With `kinoko serve` running, `kinoko serve lab` prints a link for this computer and a QR code for
-  the phone (each pairs one browser, once).
+  each way a phone or tablet reaches the hub: the local network (the browser warns about the hub's
+  own certificate once; the command prints its SHA-256 to check) and Tailscale. Each pairs one
+  browser, once.
 
 ## Config
 
