@@ -30,6 +30,7 @@ import type { CommandHost } from "../commands.ts";
 import type { Catalog, Entry, Outcome, Change } from "../catalog.ts";
 import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
 import type { ModelChoice, ModelsView } from "./models-menu.ts";
+import { DEFAULTS } from "../config.ts";
 import type { SavedModel } from "../config.ts";
 import type { Served } from "../providers/openai-compat.ts";
 import type { Provider } from "../types.ts";
@@ -1612,18 +1613,22 @@ export class App {
   /**
    * A model picked without a known window (typed by hand, or served by the engine in use): ask its
    * endpoint, use what it says, and keep it on a saved entry so the next pick knows it at once.
-   * Until then (or if it never says) the previous window stands, and the marker says so.
+   * Until then the previous window stands; if it never says (or does not answer), the default one,
+   * as a fresh start has, and the marker says so.
    */
   #learnWindow(entry: SavedModel): void {
     const host = this.#host;
     if (!host || entry.baseUrl === "") return;
     void host
       .discover(entry.baseUrl, entry.apiKey, AbortSignal.timeout(10_000))
+      .catch(() => [] as Served[])
       .then(async (served) => {
         const window = served.find((s) => s.id === entry.model)?.contextWindow;
         if (this.#model !== entry.model) return; // another pick came first
         if (!window) {
-          this.#marker = this.#quiet = `model: ${modelName(entry.model)} (its context window is unknown: keeping ${this.#window.toLocaleString("en-US")})`;
+          // The last model's window says nothing about this one: the default, as a fresh start has.
+          this.#useWindow(DEFAULTS.contextWindow);
+          this.#marker = this.#quiet = `model: ${modelName(entry.model)} (its context window is unknown: ${DEFAULTS.contextWindow.toLocaleString("en-US")}, the default)`;
           return;
         }
         this.#useWindow(window);
