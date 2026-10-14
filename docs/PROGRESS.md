@@ -1112,3 +1112,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Checked: a real reply recorded from the speakers' output and transcribed back: said once, whole.
 - Not done: barge-in that lowers the voice the moment you start speaking (step 5), echo cancellation
   (step 4); without it, kinoko's own voice is filtered by words, not removed from the microphone.
+- Then, before the owner tested it (they wanted echo cancelling first): PipeWire's WebRTC echo
+  canceller as a separate pipewire process (~/.config/pipewire/kinoko-echo-cancel.conf, user service
+  kinoko-echo-cancel, source kinoko-aec-source; the default microphone unchanged) and voice.json
+  recording from it. Checked: a whole reply spoken with the microphone open, the plain microphone
+  transcribed it (its own name included), the cancelled one none of it. And barge-in: speech
+  starting while kinoko talks lowers it to 20 % at once, then it stops (said "kinoko…") or comes
+  back. Not checked: a real voice in the room through the canceller (needs the owner).
