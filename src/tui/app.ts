@@ -138,8 +138,10 @@ export interface ModelsHost {
   save: (entry: SavedModel) => Promise<SavedModel[]>;
   /** Removes one saved entry; answers with the list to offer from now on. */
   remove: (entry: SavedModel) => Promise<SavedModel[]>;
-  /** Entries that cannot be removed from the TUI (the configured model). */
+  /** Entries that cannot be removed from the TUI (the configured model, the default). */
   fixed: (entry: SavedModel) => boolean;
+  /** Makes one the model new sessions start with; answers with the list to offer from now on. */
+  setDefault?: (entry: SavedModel) => Promise<SavedModel[]>;
 }
 
 export class App {
@@ -1081,6 +1083,9 @@ export class App {
       }
     } else if (page?.kind === "info" && key.name === "char" && page.keys?.[key.char?.toLowerCase() ?? ""]) {
       page.keys[key.char?.toLowerCase() ?? ""]?.();
+    } else if (page?.kind === "list" && key.name === "char" && page.keys?.[key.char?.toLowerCase() ?? ""]) {
+      const item = page.items[this.#menu.index];
+      if (item !== undefined && !item.header) page.keys[key.char?.toLowerCase() ?? ""]?.(item);
     } else if (page?.kind === "list" && page.update && key.name === "char" && key.char?.toLowerCase() === "u") {
       const item = page.items[this.#menu.index];
       if (item !== undefined && !item.header) page.update(item);
@@ -1397,11 +1402,13 @@ export class App {
       saved: this.#saved,
       canAdd: this.#host !== undefined,
       fixed: this.#host?.fixed,
+      canDefault: this.#host?.setDefault !== undefined,
     });
     const choose = (choice: ModelChoice): void => {
       if (choice.kind === "add") this.#addProvider();
       // The redrawn page becomes the one later answers refresh.
       else if (choice.kind === "remove") this.#removeModel(choice.entry, () => (page = modelsPage(view(), choose)));
+      else if (choice.kind === "default") this.#defaultModel(choice.entry, () => (page = modelsPage(view(), choose)));
       else this.#useModel(choice.entry);
     };
     let page = modelsPage(view(), choose);
@@ -1513,6 +1520,20 @@ export class App {
         this.#marker = this.#quiet = `removed ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}`;
       })
       .catch(() => (this.#marker = `could not remove ${modelName(entry.model)}`))
+      .finally(() => this.render());
+  }
+
+  /** Makes a model the default for new sessions (config.json); the models page stays open, redrawn. */
+  #defaultModel(entry: SavedModel, redraw: () => ListPage): void {
+    const page = this.#menu.page;
+    void this.#host
+      ?.setDefault?.(entry)
+      .then((saved) => {
+        this.#saved = saved;
+        if (page) this.#menu.swap(page, redraw()); // the same model stays selected
+        this.#marker = this.#quiet = `default: ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}, for new sessions`;
+      })
+      .catch(() => (this.#marker = `could not make ${modelName(entry.model)} the default`))
       .finally(() => this.render());
   }
 

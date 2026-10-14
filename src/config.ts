@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { userHome } from "./home.ts";
 
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
@@ -175,6 +175,30 @@ export async function saveModel(entry: SavedModel, home = userHome()): Promise<S
 /** Removes the entry with this endpoint and model, and returns the list as now saved. */
 export async function removeModel(entry: SavedModel, home = userHome()): Promise<SavedModel[]> {
   return writeSaved((await loadSavedModels(home)).filter((m) => !sameModel(m, entry)), home);
+}
+
+/**
+ * Makes `entry` the model new sessions start with: its fields go into ~/.kinoko/config.json (the
+ * rest of the file kept; 0600, it holds the key). A field it lacks (window, label) leaves the file,
+ * so the old model's never applies to it.
+ */
+export async function setDefaultModel(entry: SavedModel, home = userHome()): Promise<void> {
+  const path = `${home}/.kinoko/config.json`;
+  let raw: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = await Bun.file(path).json();
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) raw = parsed as Record<string, unknown>;
+  } catch {
+    // none yet, or not JSON: a new one
+  }
+  const fields = { model: entry.model, baseUrl: entry.baseUrl, apiKey: entry.apiKey, provider: entry.provider, contextWindow: entry.contextWindow, label: entry.label };
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === undefined) delete raw[key];
+    else raw[key] = value;
+  }
+  await mkdir(`${home}/.kinoko`, { recursive: true });
+  await writeFile(path, `${JSON.stringify(raw, null, 2)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") await chmod(path, 0o600); // the mode above only applies to a new file
 }
 
 /**

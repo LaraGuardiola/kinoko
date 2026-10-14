@@ -120,8 +120,10 @@ both work (`--max-turns` / `--maxTurns`).
 `/models` lists the models grouped by provider (one per endpoint, in name order), each provider
 asked for what it serves. `+ add provider` takes its name (strata, llama.cpp...), endpoint, API key,
 then one of the models it serves; it is kept in `~/.kinoko/models.json` (mode 0600: it holds the
-keys). Picking a model switches endpoint and model from the next request. Del twice on a saved model
-removes it (the configured one stays). `"label"` names the configured provider in that list.
+keys). Picking a model switches endpoint and model from the next request. D makes the selected one
+the default, the model new sessions (and the phone's new agents) start with: it is written into
+`~/.kinoko/config.json` (made 0600), and the one it replaces stays in the list as a saved model. Del
+twice on a saved model removes it (the default stays). `"label"` names the configured provider in that list.
 
 `"thinkingReplay"`: which of the model's old thinking goes back with each request. `"turn"` (the
 default) sends the thinking of every step since your last message, so the model keeps its plan

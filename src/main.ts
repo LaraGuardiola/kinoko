@@ -1,4 +1,4 @@
-import { DEFAULTS, loadConfig, loadSavedModels, removeModel, resumeModel, saveModel, thinkingLabel } from "./config.ts";
+import { DEFAULTS, loadConfig, loadSavedModels, removeModel, resumeModel, saveModel, setDefaultModel, thinkingLabel } from "./config.ts";
 import type { SavedModel } from "./config.ts";
 import type { Provider } from "./types.ts";
 import { isLocal, listModels, openaiCompat } from "./providers/openai-compat.ts";
@@ -141,7 +141,7 @@ if (lastAdded) {
   if (lastAdded.contextWindow) config.contextWindow = lastAdded.contextWindow;
   if (lastAdded.label) config.label = lastAdded.label;
 }
-const noModel = !setUp && lastAdded === undefined;
+let noModel = !setUp && lastAdded === undefined;
 if (noModel && !tui) {
   process.stderr.write("no model set up yet: open kinoko (no arguments) and add one in /models, or write ~/.kinoko/config.json\n");
   process.exit(1);
@@ -191,7 +191,7 @@ const providerOptions = {
   thinkingReplay: config.thinkingReplay,
 };
 // The model in the config, as the models menu offers it next to the ones added from the TUI.
-const configured: SavedModel = {
+let configured: SavedModel = {
   model: config.model,
   baseUrl: config.baseUrl,
   apiKey: config.apiKey,
@@ -301,6 +301,14 @@ if (tui) {
       save: async (entry) => [...(noModel ? [] : [configured]), ...(await saveModel(entry))],
       remove: async (entry) => [...(noModel ? [] : [configured]), ...(await removeModel(entry))],
       fixed: (entry) => entry.baseUrl === configured.baseUrl && entry.model === configured.model,
+      // The default moves into config.json, and the one it replaces into the saved ones: still there to pick.
+      setDefault: async (entry) => {
+        if (!noModel) await saveModel(configured);
+        await setDefaultModel(entry);
+        configured = entry;
+        noModel = false;
+        return [configured, ...(await removeModel(entry))];
+      },
     },
     // Same rule as App.resize: the panel above simply scrolls away into the scrollback.
     extensions: catalog({ kind: EXTENSIONS, home: userHome(), repo: config.extensionsRepo }),

@@ -968,3 +968,12 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Checked live (test hub on 7880, emulator): /models → MiniCPM from the app; back on the list the card said MiniCPM-V-4.7-35B-A3B.
 - No app change: it already draws AgentInfo.model from each list.
 - Then, asked by the user on the same branch: the TUI's note after picking a model had the inverse (white) band instead of the cream of the notes that only inform. The model's notes (picked, saved, removed, window unknown) and the thinking level's are quiet now; "could not …" ones keep the band. Test: the models pick writes its note in cream, never inverse.
+
+## feat/default-model: D in /models makes a model the default (branch feat/default-model)
+- Asked by the user: choose the default model from the menu. Their config.json named the Qwen3.6 file while :8085 served MiniCPM, so every new agent (the phone's too) started as "Qwen3.6".
+- models-menu.ts: the default (the configured model) is marked "default" (with "in use" when both); D on a model makes it the default (a `keys` map on list pages, the selected item handed over; menu.ts/app.ts route it). The hint says so.
+- config.ts `setDefaultModel`: model, baseUrl, apiKey, provider, contextWindow and label into ~/.kinoko/config.json, the rest of the file kept; a field the new one lacks (window, label) is removed, so the old model's never applies; chmod 0600 (it holds the key, and writeFile's mode only applies to a new file).
+- main.ts host `setDefault`: the old default saved into models.json (still in the list), the new one out of it (it lives in config.json now), `configured` and `fixed` follow. The model in use does not change until one is picked (Enter).
+- Tests: the page (marks, D, hint), the file (kept keys, dropped window/label, 0600, a new file), the app (D on a model: the host told, the page redrawn with it still selected, the note).
+- Checked live (tmux, a test HOME): D on MiniCPM wrote config.json (600), the old Qwen moved to models.json, a new kinoko started with MiniCPM.
+- Not done: a default whose window the endpoint does not tell starts at the 128k default until used (the TUI learns it then, as before). A project's ./.kinoko/config.json still wins over the home one.
