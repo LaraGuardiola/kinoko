@@ -1101,3 +1101,14 @@ Deferred, for whenever an Anthropic model is actually needed:
   the calls after it "ERROR: not run: …", and the steer is the next message. Background jobs are
   untouched. Test in loop.test.ts; live with MiniCPM: `sleep 25` cut, "CORTADO" 2 s after Alt+X.
 - The voice extension sends what it hears as `steer_now` (a prompt when idle).
+
+## Voice, step 3: kinoko talks (kinoko-extensions feat/voice-speak; docs/voice.md)
+- In voice mode (Ctrl+Space) the reply is read aloud as it streams, sentence by sentence (code
+  blocks, tables, addresses and markdown marks left out), in a cloned voice; Esc, a new run, an
+  abort or talking to it stop it; `/voice <name>`, `/voice quiet`, `/voice talk`.
+- This machine: ~/Projects/qwentts.cpp (CUDA) and ~/bin/tts-serve.sh (port 8091); the Wheatley clip
+  in ~/.kinoko/voices (with .spk/.rvq encoded ahead on the CPU); "tts" in ~/.kinoko/voice.json;
+  minicpm-serve.sh and lfm-serve.sh say which NCMOE leaves room for it (38, 36).
+- Checked: a real reply recorded from the speakers' output and transcribed back: said once, whole.
+- Not done: barge-in that lowers the voice the moment you start speaking (step 5), echo cancellation
+  (step 4); without it, kinoko's own voice is filtered by words, not removed from the microphone.

@@ -158,8 +158,13 @@ Two kinds, both for STT and TTS, so any engine fits:
 2. **Hearing** (kinoko-extensions, `feat/voice-hear`): the microphone, voice activity, the wake
    word, both backend kinds, `voice.json`, Ctrl+Space; utterances become prompts. Measured on
    Spanish phrases spoken into this laptop.
-3. **Speech** (kinoko-extensions, `feat/voice-speech`): the sentence splitter (tested hard), the
-   queue, playback, cutting, voices, `/voice`. Checked by ear by the owner.
+3. **Speech** (kinoko-extensions, `feat/voice-speak`): the sentence splitter (tested hard), the
+   queue, playback, cutting, voices, `/voice`. Checked by ear by the owner. Built 2026-10-14: one
+   pw-play per reply fed sentence after sentence (synthesis ~5× faster than speech, so the next is
+   ready before the last ends); the clone taught to the server as latents encoded ahead on the CPU
+   (`qwen-codec`: encoding the clip on the GPU beside the LLM ran out of memory and crashed the
+   server); its own voice heard back is dropped (3+ words, mostly its recent words). MiniCPM
+   beside it: `NCMOE=38` (5.0 GB; 726 tok/s prompt, 37.9 generation, vs ~850 / ~42 at 34).
 4. **This machine**: whisper.cpp and qwentts.cpp built with CUDA under `~/Projects`, models in place,
    `~/bin/tts-serve.sh` and `~/bin/stt-serve.sh` beside `lfm-serve.sh` (its NCMOE to 36), the
    Wheatley voice in `~/.kinoko/voices`, PipeWire's echo cancellation.
