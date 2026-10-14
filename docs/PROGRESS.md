@@ -1092,3 +1092,12 @@ Deferred, for whenever an Anthropic model is actually needed:
   feat/voice-hear) no longer shows "transcribing": the word stays "● listening".
 - At the owner's request, an extension's status moved from the start of the status line to the rule
   above the input, right side, leftmost of the labels (its leading ● in red).
+
+## feat/steer-now-cuts-tools: Alt+X (and the voice) cut the tools running too
+- The owner found Alt+X "not instant". In the core it was: checked live, the reply is cut and the
+  steer delivered in ~2 s; LFM2.5 then thinks ~10 s before answering, which reads as slow. But with
+  a tool running Alt+X did nothing (the steer waited for the batch). Now `sendNow` also stops the
+  tools running: the call running answers "ERROR: stopped: the user sent a message, read it next",
+  the calls after it "ERROR: not run: …", and the steer is the next message. Background jobs are
+  untouched. Test in loop.test.ts; live with MiniCPM: `sleep 25` cut, "CORTADO" 2 s after Alt+X.
+- The voice extension sends what it hears as `steer_now` (a prompt when idle).

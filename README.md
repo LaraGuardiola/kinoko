@@ -69,7 +69,7 @@ an `AbortSignal`, nothing blocks the event loop, and the keyboard always wins:
 | `Ctrl-C` | clear the editor, then quit | abort |
 | `Ctrl-D` | quit (empty editor) | — |
 | `Alt+Up` | — | pull the newest queued message back into the editor |
-| `Alt+X` | — | send the waiting steer **now**: cuts the reply being written, thinking included |
+| `Alt+X` | — | send the waiting steer **now**: cuts the reply being written, thinking included, or stops the tools running (the rest of the batch does not run) |
 | `Alt+C` | — | cancel the queued messages: they go back into the editor |
 | `Ctrl-T` | expand or collapse tool output | same |
 | `Ctrl-V` | paste the clipboard image as `[Image #N]` | same |
@@ -259,7 +259,7 @@ throws is logged and skipped; a blocked call returns its reason to the model ins
 
 For the TUI, an extension can also take a key the TUI leaves free (`registerKey("ctrl-space", handler,
 description)`, listed in /help), send text as the user (`send(text)` is Enter; `send(text, {as:
-"steer_now"})` is Alt+X, cutting the reply being streamed) and show what it is doing on the rule above
+"steer_now"})` is Alt+X, cutting the reply being streamed or the tools running) and show what it is doing on the rule above
 the input, right side (`status("● listening")`, `status(undefined)` to clear it). Where nobody types (print
 and rpc modes) `send` returns false and `status` shows nothing. The voice extension (docs/voice.md) is what they are for.
 
