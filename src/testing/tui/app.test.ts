@@ -433,7 +433,7 @@ describe("TUI app with the agent", () => {
     expect(h.screen()).toContain("Talk to kinoko");
   });
 
-  test("7c. an extension speaks for the user: a prompt when idle, a steer sent at once while running; its status leads the status line", async () => {
+  test("7c. an extension speaks for the user: a prompt when idle, a steer sent at once while running; its word sits on the rule above the input", async () => {
     const h = await harness(
       [
         [{ type: "thinking", delta: "thinking " }, { type: "thinking", delta: "and thinking " }, { type: "thinking", delta: "and more " }, { type: "text", delta: "x" }, { type: "done", stop: "end" }],
@@ -448,10 +448,16 @@ describe("TUI app with the agent", () => {
     expect(h.agent.messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["mira el test", "para, usa rg"]);
     expect(h.agent.messages.find((m) => m.stop === "aborted")?.thinking).toStartWith("thinking"); // cut, as Alt+X does
     expect(h.screen()).toContain("mira el test");
+    const rule = (): string => frame(h).find((row) => row.includes("LOW · 2048")) ?? "";
     h.app.extensionStatus("● listening");
-    expect(h.app.statusLine.replace(ANSI, "")).toStartWith("● listening | IDLE");
+    await paced();
+    h.app.render();
+    expect(rule()).toMatch(/─ ● listening ── LOW · 2048 ──$/); // on the rule above the input, right
+    expect(h.app.statusLine).not.toContain("listening");
     h.app.extensionStatus(undefined);
-    expect(h.app.statusLine.replace(ANSI, "")).toStartWith("IDLE");
+    await paced();
+    h.app.render();
+    expect(rule()).not.toContain("listening");
     const none = await harness([], { noModel: true });
     expect(none.app.send("hola", "prompt")).toBe(false);
   });

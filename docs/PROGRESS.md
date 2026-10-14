@@ -1085,3 +1085,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Checked live in tmux with a throwaway extension: Ctrl+Space sent a prompt, a second one a
   steer_now that cut the thinking, Esc running and idle fired interrupt, the status showed.
 - Not done: the voice extension itself (steps 2–5).
+
+## fix/voice-status-on-rule: the voice's word sits still, above the input
+- The owner saw "● listening" blink: every sound in the room (people talking behind) became an
+  utterance, and the extension flashed "● transcribing…" for each. The extension (kinoko-extensions,
+  feat/voice-hear) no longer shows "transcribing": the word stays "● listening".
+- At the owner's request, an extension's status moved from the start of the status line to the rule
+  above the input, right side, leftmost of the labels (its leading ● in red).

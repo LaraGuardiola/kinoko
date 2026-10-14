@@ -57,7 +57,7 @@ The core grows four hooks, each small and useful to other extensions:
 2. **`k.on("interrupt", () => …)`**: the user asked for quiet: Esc or Ctrl-C, **also while idle**
    (today Esc does nothing then). The first Esc after a run stops the voice.
 3. **`k.registerKey(key, description, handler)`**, TUI only: the handler gets `status(text |
-   undefined)`, a line under the editor ("● listening", "transcribing…"). Listed in /help. Core
+   undefined)`, a word on the rule above the editor, right side ("● listening"). Listed in /help. Core
    keys cannot be taken.
 4. **`k.send(text, { as: "prompt" | "steer_now" })`**: the extension speaking for the user, exactly
    as if typed and sent (section 4b).
@@ -69,8 +69,9 @@ Zero runtime dependencies: `fetch`, `Bun.spawn`, PipeWire's `pw-record` and `pw-
 Everything voice starts **off** when kinoko opens. **Ctrl+Space turns voice mode on**: kinoko
 listens for its name (section 4b) and reads its replies aloud (section 4). Ctrl+Space again turns
 it all off at once: the microphone closes and the voice stops. `/voice` does the same by command
-and picks the voice. A line under the editor says what it is doing: "● listening", "● kinoko
-hears you", "transcribing…".
+and picks the voice. A word on the rule above the editor, right side, says so, steady: "● listening", "● kinoko
+hears you" (no "transcribing": every sound in the room is transcribed to look for the name, and it
+would flicker).
 
 Terminals do not report key releases, so it is a toggle, not hold-to-talk.
 

@@ -70,7 +70,7 @@ export type KeyHandler = () => void | Promise<void>;
 /** A prompt (when idle, a steer otherwise), or a steer delivered now, cutting the reply being streamed. */
 export type SendAs = "prompt" | "steer_now";
 
-/** What only the TUI does for extensions: send as the user, and the line that says what one is doing. */
+/** What only the TUI does for extensions: send as the user, and the word that says what one is doing. */
 export interface ExtHost {
   send(text: string, as: SendAs): boolean;
   status(text: string | undefined): void;
@@ -87,7 +87,7 @@ export interface Kinoko {
   /** Sends `text` as if the user typed it and pressed Enter (or Alt+X, for "steer_now"). False
    *  where nobody types: print and rpc modes. */
   send(text: string, opts?: { as?: SendAs }): boolean;
-  /** A short line in the TUI's status bar ("● listening"); undefined takes it away. */
+  /** A short word on the TUI's rule above the input, right side ("● listening"); undefined takes it away. */
   status(text: string | undefined): void;
   log(message: string): void;
 }
