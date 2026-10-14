@@ -13,12 +13,10 @@ import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
 import type { RenderState } from "./render.ts";
-import { ABORTED, formatBlock, liveRegion, statusLine, wrapTo } from "./view.ts";
-import { errorBlock, pulseLevel, toolBlock, toolFailed, toolSummary } from "./tools.ts";
-import { TODO_TOOL } from "./todos.ts";
+import { formatBlock, liveRegion, statusLine, wrapTo } from "./view.ts";
 import type { Todo } from "./todos.ts";
 import { replayBlocks } from "./replay.ts";
-import { answeredNote, approvalKey, approvalRows } from "./approval.ts";
+import { approvalKey, approvalRows } from "./approval.ts";
 import type { ApprovalView } from "./approval.ts";
 import { MENU_ROWS, Menu, filterRoot, listRows, listWindow, pageRows } from "./menu.ts";
 import type { ListPage, MenuItem } from "./menu.ts";
@@ -29,9 +27,8 @@ import type { ThinkingProfile } from "./menu-pages.ts";
 import type { CommandHost } from "../commands.ts";
 import type { Catalog, Change } from "../catalog.ts";
 import { actionFor } from "./keys.ts";
-import type { QueuedView, Region, ToolLine, ToolView } from "./view.ts";
-import type { Agent, RunResult } from "../loop.ts";
-import type { AgentEvent } from "../loop.ts";
+import type { QueuedView, Region } from "./view.ts";
+import type { Agent } from "../loop.ts";
 import type { Session } from "../session.ts";
 import { sessionDir } from "../session.ts";
 import { dirname } from "node:path";
@@ -46,9 +43,9 @@ import { Scrollback } from "./scrollback.ts";
 import { ModelSwitch } from "./model-switch.ts";
 import { StartupPanel } from "./startup-panel.ts";
 import { ExtensionsMenu } from "./extensions-menu.ts";
+import { RunView } from "./run-view.ts";
 import type { ModelsHost } from "./model-switch.ts";
 import { COPY, copyFor } from "./code.ts";
-import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
 import { openIntegrations } from "./integrations-menu.ts";
@@ -164,20 +161,8 @@ export class App {
   #side: SidePanel;
   #integrations: AppOptions["integrations"];
 
-  #running = false;
-  #thinkingSeen = false; // this message already streamed its thinking
-  #tool: ToolView | undefined;
-  // The reply's calls not started yet, in order: written so far while it streams, then all of them.
-  #calls: Array<{ id?: string; index?: number; name: string; args: string }> = [];
-  #written = false; // the reply is over: #calls holds all of its calls, the first one next
-  #queued: QueuedView[] = [];
-  #approval: ApprovalView | undefined; // a call waiting for the user's answer
-  #toolBlocksFull = false; // ctrl+t
-  #compacting: CompactProgress | undefined; // a summary on its way: the note animates
   #marker = new Marker(); // the one-line note above the editor
-  #retrying = false; // the marker says a retry is coming: the next reply's first token clears it
-  #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
-  #cost = 0;
+  #run: RunView; // what the run in progress shows
 
   // The mouse is kinoko's: a click on a code block's ⧉ copies it, and while the menu is open clicks
   // pick, hovering selects and the wheel moves through it. With Shift held the terminal has it
@@ -246,7 +231,18 @@ export class App {
       changed: () => this.#startup.refresh(),
       render: () => this.render(),
     });
-    this.#agent.on((e) => this.#onAgentEvent(e));
+    this.#run = new RunView({
+      scrollback: this.#scrollback,
+      marker: this.#marker,
+      side: this.#side,
+      columns: () => this.#viewportCols,
+      printColumns: () => this.#printCols,
+      sideOn: () => this.#sideOn,
+      giveBack: (text) => this.#takeBack([text]),
+      refreshPlace: () => this.#refreshPlace(),
+      render: () => this.render(),
+    });
+    this.#agent.on((e) => this.#run.onEvent(e));
     this.#refreshPlace();
   }
 
@@ -280,14 +276,7 @@ export class App {
     for (const block of replayBlocks(messages, this.#printCols)) this.#scrollback.print(block.kind, block.text, undefined, undefined, block.render && ((w) => block.render!(w + 2)));
     this.#images.startAfter(messages.reduce((n, m) => n + (m.images?.length ?? 0), 0));
     this.#side.history(messages);
-    const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
-    if (usage) this.#tokens.context = usage.input + usage.output;
-    // The session's totals so far: what was sent, read from the cache and generated.
-    for (const m of messages) {
-      this.#tokens.input += m.usage?.input ?? 0;
-      this.#tokens.cacheRead += m.usage?.cacheRead ?? 0;
-      this.#tokens.output += m.usage?.output ?? 0;
-    }
+    this.#run.count(messages);
     this.render();
   }
 
@@ -319,15 +308,15 @@ export class App {
 
   /** The call waiting for the user's answer, if any. */
   get approval(): ApprovalView | undefined {
-    return this.#approval;
+    return this.#run.approval;
   }
 
   get queued(): QueuedView[] {
-    return this.#queued.map((q) => ({ ...q }));
+    return this.#run.queued.map((q) => ({ ...q }));
   }
 
   get running(): boolean {
-    return this.#running;
+    return this.#run.running;
   }
 
   get marker(): string {
@@ -341,11 +330,11 @@ export class App {
 
   get statusLine(): string {
     return statusLine({
-      running: this.#running,
+      running: this.#run.running,
       model: this.#models.noModel ? "no model yet" : this.#models.model,
-      tokens: this.#tokens,
+      tokens: this.#run.tokens,
       contextWindow: this.#models.contextWindow,
-      cost: this.#cost,
+      cost: this.#run.cost,
     });
   }
 
@@ -367,9 +356,10 @@ export class App {
       return;
     }
     // An approval waiting takes its keys first (Esc denies it); ctrl-c still aborts the run.
-    if (this.#approval !== undefined && key.name !== "ctrl-c") {
+    const approval = this.#run.approval;
+    if (approval !== undefined && key.name !== "ctrl-c") {
       const answer = approvalKey(key);
-      if (answer !== undefined) this.#agent.approve(this.#approval.id, answer.allow, { by: "tui", remember: answer.remember });
+      if (answer !== undefined) this.#agent.approve(approval.id, answer.allow, { by: "tui", remember: answer.remember });
       return;
     }
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
@@ -377,7 +367,7 @@ export class App {
     if (this.#fileKey(key)) return;
     if (this.#planKey(key)) return;
     const action = actionFor(key, {
-      running: this.#running || this.#agent.state === "running",
+      running: this.#run.running || this.#agent.state === "running",
       editorEmpty: this.#editor.empty,
     });
     switch (action) {
@@ -392,7 +382,7 @@ export class App {
         this.render();
         return;
       case "toggle-tools":
-        this.#toolBlocksFull = !this.#toolBlocksFull;
+        this.#run.toggleFullTools();
         this.render();
         return;
       case "pull-queued":
@@ -458,9 +448,9 @@ export class App {
       this.render();
       return;
     }
-    this.#running = true;
-    this.#echoUser(text);
-    void this.#run(text);
+    this.#run.started();
+    this.#run.echoUser(text);
+    void this.#send(text);
   }
 
   /** Alt+Enter: follow-up when running, plain submit when idle. */
@@ -469,20 +459,20 @@ export class App {
     if (text === "") return;
     this.#editor.remember(text);
     this.#editor.clear();
-    this.#running = true;
+    this.#run.started();
     this.#marker.clear();
     if (this.#agent.state === "running") {
       this.#agent.followUp(text, this.#images.attached(text));
       this.render();
       return;
     }
-    this.#echoUser(text);
-    void this.#run(text);
+    this.#run.echoUser(text);
+    void this.#send(text);
   }
 
-  async #run(text: string): Promise<void> {
+  async #send(text: string): Promise<void> {
     await this.#agent.prompt(text, this.#images.attached(text));
-    this.#running = false;
+    this.#run.stopped();
     this.render();
   }
 
@@ -498,7 +488,7 @@ export class App {
       this.render();
       return;
     }
-    if (this.#running) {
+    if (this.#run.running) {
       this.#marker.warn("a run is going: Esc it first, then the shell");
       this.render();
       return;
@@ -571,161 +561,7 @@ export class App {
     this.render();
   }
 
-  // ---- agent events ----
-
-  #onAgentEvent(e: AgentEvent): void {
-    switch (e.type) {
-      case "run_start":
-        // A run this terminal did not start: a prompt from the phone, through kinoko serve.
-        if (!this.#running) {
-          this.#running = true;
-          this.#marker.clear();
-          this.#echoUser(e.prompt);
-        }
-        return;
-      case "message_delta":
-        this.#scrollback.append("assistant", e.delta);
-        return;
-      case "thinking_delta":
-        this.#thinkingSeen = true;
-        this.#scrollback.append("thinking", e.delta);
-        return;
-      case "request_start":
-        // A request starts afresh: calls left from the last reply (an unknown tool's) are gone.
-        this.#calls = [];
-        this.#written = false;
-        return;
-      case "tool_pending": {
-        // The text before the call is final; the call itself shows at once, its bullet pulsing.
-        this.#scrollback.closeBlock();
-        // Its name first, then what it acts on as soon as that arg is complete (a write's path).
-        // Each call of the reply has its own row: a new index is a new call.
-        const args = e.args ? toolSummary(e.name, e.args, false) : "";
-        const same = this.#calls.find((c) => c.index === e.index);
-        if (same) Object.assign(same, { name: e.name }, args === "" ? {} : { args });
-        else this.#calls.push({ index: e.index, name: e.name, args });
-        this.render();
-        return;
-      }
-      case "tool_start": {
-        this.#scrollback.closeBlock();
-        const at = this.#calls.findIndex((c) => c.id === e.call.id);
-        this.#calls.splice(at < 0 ? 0 : at, 1);
-        this.#side.toolCall(e.call);
-        this.#tool = {
-          name: e.call.name,
-          args: toolSummary(e.call.name, e.call.args),
-          output: "",
-          aborted: false,
-        };
-        this.render();
-        return;
-      }
-      case "tool_output":
-        if (this.#tool) {
-          this.#tool.output = e.output;
-          this.#tool.aborted = e.output === ABORTED;
-        }
-        return;
-      case "tool_end":
-        this.#printTool();
-        // A tool may have run `git init` or switched branch: show it now, not when the run ends.
-        this.#refreshPlace();
-        // ...and may have changed files: the side panel's changes too, while it is on screen.
-        if (this.#side.visible(this.#viewportCols)) this.#side.refresh();
-        return;
-      case "message_end":
-        this.#finishMessage(e.message);
-        return;
-      case "queue_change":
-        this.#syncQueued(e.steer, e.followUp);
-        return;
-      case "delivered":
-        this.#echoUser(e.text);
-        return;
-      case "compacting":
-        this.#compacting = { phase: e.phase, done: e.done, total: e.total ?? this.#compacting?.total };
-        this.render();
-        return;
-      case "compacted":
-        this.#compacting = undefined;
-        if (e.keep >= 0) this.#marker.inform(`compacted · ${e.keep} message${e.keep === 1 ? "" : "s"} kept as they were`);
-        this.render();
-        return;
-      case "retry":
-        // What streamed before the failure stays on screen; the model starts that reply over.
-        this.#scrollback.closeBlock();
-        this.#calls = [];
-        this.#thinkingSeen = false;
-        this.#marker.warn(`${e.error} · retry ${e.attempt}/${e.of} in ${Math.round(e.inMs / 1000)}s`);
-        this.#retrying = true;
-        this.render();
-        return;
-      case "first_token":
-        if (this.#retrying) this.#marker.clear();
-        this.#retrying = false;
-        return;
-      case "approval_request":
-        this.#approval = { id: e.id, call: e.call, reason: e.reason };
-        this.render();
-        return;
-      case "approval_end": {
-        if (this.#approval?.id === e.id) this.#approval = undefined;
-        const note = answeredNote(e.allow, e.by);
-        if (note !== "") this.#marker.inform(note);
-        this.render();
-        return;
-      }
-      case "run_end":
-        this.#finishRun(e.reason, e.dropped, e.detail);
-        return;
-      default:
-        return;
-    }
-  }
-
-  /** The message is over: whatever was streaming is final, and goes to the scrollback now. */
-  #finishMessage(message: Message): void {
-    const usage = message.usage;
-    if (usage) {
-      // Every request re-sends the whole conversation, so its `input` already IS the context:
-      // summing them counted the history once per tool round. The latest one is the truth.
-      this.#tokens.context = (usage.input ?? 0) + (usage.output ?? 0);
-      this.#tokens.input += usage.input ?? 0;
-      this.#tokens.cacheRead += usage.cacheRead ?? 0;
-      this.#tokens.output += usage.output ?? 0;
-      this.#cost += usage.cost ?? 0;
-    }
-    this.#scrollback.closeBlock();
-    // The calls as written, each on its row until it runs; one cut off before its args were complete
-    // never starts, so its pulsing line goes.
-    if (message.role === "assistant") this.#written = true;
-    if (message.role === "assistant") this.#calls = (message.toolCalls ?? []).map((tc) => ({ id: tc.id, name: tc.name, args: toolSummary(tc.name, tc.args) }));
-    // A provider that only reports the reasoning at the end (no deltas): better late than lost.
-    const thinking = message.thinking ?? "";
-    if (!this.#thinkingSeen && thinking.trim() !== "") this.#scrollback.print("thinking", formatBlock("thinking", thinking));
-    this.#thinkingSeen = false;
-    this.render();
-  }
-
-  /** One row per call: the running one first, then those waiting; while the reply streams, the newest is live,
-   *  once it is over the next to run. */
-  #toolLines(): ToolLine[] {
-    const running = this.#tool ? [{ name: this.#tool.name, args: this.#tool.args, live: true }] : [];
-    const last = this.#calls.length - 1;
-    return [...running, ...this.#calls.map((c, i) => ({ name: c.name, args: c.args, live: !this.#tool && i === (this.#written ? 0 : last) }))];
-  }
-
-  #printTool(): void {
-    const tool = this.#tool;
-    if (!tool) return;
-    this.#scrollback.closeBlock();
-    this.#tool = undefined;
-    // With the side column on, the plan is there: its todo calls need no block in the transcript.
-    if (tool.name === TODO_TOOL && !tool.aborted && !toolFailed(tool.output) && this.#sideOn) return;
-    const full = this.#toolBlocksFull;
-    this.#scrollback.print("tool", toolBlock(tool, full, this.#printCols), undefined, undefined, (w) => toolBlock(tool, full, w + 2));
-  }
+  // ---- the live region ----
 
   #refreshPlace(): void {
     void this.#placeOf?.()
@@ -736,53 +572,6 @@ export class App {
       .catch(() => undefined);
   }
 
-  #finishRun(reason: RunResult["reason"], dropped: string[] | undefined, detail?: string): void {
-    this.#refreshPlace();
-    if (this.#side.visible(this.#viewportCols)) this.#side.refresh();
-    this.#running = false;
-    this.#calls = [];
-    this.#queued = [];
-    this.#scrollback.closeBlock();
-    this.#thinkingSeen = false;
-    if (dropped !== undefined && dropped.length > 0) {
-      // Nothing the user typed is ever lost: it goes back into the editor.
-      const back = dropped.join("\n");
-      const current = this.#editor.text.trim();
-      this.#editor.setText(current === "" ? back : `${back}\n${current}`);
-      this.#marker.alert("Interrupted — your queued messages are back in the editor");
-    } else if (reason === "aborted") {
-      this.#marker.alert("Interrupted");
-    } else if (reason === "error") {
-      // A failed run says why where it happened, on a band like a failed tool's; the marker points at it.
-      const why = detail ?? "unknown error";
-      this.#scrollback.print("tool", errorBlock(why, this.#scrollback.width), undefined, undefined, (w) => errorBlock(why, w));
-      this.#marker.warn("Stopped — error");
-    } else if (reason === "limit") {
-      // A run that stops on its own must say why, or it looks like the model gave up.
-      this.#marker.warn(`Stopped — ${detail ?? reason}`);
-    }
-    this.render();
-  }
-
-  #syncQueued(steer: string[], followUp: string[]): void {
-    this.#queued = [
-      ...steer.map((text) => ({ kind: "steer" as const, text: text })),
-      ...followUp.map((text) => ({ kind: "followUp" as const, text: text })),
-    ];
-    this.render();
-  }
-
-  #echoUser(text: string): void {
-    // Closing first keeps the order true: what was already streamed stays above the message.
-    this.#scrollback.closeBlock();
-    // kinoko's own words to the model (a background job ended) are not the user's.
-    const note = `⚙ ${text.slice(9).split("\n")[0]}`;
-    if (text.startsWith("[kinoko] ")) this.#scrollback.print("system", formatBlock("system", note, this.#scrollback.width), undefined, undefined, (w) => formatBlock("system", note, w));
-    else this.#scrollback.print("user", formatBlock("user", text));
-    this.render();
-  }
-
-  // ---- the live region ----
 
   /** The transcript's columns: the window's, less the side column's when it is on. */
   get #printCols(): number | undefined {
@@ -813,18 +602,19 @@ export class App {
     // The block cursor may sit one column past the text, plus the renderer's margins.
     const editorWidth = Math.max(1, (cols ?? 80) - 3);
     const view = this.#editor.view(wrapTo(editorWidth));
+    const { compacting, approval } = this.#run;
     return liveRegion({
       open: this.#scrollback.open,
-      tools: this.#toolLines(),
+      tools: this.#run.toolLines(),
       // Until the result is in, the bullet fades in and out (the render timer repaints each step).
-      pulse: this.#tool || this.#calls.length > 0 ? pulseLevel(Date.now()) : undefined,
+      pulse: this.#run.pulse(),
       toolGap: this.#scrollback.printedAny,
       // While compacting: mushrooms and how far it is (the clock moves them on each frame).
-      marker: this.#compacting ? compactingNote(this.#compacting, Date.now()) : this.#marker.text,
-      markerAlert: !this.#compacting && this.#marker.tone === "alert",
-      markerCream: this.#compacting !== undefined || this.#marker.tone === "info",
-      queued: this.#queued,
-      approval: this.#approval === undefined ? undefined : approvalRows(this.#approval),
+      marker: compacting ? compactingNote(compacting, Date.now()) : this.#marker.text,
+      markerAlert: !compacting && this.#marker.tone === "alert",
+      markerCream: compacting !== undefined || this.#marker.tone === "info",
+      queued: this.#run.queued,
+      approval: approval === undefined ? undefined : approvalRows(approval),
       editorLines: view.lines,
       editorRow: view.row,
       editorCol: view.col,
@@ -1236,7 +1026,7 @@ export class App {
       session: () => {
         const s = this.#session;
         if (s === undefined) return "no session";
-        const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#tokens.context, window: this.#models.contextWindow };
+        const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#run.tokens.context, window: this.#models.contextWindow };
         return stripAnsi(sessionLines(facts, 60).join("\n"));
       },
       told: (note) => {
@@ -1251,7 +1041,7 @@ export class App {
     const s = this.#session;
     return {
       dir: s ? dirname(s.path) : sessionDir(this.#cwd),
-      current: s ? { id: s.meta.id, context: this.#tokens.context, window: this.#models.contextWindow } : undefined,
+      current: s ? { id: s.meta.id, context: this.#run.tokens.context, window: this.#models.contextWindow } : undefined,
       resume: this.#resumeOf
         ? (path) => {
             this.#closeMenu();
@@ -1281,7 +1071,7 @@ export class App {
 
   /** /new: a new session, the model with no history; counters and plan start again. */
   async #newSession(): Promise<void> {
-    if (this.#running) {
+    if (this.#run.running) {
       this.#marker.warn("a run is going: Esc it first, then /new");
       return;
     }
@@ -1291,9 +1081,7 @@ export class App {
     }
     const { session, intro } = await this.#newSessionOf();
     this.#session = session;
-    this.#tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
-    this.#cost = 0;
-    this.#queued = [];
+    this.#run.reset();
     this.#side.history([]);
     this.#clearScreen();
     this.intro(intro);
@@ -1302,16 +1090,14 @@ export class App {
 
   /** /sessions' R: that session's conversation, in place of this one (the model in use stays). */
   async #resumeSession(path: string): Promise<void> {
-    if (this.#running) {
+    if (this.#run.running) {
       this.#marker.warn("a run is going: Esc it first, then resume");
       return;
     }
     const { session, intro } = (await this.#resumeOf?.(path)) ?? {};
     if (session === undefined || intro === undefined) return;
     this.#session = session;
-    this.#tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
-    this.#cost = 0;
-    this.#queued = [];
+    this.#run.reset();
     this.#clearScreen();
     this.intro(intro);
     this.replay(this.#agent.messages, `resumed session ${session.meta.id}`);
