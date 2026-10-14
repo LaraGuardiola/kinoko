@@ -1017,3 +1017,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## release/v0.3.0: history across runs, the model check, stopping a shell from the phone, app.ts in parts (branch release/v0.3.0)
 - package.json 0.3.0; CHANGELOG 0.3.0 (the four branches of the 0.3.0 list the user chose).
 - Tag v0.3.0 on main: release.yml builds and publishes.
+
+## docs/visualizer: the flow visualizer's design document (branch docs/visualizer)
+- The next item of the handoff: docs/visualizer.md, a draft for the owner to review before any code. It settles the machines (17, each with its one-line "why" and its source), the events (five new small ones: request, prefill, gate, appended, guard; contents fetched with `inspect` instead of streamed), where it lives (recommended: a page served by `kinoko serve` at /flow, a client of the hub like the phone app; replay of a saved run for the world), clicking a machine, breakpoints (approvals-like waits at four phase boundaries, abortable, no cost when unset), the look (Factorio-like SVG board, the TUI's palette, a vertical layout on the phone) and the order of work (events → live page → replay → breakpoints).
+- Not done: no code. Five open questions at its end are the owner's (hub page or own repo, name, live or replay first, caption language, breakpoints in the TUI).
