@@ -19,11 +19,10 @@ import { replayBlocks } from "./replay.ts";
 import { approvalKey, approvalRows } from "./approval.ts";
 import type { ApprovalView } from "./approval.ts";
 import { Menu } from "./menu.ts";
-import type { ListPage, MenuItem } from "./menu.ts";
+import type { MenuItem } from "./menu.ts";
 import { copyText } from "./clipboard.ts";
-import { THINKING, copyPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { copyPage } from "./menu-pages.ts";
 import { snippets } from "./snippets.ts";
-import type { ThinkingProfile } from "./menu-pages.ts";
 import type { CommandHost } from "../commands.ts";
 import type { Catalog, Change } from "../catalog.ts";
 import { actionFor } from "./keys.ts";
@@ -31,7 +30,6 @@ import type { QueuedView, Region } from "./view.ts";
 import type { Agent } from "../loop.ts";
 import type { Session } from "../session.ts";
 import type { Image, Message } from "../types.ts";
-import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
 import { FilePicker } from "./files.ts";
 import { compactingNote } from "./sprout.ts";
@@ -44,6 +42,8 @@ import { ExtensionsMenu } from "./extensions-menu.ts";
 import { RunView } from "./run-view.ts";
 import { SessionActions } from "./session-actions.ts";
 import { SlashMenu } from "./slash-menu.ts";
+import { SlashCommands } from "./slash-commands.ts";
+import { ThinkingLevel } from "./thinking-level.ts";
 import type { ModelsHost } from "./model-switch.ts";
 import { COPY, copyFor } from "./code.ts";
 import { SidePanel } from "./side.ts";
@@ -134,9 +134,8 @@ export class App {
   #extensions: ExtensionsMenu;
   #parser = new KeyParser();
   #editor: Editor;
-  #thinking: string | undefined;
-  #profile: string | undefined;
-  #budgets: boolean;
+  #thinking: ThinkingLevel;
+  #commands: SlashCommands;
   #menu = new Menu();
   #slash: SlashMenu;
   #models: ModelSwitch;
@@ -178,9 +177,13 @@ export class App {
     this.#scrollback = new Scrollback({ renderer: this.#renderer, state: () => this.#state(), columns: () => this.#printCols });
     this.#startup = new StartupPanel({ scrollback: this.#scrollback, renderer: this.#renderer, current: opts.capabilities, render: () => this.render() });
     this.#editor = new Editor({ history: opts.history?.sent, onRemember: opts.history?.add });
-    this.#thinking = opts.thinking;
-    this.#profile = opts.thinkingProfile;
-    this.#budgets = opts.budgets ?? false;
+    this.#thinking = new ThinkingLevel({
+      agent: () => this.#agent,
+      label: opts.thinking,
+      name: opts.thinkingProfile,
+      budgets: opts.budgets ?? false,
+      told: (note) => this.#marker.inform(note),
+    });
     this.#catalogs = { extensions: opts.extensions, skills: opts.skills };
     // Every install, removal or switch also brings the [Capabilities] lines up to date.
     const apply = opts.apply;
@@ -266,6 +269,24 @@ export class App {
       intro: (text) => this.intro(text),
       replay: (messages, note) => this.replay(messages, note),
       closeMenu: () => this.#slash.close(),
+      render: () => this.render(),
+    });
+    this.#commands = new SlashCommands({
+      agent: () => this.#agent,
+      scrollback: this.#scrollback,
+      marker: this.#marker,
+      models: this.#models,
+      sessions: this.#sessions,
+      run: this.#run,
+      thinking: this.#thinking,
+      startup: this.#startup,
+      extensionCommands: this.#extensionCommands,
+      jobs: this.#jobs,
+      catalogs: this.#catalogs,
+      apply: this.#apply,
+      clearScreen: () => this.#clearScreen(),
+      quit: () => this.#quit(),
+      shell: (command) => this.#shell(command),
       render: () => this.render(),
     });
     this.#refreshPlace();
@@ -644,7 +665,7 @@ export class App {
       editorCol: view.col,
       status: this.statusLine,
       place: this.#place,
-      thinking: this.#thinking,
+      thinking: this.#thinking.label,
       jobs: jobsLabel(this.#jobs?.running ?? 0),
       menu: this.#slash.rows(),
       tailCols,
@@ -656,46 +677,13 @@ export class App {
   // ---- slash commands ----
 
   /** Runs a slash command. Returns false when the name is unknown. */
-  async command(input: string): Promise<boolean> {
-    const [name = ""] = input.replace(/^\//, "").split(" ");
-    switch (name) {
-      case "help":
-        this.#scrollback.print("system", helpText(this.#scrollback.width), undefined, undefined, (w) => helpText(w));
-        this.render();
-        return true;
-      case "model":
-        this.#scrollback.print("system", `model: ${modelName(this.#models.model)}  context: ${this.#models.contextWindow} tokens`);
-        this.render();
-        return true;
-      case "compact": {
-        const done = await this.#agent.compactNow();
-        if (!done) this.#marker.warn("nothing to compact yet");
-        this.render();
-        return true;
-      }
-      case "fork": {
-        const moved = await this.#sessions.fork();
-        this.#scrollback.print("system", moved);
-        this.render();
-        return true;
-      }
-      case "clear":
-        this.#clearScreen();
-        this.render();
-        return true;
-      case "new":
-        await this.#sessions.startNew();
-        this.render();
-        return true;
-      case "quit":
-        this.#quit();
-        return true;
-      case "shell":
-        await this.#shell(input.replace(/^\/?shell\s*/, ""));
-        return true;
-      default:
-        return this.#extensionCommand(name, input.replace(/^\/?\S+\s*/, ""));
-    }
+  command(input: string): Promise<boolean> {
+    return this.#commands.run(input);
+  }
+
+  /** What the phone's slash commands act on (through kinoko serve): this TUI, so its screen follows. */
+  commandHost(): CommandHost {
+    return this.#commands.phoneHost();
   }
 
   /** Started with no model: the panel is followed by how to set one up. */
@@ -711,20 +699,6 @@ export class App {
     const block = (width: number): string => `${ANSI.cream}${formatBlock("system", note, width)}${ANSI.reset}`;
     this.#scrollback.print("system", block(this.#scrollback.width), this.#scrollback.printedAny, undefined, block); // wrapped by words, again on a resize
     this.render();
-  }
-
-  /** An extension's command: what it answers, printed here; one that throws says so. */
-  async #extensionCommand(name: string, args: string): Promise<boolean> {
-    const run = this.#extensionCommands?.get(name);
-    if (run === undefined) return false;
-    this.#scrollback.print("system", `${ANSI.dim}/${name}${args ? ` ${args}` : ""}…${ANSI.reset}`);
-    this.render();
-    const answer = await Promise.resolve()
-      .then(() => run(args))
-      .catch((e: unknown) => `/${name} failed: ${e instanceof Error ? e.message : String(e)}`);
-    this.#scrollback.print("system", answer);
-    this.render();
-    return true;
   }
 
   // ---- the slash menu ----
@@ -814,7 +788,7 @@ export class App {
   }
 
   #openRoot(item: MenuItem): void {
-    if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
+    if (item.name === "thinking") this.#menu.open(this.#thinking.page());
     else if (item.name === "models") this.#models.open();
     else if (item.name === "extensions" || item.name === "skills") this.#extensions.openCatalog(item.name);
     else if (item.name === "sessions") openSessions(this.#sessions.menuHost());
@@ -847,72 +821,6 @@ export class App {
     const lines = text.split("\n").length;
     this.#marker.inform(`copied: ${lines} line${lines === 1 ? "" : "s"}`);
     void copyText(text, (data) => this.#write(data), AbortSignal.timeout(5000));
-  }
-
-  #thinkingPage(): ListPage {
-    return thinkingPage(this.#profile, (profile) => this.#chooseThinking(profile));
-  }
-
-  #chooseThinking(profile: ThinkingProfile): string {
-    // Only an engine that takes a budget gets one; elsewhere the effort alone is the level.
-    this.#agent.setThinking(profile.effort, this.#budgets ? profile.budget : undefined);
-    this.#profile = profile.name;
-    this.#thinking = profileLabel(profile, this.#budgets);
-    this.#marker.inform(`thinking: ${this.#thinking} from the next request`);
-    return this.#marker.text;
-  }
-
-  /** What the phone's slash commands act on (through kinoko serve): this TUI, so its screen follows. */
-  commandHost(): CommandHost {
-    return {
-      agent: this.#agent,
-      ...(this.#jobs ? { jobs: this.#jobs } : {}),
-      catalogs: this.#catalogs,
-      apply: this.#apply,
-      newSession: async () => {
-        await this.#sessions.startNew();
-        this.render();
-      },
-      thinking: {
-        current: () => this.#profile,
-        set: (name) => {
-          const profile = THINKING.find((p) => p.name === name);
-          if (profile === undefined) return `no thinking profile ${name}`;
-          const note = this.#chooseThinking(profile);
-          this.render();
-          return note;
-        },
-      },
-      models: {
-        list: (signal) => this.#models.list(signal),
-        set: (name) => {
-          const note = this.#models.useByName(name);
-          this.render();
-          return note;
-        },
-      },
-      clear: () => {
-        this.#clearScreen();
-        this.render();
-      },
-      fork: async () => {
-        const moved = await this.#sessions.fork();
-        this.#scrollback.print("system", moved);
-        this.render();
-        return moved;
-      },
-      session: () => {
-        const s = this.#sessions.session;
-        if (s === undefined) return "no session";
-        const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#run.tokens.context, window: this.#models.contextWindow };
-        return stripAnsi(sessionLines(facts, 60).join("\n"));
-      },
-      told: (note) => {
-        this.#marker.inform(note);
-        void this.#startup.refresh(); // a profile switched from the phone: the panel says which
-        this.render();
-      },
-    };
   }
 
   /** /clear: the screen and the terminal's scrollback go; the conversation stays as it was. */
