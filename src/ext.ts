@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { uniqueDirs } from "./context.ts";
 import { readDisabled } from "./disabled.ts";
 import type { Message, ProviderRequest, Tool } from "./types.ts";
-import type { RunResult } from "./loop.ts";
+import type { RunResult } from "./agent-events.ts";
 import { userHome } from "./home.ts";
 import { extensionPlatforms, runsHere } from "./platforms.ts";
 

@@ -4,7 +4,7 @@
 // and, when the run ends, why it ended.
 
 import type { CompactProgress } from "../compact.ts";
-import type { AgentEvent, RunResult } from "../loop.ts";
+import type { AgentEvent, RunResult } from "../agent-events.ts";
 import type { Message } from "../types.ts";
 import { answeredNote } from "./approval.ts";
 import type { ApprovalView } from "./approval.ts";

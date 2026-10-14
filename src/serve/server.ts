@@ -8,7 +8,7 @@ import { isPipe } from "./link.ts";
 import { dirname, join } from "node:path";
 import { stat } from "node:fs/promises";
 import type { Server, ServerWebSocket } from "bun";
-import type { AgentEvent } from "../loop.ts";
+import type { AgentEvent } from "../agent-events.ts";
 import type { Image, Message } from "../types.ts";
 import { Agents, lineQueue } from "./agents.ts";
 import type { Child, Hello, Spawn } from "./agents.ts";

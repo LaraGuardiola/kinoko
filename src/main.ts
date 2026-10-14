@@ -4,7 +4,7 @@ import type { Provider } from "./types.ts";
 import { isLocal, listModels, openaiCompat } from "./providers/openai-compat.ts";
 import { anthropic, modelInfo } from "./providers/anthropic.ts";
 import { Agent } from "./loop.ts";
-import type { AgentEvent } from "./loop.ts";
+import type { AgentEvent } from "./agent-events.ts";
 import { Session, findSession, latestSession } from "./session.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";

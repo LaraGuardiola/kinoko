@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Extensions } from "../ext.ts";
 import { Agent } from "../loop.ts";
-import type { AgentEvent } from "../loop.ts";
+import type { AgentEvent } from "../agent-events.ts";
 import type { Message, Provider, StreamEvent, Tool } from "../types.ts";
 
 /** A model that calls `bash` with each command in turn (one per reply); "" or none says "done". */

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { MAX_NUDGES, NUDGE_EMPTY, NUDGE_LENGTH, NUDGE_REPEAT, REPEAT_LINES, STOP_CALLS, WARN_CALLS } from "../guard.ts";
-import { Agent, type AgentEvent } from "../loop.ts";
+import type { AgentEvent } from "../agent-events.ts";
+import { Agent } from "../loop.ts";
 import type { Provider, StreamEvent } from "../types.ts";
 
 function scripted(turns: StreamEvent[][]): Provider & { requests: number } {

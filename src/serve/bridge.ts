@@ -13,7 +13,7 @@ import type { Image } from "../types.ts";
 import type { ApprovalBy } from "../approvals.ts";
 import { integrationsFile, readIntegrations } from "../integrations.ts";
 import type { TelegramSettings } from "../integrations.ts";
-import type { AgentEvent } from "../loop.ts";
+import type { AgentEvent } from "../agent-events.ts";
 import type { AgentInfo, Agents, StartOptions } from "./agents.ts";
 import { HELP, agentsText, answeredText, approvalText, endedText, stateWord } from "./bridge-text.ts";
 import type { Project } from "./projects.ts";

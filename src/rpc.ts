@@ -5,8 +5,8 @@
 // steer, follow_up and abort work while a run is in progress, because they go straight to the
 // Agent. One request at a time: a second prompt while busy is refused, never queued silently.
 
-import type { Agent, RunResult } from "./loop.ts";
-import type { AgentEvent } from "./loop.ts";
+import type { AgentEvent, RunResult } from "./agent-events.ts";
+import type { Agent } from "./loop.ts";
 import type { ApprovalBy } from "./approvals.ts";
 import type { Image, Message } from "./types.ts";
 import { commandList, runCommand } from "./commands.ts";
