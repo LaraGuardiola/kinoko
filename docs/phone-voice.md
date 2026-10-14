@@ -78,7 +78,8 @@ agent watched from the phone with both on), both speak; the speaker button is th
    the button, the stops. Checked on the emulator against this machine's hub, then by the owner on
    the phone (the release APK).
 
-## 6. Open questions
+## 6. Decisions (the owner, 2026-10-15)
 
-1. The button in the chat's top bar, or a switch in settings (for all agents)?
-2. Should a phone with the speaker on also read replies of agents started from the TUI?
+1. The speaker button sits in each chat's top bar.
+2. A phone with it on also reads replies of agents started from a terminal; if that terminal is in
+   voice mode too, both speak.
