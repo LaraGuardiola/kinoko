@@ -998,3 +998,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Tests: prompt-history (order, several lines, 0600, a cut line, the cut back), editor 11b (told once, earlier runs reachable with ↑).
 - Checked live (tmux, test HOME): sent a message, quit, a new kinoko brought it back with ↑.
 - Not done: messages typed on the phone are not in it (they never pass the editor).
+
+## feat/stop-shell: stop a background shell from the phone (branch feat/stop-shell; kinoko-android feat/stop-shell)
+- Idea 3 of the 0.3.0 list: the app could see the shells but not stop them.
+- commands.ts `/jobs stop #ID`: stops it with Jobs.kill (its whole process group, as the TUI's jobs page), then answers with its window ("killed after …"); an ended one is left as it is; an unknown id says so. The model is told as for any stopped job. protocol.md says it.
+- App: a running shell's window (title "#N · running") has a red Stop; the first tap arms it ("Tap again to stop"), the second sends `stop #N`. The window then follows "#N" (not the stop again). `runningShell` is pure and tested on the JVM.
+- Tests: commands (stop → killed and the window, again → nothing more, unknown), app (which window can be stopped).
+- Checked live (test hub 7880, emulator, local Qwen): the model started `ping` in the background; the window's Stop, twice: "#1 · killed after 1m 8s", the ⚙ label gone, no ping left on the machine.
