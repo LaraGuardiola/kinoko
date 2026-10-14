@@ -88,12 +88,13 @@ Each repo has its own AGENTS.md. kinoko-android: `./gradlew testDebugUnitTest as
   a non-blocking `music wait` in cliamp.
 - Android: the release build still signs with the debug key; no npm package; no FUNDING.yml.
 
-## Next: Kinoko Lab, the harness flow visualizer (in progress)
+## Kinoko Lab, the harness flow visualizer (done, 2026-10-14)
 
-Design reviewed and decided: docs/visualizer.md (its "Decisions" and "Order of work"). Done:
-step 1, the loop's finer events and `inspect` (feat/lab-events); step 2, the live page at `/lab`
-(feat/lab-page: src/serve/lab, `kinoko serve lab`). Next: step 3 replay, step 4 breakpoints (from
-the page only: the owner does not want the TUI touched). To see it: a test hub
+Design: docs/visualizer.md (its "Decisions" and "Order of work"). Shipped on main: step 1, the
+loop's finer events and `inspect` (feat/lab-events); step 2, the live page at `/lab`
+(feat/lab-page: src/serve/lab, `kinoko serve lab`, a QR for the LAN and one for Tailscale).
+The owner does not miss replay (step 3): dropped. Breakpoints (step 4) stay an idea only, not a
+to-do; if ever built, from the page only (the TUI is not touched). To see it: a test hub
 (`kinoko serve --local --no-lan --port 7880` with a test HOME), `kinoko serve lab` with the same
 HOME, a TUI with that HOME (it links itself), and headless Chromium driven over CDP for screenshots
 (`chromium --headless=new --remote-debugging-port=9333`).
