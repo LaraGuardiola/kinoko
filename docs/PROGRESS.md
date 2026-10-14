@@ -967,3 +967,4 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Tests: loop (told once, not for the same model), server (the list carries the new model).
 - Checked live (test hub on 7880, emulator): /models → MiniCPM from the app; back on the list the card said MiniCPM-V-4.7-35B-A3B.
 - No app change: it already draws AgentInfo.model from each list.
+- Then, asked by the user on the same branch: the TUI's note after picking a model had the inverse (white) band instead of the cream of the notes that only inform. The model's notes (picked, saved, removed, window unknown) and the thinking level's are quiet now; "could not …" ones keep the band. Test: the models pick writes its note in cream, never inverse.

@@ -839,6 +839,11 @@ describe("slash menu", () => {
     h.press(DOWN);
     h.press("\r");
     expect(h.app.statusLine).toContain("beta");
+    // The note says it in cream, like the other notes that only inform (no inverse band).
+    await until(h, () => h.out.join("").includes("model: beta"));
+    const written = h.out.join("");
+    expect(written).toContain("\x1b[38;2;238;222;186mmodel: beta");
+    expect(written).not.toContain("\x1b[7mmodel: beta");
     h.press("go\r");
     await settle(h.agent);
     expect(h.calls()[0]?.model).toBe("beta");
