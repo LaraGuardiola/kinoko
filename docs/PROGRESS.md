@@ -960,3 +960,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - editor.ts `#arrow`: Up/Down still move between lines; on the first (last) line the cursor goes to its start (end); from either end of the text the arrow goes to the previous (next) message, Ctrl-P/Ctrl-N as before. A recalled one-line message keeps going with ↑ (its cursor sits at the end); one of several lines is walked line by line first. The draft being typed comes back past the newest one.
 - Tests: editor 5 (the edges now go to the line's start/end instead of staying put), 12b (empty, several lines, mid-text, the draft back). Help page and README say it.
 - Not done: the history is still this kinoko's only (not kept across runs nor taken from a resumed session).
+
+## fix/agent-model: the phone's agents list follows a switched model (branch fix/agent-model)
+- Reported by the user: after switching the model (from the app or the TUI) the app's agents list kept the one the agent started with.
+- The hub asked the agent for its model once, when it adopted it. Now `Agent.setModel` tells a new event `{ type: "model", model }` when it changes (not when it is the same); the hub takes it like `jobs`: updates `AgentInfo.model`, sends the list again, never replays it. Both an rpc agent and a TUI linked to the hub pass it on (their events go through Rpc). protocol.md lists it.
+- Tests: loop (told once, not for the same model), server (the list carries the new model).
+- Checked live (test hub on 7880, emulator): /models → MiniCPM from the app; back on the list the card said MiniCPM-V-4.7-35B-A3B.
+- No app change: it already draws AgentInfo.model from each list.

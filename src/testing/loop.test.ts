@@ -300,9 +300,13 @@ describe("Agent loop with abort, steer and follow-up", () => {
     } as unknown as RealProvider;
     const agent = new Agent({ provider, model: "a", system: (model) => `Model: ${model}`, tools: [], maxTurns: 10, maxCost: 100 });
     await agent.prompt("one");
+    const told: string[] = [];
+    agent.on((e) => e.type === "model" && told.push(e.model));
     agent.setModel("b");
+    agent.setModel("b"); // the same one: nothing to tell
     await agent.prompt("two");
     expect(systems).toEqual(["Model: a", "Model: b"]);
+    expect(told).toEqual(["b"]);
   });
 
   test("sendNow cuts the streaming reply and delivers the steer at once; its thinking and text are kept, its calls are not", async () => {

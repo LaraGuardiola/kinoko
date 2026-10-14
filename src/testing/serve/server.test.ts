@@ -347,7 +347,7 @@ describe("serve: the hub", () => {
     }
   });
 
-  test("background jobs: the agent says how many run, the list carries it (none: no field), never replayed", async () => {
+  test("background jobs and the model: the agent says them, the list carries them (no jobs: no field), never replayed", async () => {
     const child = { emit: (_e: object): void => undefined }; // what the fake agent says, once it runs
     const spawn: Spawn = (_cmd, cwd): Child => {
       const out = pipe();
@@ -374,9 +374,12 @@ describe("serve: the hub", () => {
       await Bun.sleep(20);
       changes.push(hub.agents.info(info.id)?.jobs ?? 0);
       child.emit({ type: "jobs", running: 0 });
+      // A model switched later (from the app, the TUI, Telegram): the list says the new one.
+      child.emit({ type: "model", model: "other" });
       await Bun.sleep(20);
       expect(changes).toEqual([2]);
       expect(hub.agents.info(info.id)?.jobs).toBeUndefined();
+      expect(hub.agents.info(info.id)?.model).toBe("other");
       expect((await hub.agents.snapshot(info.id))?.live).toEqual([]);
     } finally {
       hub.stop();
