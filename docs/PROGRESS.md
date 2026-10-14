@@ -1013,3 +1013,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - New tests: marker, scrollback (order and gaps, the open block, prints held while the shell has the terminal). The 538 before pass unchanged.
 - Checked live (tmux, test HOME): a reply with thinking and a bash call, the root menu, /models, /extensions, /help, ↑, Esc mid-run (Interrupted in red), /sessions. Ctrl+O at 110 columns behaves as main's build does (compared side by side).
 - Not done: app.ts is still over the ~300 rule (its constructor alone is ~190 lines of wiring); run-view.ts is 324. Splitting further would hide the map rather than clarify it.
+
+## release/v0.3.0: history across runs, the model check, stopping a shell from the phone, app.ts in parts (branch release/v0.3.0)
+- package.json 0.3.0; CHANGELOG 0.3.0 (the four branches of the 0.3.0 list the user chose).
+- Tag v0.3.0 on main: release.yml builds and publishes.
