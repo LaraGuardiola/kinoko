@@ -48,6 +48,7 @@ import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./ima
 import { FilePicker } from "./files.ts";
 import { compactingNote } from "./sprout.ts";
 import { ANSI, cells, stripAnsi } from "./style.ts";
+import { Marker } from "./marker.ts";
 import { COPY, copyFor } from "./code.ts";
 import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
@@ -203,9 +204,8 @@ export class App {
   #approval: ApprovalView | undefined; // a call waiting for the user's answer
   #toolBlocksFull = false; // ctrl+t
   #compacting: CompactProgress | undefined; // a summary on its way: the note animates
-  #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
+  #marker = new Marker(); // the one-line note above the editor
   #retrying = false; // the marker says a retry is coming: the next reply's first token clears it
-  #quiet = ""; // a marker that only informs (an extension or skill installed, a model or thinking level picked): cream, no background
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
@@ -373,7 +373,7 @@ export class App {
   }
 
   get marker(): string {
-    return this.#marker;
+    return this.#marker.text;
   }
 
   /** The cwd/branch line under the editor, as it stands now (not as last painted). */
@@ -492,7 +492,7 @@ export class App {
     }
     this.#editor.remember(text);
     this.#editor.clear();
-    this.#marker = "";
+    this.#marker.clear();
     if (this.#agent.state === "running") {
       // Already running: this is a steer. It shows in the queued area until it reaches the model
       // ("delivered"), and only then joins the transcript.
@@ -512,7 +512,7 @@ export class App {
     this.#editor.remember(text);
     this.#editor.clear();
     this.#running = true;
-    this.#marker = "";
+    this.#marker.clear();
     if (this.#agent.state === "running") {
       this.#agent.followUp(text, this.#images.attached(text));
       this.render();
@@ -536,16 +536,16 @@ export class App {
   async #shell(command: string): Promise<void> {
     this.#closeMenu();
     if (this.#handOver === undefined) {
-      this.#marker = "no terminal to lend here";
+      this.#marker.warn("no terminal to lend here");
       this.render();
       return;
     }
     if (this.#running) {
-      this.#marker = "a run is going: Esc it first, then the shell";
+      this.#marker.warn("a run is going: Esc it first, then the shell");
       this.render();
       return;
     }
-    this.#marker = "";
+    this.#marker.clear();
     this.#print("system", command ? `${ANSI.dim}!${ANSI.reset} ${command}` : `${ANSI.dim}your shell: exit (or Ctrl-D) comes back to kinoko${ANSI.reset}`);
     this.#renderer.update(this.#state());
     this.#renderer.flush();
@@ -559,7 +559,7 @@ export class App {
     this.#mouse = false;
     this.#write("\x1b[?1000h\x1b[?1006h");
     for (const print of held) print();
-    if (code !== 0) this.#marker = `${command ? "the command" : "the shell"} exited with ${code}`;
+    if (code !== 0) this.#marker.warn(`${command ? "the command" : "the shell"} exited with ${code}`);
     this.render();
   }
 
@@ -596,7 +596,7 @@ export class App {
   }
 
   #addImage(image: Image | string): void {
-    if (typeof image === "string") this.#marker = `Image not attached: ${image}`;
+    if (typeof image === "string") this.#marker.warn(`Image not attached: ${image}`);
     else this.#editor.insert(`${this.#images.add(image)} `);
     this.render();
   }
@@ -623,7 +623,7 @@ export class App {
         // A run this terminal did not start: a prompt from the phone, through kinoko serve.
         if (!this.#running) {
           this.#running = true;
-          this.#marker = "";
+          this.#marker.clear();
           this.#echoUser(e.prompt);
         }
         return;
@@ -693,7 +693,7 @@ export class App {
         return;
       case "compacted":
         this.#compacting = undefined;
-        if (e.keep >= 0) this.#marker = `compacted · ${e.keep} message${e.keep === 1 ? "" : "s"} kept as they were`;
+        if (e.keep >= 0) this.#marker.inform(`compacted · ${e.keep} message${e.keep === 1 ? "" : "s"} kept as they were`);
         this.render();
         return;
       case "retry":
@@ -701,12 +701,12 @@ export class App {
         this.#closeBlock();
         this.#calls = [];
         this.#thinkingSeen = false;
-        this.#marker = `${e.error} · retry ${e.attempt}/${e.of} in ${Math.round(e.inMs / 1000)}s`;
+        this.#marker.warn(`${e.error} · retry ${e.attempt}/${e.of} in ${Math.round(e.inMs / 1000)}s`);
         this.#retrying = true;
         this.render();
         return;
       case "first_token":
-        if (this.#retrying) this.#marker = "";
+        if (this.#retrying) this.#marker.clear();
         this.#retrying = false;
         return;
       case "approval_request":
@@ -716,7 +716,7 @@ export class App {
       case "approval_end": {
         if (this.#approval?.id === e.id) this.#approval = undefined;
         const note = answeredNote(e.allow, e.by);
-        if (note !== "") this.#marker = this.#quiet = note;
+        if (note !== "") this.#marker.inform(note);
         this.render();
         return;
       }
@@ -793,17 +793,17 @@ export class App {
       const back = dropped.join("\n");
       const current = this.#editor.text.trim();
       this.#editor.setText(current === "" ? back : `${back}\n${current}`);
-      this.#marker = "Interrupted — your queued messages are back in the editor";
+      this.#marker.alert("Interrupted — your queued messages are back in the editor");
     } else if (reason === "aborted") {
-      this.#marker = "Interrupted";
+      this.#marker.alert("Interrupted");
     } else if (reason === "error") {
       // A failed run says why where it happened, on a band like a failed tool's; the marker points at it.
       const why = detail ?? "unknown error";
       this.#print("tool", errorBlock(why, this.#width), undefined, undefined, (w) => errorBlock(why, w));
-      this.#marker = "Stopped — error";
+      this.#marker.warn("Stopped — error");
     } else if (reason === "limit") {
       // A run that stops on its own must say why, or it looks like the model gave up.
-      this.#marker = `Stopped — ${detail ?? reason}`;
+      this.#marker.warn(`Stopped — ${detail ?? reason}`);
     }
     this.render();
   }
@@ -917,9 +917,9 @@ export class App {
       pulse: this.#tool || this.#calls.length > 0 ? pulseLevel(Date.now()) : undefined,
       toolGap: this.#printedAny,
       // While compacting: mushrooms and how far it is (the clock moves them on each frame).
-      marker: this.#compacting ? compactingNote(this.#compacting, Date.now()) : this.#marker,
-      markerAlert: !this.#compacting && this.#marker.startsWith("Interrupted"),
-      markerCream: this.#compacting !== undefined || this.#marker.startsWith("compacted") || (this.#quiet !== "" && this.#marker === this.#quiet),
+      marker: this.#compacting ? compactingNote(this.#compacting, Date.now()) : this.#marker.text,
+      markerAlert: !this.#compacting && this.#marker.tone === "alert",
+      markerCream: this.#compacting !== undefined || this.#marker.tone === "info",
       queued: this.#queued,
       approval: this.#approval === undefined ? undefined : approvalRows(this.#approval),
       editorLines: view.lines,
@@ -952,7 +952,7 @@ export class App {
         return true;
       case "compact": {
         const done = await this.#agent.compactNow();
-        if (!done) this.#marker = "nothing to compact yet";
+        if (!done) this.#marker.warn("nothing to compact yet");
         this.render();
         return true;
       }
@@ -1043,7 +1043,7 @@ export class App {
     const column = this.#side.column(this.#viewportCols);
     if (key.name === "ctrl-o") {
       if (column !== undefined) this.#side.toggle();
-      else if (this.#side.todos.length === 0) this.#marker = "no plan yet";
+      else if (this.#side.todos.length === 0) this.#marker.warn("no plan yet");
       else this.#print("system", planLines(this.#side.todos));
       this.render();
       return true;
@@ -1199,12 +1199,12 @@ export class App {
         pick: (item) => {
           const profile = all.find((p) => p.name === item.name);
           if (profile === undefined) return;
-          this.#marker = this.#quiet = `switching to ${profile.title}…`;
+          this.#marker.inform(`switching to ${profile.title}…`);
           void applyProfile(this.commandHost(), home, profile, AbortSignal.timeout(300_000))
             .catch((e: unknown) => `${profile.title}: ${errorText(e)}`)
             .then(async (note) => {
               await this.#refreshCapabilities();
-              this.#marker = this.#quiet = note;
+              this.#marker.inform(note);
               this.render();
             });
         },
@@ -1230,7 +1230,7 @@ export class App {
         this.render();
       },
       note: (text) => {
-        this.#marker = this.#quiet = text;
+        this.#marker.inform(text);
         this.render();
       },
       // The window fills what the menu may take: the screen less the input and its rules.
@@ -1265,7 +1265,7 @@ export class App {
         this.render();
       },
       note: (text) => {
-        this.#marker = this.#quiet = text;
+        this.#marker.inform(text);
         this.render();
       },
       changed: () => void this.#refreshCapabilities(),
@@ -1328,7 +1328,7 @@ export class App {
 
   #copy(text: string): void {
     const lines = text.split("\n").length;
-    this.#marker = this.#quiet = `copied: ${lines} line${lines === 1 ? "" : "s"}`;
+    this.#marker.inform(`copied: ${lines} line${lines === 1 ? "" : "s"}`);
     void copyText(text, (data) => this.#write(data), AbortSignal.timeout(5000));
   }
 
@@ -1341,8 +1341,8 @@ export class App {
     this.#agent.setThinking(profile.effort, this.#budgets ? profile.budget : undefined);
     this.#profile = profile.name;
     this.#thinking = profileLabel(profile, this.#budgets);
-    this.#marker = this.#quiet = `thinking: ${this.#thinking} from the next request`;
-    return this.#marker;
+    this.#marker.inform(`thinking: ${this.#thinking} from the next request`);
+    return this.#marker.text;
   }
 
   /** What the phone's slash commands act on (through kinoko serve): this TUI, so its screen follows. */
@@ -1377,7 +1377,7 @@ export class App {
           const current = this.#saved.find((e) => e.baseUrl === this.#endpoint);
           this.#useModel(this.#saved.find((e) => e.model === name) ?? { model: name, baseUrl: this.#endpoint, apiKey: current?.apiKey ?? "" });
           this.render();
-          return this.#marker;
+          return this.#marker.text;
         },
       },
       clear: () => {
@@ -1397,7 +1397,7 @@ export class App {
         return stripAnsi(sessionLines(facts, 60).join("\n"));
       },
       told: (note) => {
-        this.#marker = this.#quiet = note;
+        this.#marker.inform(note);
         void this.#refreshCapabilities(); // a profile switched from the phone: the panel says which
         this.render();
       },
@@ -1465,13 +1465,13 @@ export class App {
       return { ok: true, note: `${done.note}: ${how}` };
     };
     const install = (name: string): void => {
-      this.#marker = this.#quiet = `${state.entries?.find((e) => e.name === name)?.installed ? "updating" : "installing"} ${name}…`;
+      this.#marker.inform(`${state.entries?.find((e) => e.name === name)?.installed ? "updating" : "installing"} ${name}…`);
       void store
         .install(name, AbortSignal.timeout(300_000))
         .then((done) => settle(name, "install", done))
         .catch((e: unknown) => ({ ok: false, note: `${name} did not install: ${errorText(e)}` }))
         .then(({ ok, note }) => {
-          this.#marker = this.#quiet = note;
+          this.#marker.inform(note);
           const entry = state.entries?.find((e) => e.name === name);
           if (entry && ok) {
             entry.installed = true;
@@ -1486,7 +1486,7 @@ export class App {
         .enable(name, on)
         .then((done) => settle(name, on ? "enable" : "disable", done))
         .then(({ ok, note }) => {
-          this.#marker = this.#quiet = note;
+          this.#marker.inform(note);
           const entry = state.entries?.find((e) => e.name === name);
           if (entry && ok) entry.enabled = on;
           redraw();
@@ -1497,7 +1497,7 @@ export class App {
         .remove(name)
         .then((done) => settle(name, "remove", done))
         .then(({ ok, note }) => {
-          this.#marker = this.#quiet = note;
+          this.#marker.inform(note);
           const entry = state.entries?.find((e) => e.name === name);
           if (entry && ok) entry.installed = false;
           redraw();
@@ -1533,9 +1533,9 @@ export class App {
       .then((saved) => {
         this.#saved = saved;
         if (page) this.#menu.refresh(page, redraw());
-        this.#marker = this.#quiet = `removed ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}`;
+        this.#marker.inform(`removed ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}`);
       })
-      .catch(() => (this.#marker = `could not remove ${modelName(entry.model)}`))
+      .catch(() => this.#marker.warn(`could not remove ${modelName(entry.model)}`))
       .finally(() => this.render());
   }
 
@@ -1547,9 +1547,9 @@ export class App {
       .then((saved) => {
         this.#saved = saved;
         if (page) this.#menu.swap(page, redraw()); // the same model stays selected
-        this.#marker = this.#quiet = `default: ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}, for new sessions`;
+        this.#marker.inform(`default: ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}, for new sessions`);
       })
-      .catch(() => (this.#marker = `could not make ${modelName(entry.model)} the default`))
+      .catch(() => this.#marker.warn(`could not make ${modelName(entry.model)} the default`))
       .finally(() => this.render());
   }
 
@@ -1580,9 +1580,9 @@ export class App {
         ?.save(entry)
         .then((saved) => {
           this.#saved = saved;
-          this.#marker = this.#quiet = `model: ${modelName(entry.model)} at ${host}, saved`;
+          this.#marker.inform(`model: ${modelName(entry.model)} at ${host}, saved`);
         })
-        .catch(() => (this.#marker = `model: ${modelName(entry.model)} at ${host} (could not save it)`))
+        .catch(() => this.#marker.warn(`model: ${modelName(entry.model)} at ${host} (could not save it)`))
         .finally(() => this.render());
     };
     const asking = servedPage(host, undefined, keep);
@@ -1608,7 +1608,7 @@ export class App {
     }
     this.#agent.setModel(entry.model);
     this.#model = entry.model;
-    this.#marker = this.#quiet = `model: ${modelName(entry.model)}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`;
+    this.#marker.inform(`model: ${modelName(entry.model)}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`);
     if (entry.contextWindow) this.#useWindow(entry.contextWindow);
     else this.#learnWindow(entry);
     this.#recordModel(entry, entry.contextWindow);
@@ -1643,7 +1643,7 @@ export class App {
         if (!window) {
           // The last model's window says nothing about this one: the default, as a fresh start has.
           this.#useWindow(DEFAULTS.contextWindow);
-          this.#marker = this.#quiet = `model: ${modelName(entry.model)} (its context window is unknown: ${DEFAULTS.contextWindow.toLocaleString("en-US")}, the default)`;
+          this.#marker.inform(`model: ${modelName(entry.model)} (its context window is unknown: ${DEFAULTS.contextWindow.toLocaleString("en-US")}, the default)`);
           return;
         }
         this.#useWindow(window);
@@ -1681,7 +1681,7 @@ export class App {
   /** Moves the session head back one message; a fork is only ever a pointer move. */
   /** /clear: the screen and the terminal's scrollback go; the conversation stays as it was. */
   #clearScreen(): void {
-    this.#marker = "";
+    this.#marker.clear();
     this.#renderer.update(this.#state());
     this.#renderer.clear();
     this.#printedAny = false;
@@ -1690,11 +1690,11 @@ export class App {
   /** /new: a new session, the model with no history; counters and plan start again. */
   async #newSession(): Promise<void> {
     if (this.#running) {
-      this.#marker = "a run is going: Esc it first, then /new";
+      this.#marker.warn("a run is going: Esc it first, then /new");
       return;
     }
     if (this.#newSessionOf === undefined) {
-      this.#marker = "/new is not available here";
+      this.#marker.warn("/new is not available here");
       return;
     }
     const { session, intro } = await this.#newSessionOf();
@@ -1705,13 +1705,13 @@ export class App {
     this.#side.history([]);
     this.#clearScreen();
     this.intro(intro);
-    this.#marker = this.#quiet = "new session: the model starts with no history";
+    this.#marker.inform("new session: the model starts with no history");
   }
 
   /** /sessions' R: that session's conversation, in place of this one (the model in use stays). */
   async #resumeSession(path: string): Promise<void> {
     if (this.#running) {
-      this.#marker = "a run is going: Esc it first, then resume";
+      this.#marker.warn("a run is going: Esc it first, then resume");
       return;
     }
     const { session, intro } = (await this.#resumeOf?.(path)) ?? {};
@@ -1723,7 +1723,7 @@ export class App {
     this.#clearScreen();
     this.intro(intro);
     this.replay(this.#agent.messages, `resumed session ${session.meta.id}`);
-    this.#marker = this.#quiet = "resumed: the model has that conversation again";
+    this.#marker.inform("resumed: the model has that conversation again");
   }
 
   async #forkHead(): Promise<string> {
