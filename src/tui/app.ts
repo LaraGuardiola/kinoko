@@ -23,11 +23,11 @@ import type { ApprovalView } from "./approval.ts";
 import { MENU_ROWS, Menu, filterRoot, listRows, listWindow, pageRows } from "./menu.ts";
 import type { ListPage, MenuItem } from "./menu.ts";
 import { copyText } from "./clipboard.ts";
-import { ROOT, THINKING, catalogPage, copyPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
+import { ROOT, THINKING, copyPage, helpText, profileLabel, sessionLines, thinkingPage } from "./menu-pages.ts";
 import { snippets } from "./snippets.ts";
 import type { ThinkingProfile } from "./menu-pages.ts";
 import type { CommandHost } from "../commands.ts";
-import type { Catalog, Entry, Outcome, Change } from "../catalog.ts";
+import type { Catalog, Change } from "../catalog.ts";
 import { actionFor } from "./keys.ts";
 import type { QueuedView, Region, ToolLine, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
@@ -44,6 +44,8 @@ import { ANSI, cells, stripAnsi } from "./style.ts";
 import { Marker } from "./marker.ts";
 import { Scrollback } from "./scrollback.ts";
 import { ModelSwitch } from "./model-switch.ts";
+import { StartupPanel } from "./startup-panel.ts";
+import { ExtensionsMenu } from "./extensions-menu.ts";
 import type { ModelsHost } from "./model-switch.ts";
 import { COPY, copyFor } from "./code.ts";
 import type { CompactProgress } from "../compact.ts";
@@ -53,9 +55,8 @@ import { openIntegrations } from "./integrations-menu.ts";
 import { openSessions } from "./sessions-menu.ts";
 import type { SessionsHost } from "./sessions-menu.ts";
 import { jobsLabel, openJobs } from "./jobs-view.ts";
-import { applyProfile, currentProfile, readProfiles } from "../profiles.ts";
 import type { Jobs } from "../jobs.ts";
-import type { FilesState, IntegrationsHost } from "./integrations-menu.ts";
+import type { IntegrationsHost } from "./integrations-menu.ts";
 import { hubRunning, hubSocket } from "../serve/link.ts";
 import { userHome } from "../home.ts";
 
@@ -133,6 +134,8 @@ export class App {
   #agent: Agent;
   #renderer: Renderer;
   #scrollback: Scrollback;
+  #startup: StartupPanel;
+  #extensions: ExtensionsMenu;
   #parser = new KeyParser();
   #editor: Editor;
   #thinking: string | undefined;
@@ -142,12 +145,8 @@ export class App {
   #models: ModelSwitch;
   #catalogs: { extensions?: Catalog; skills?: Catalog };
   #apply: AppOptions["apply"];
-  #capabilities: AppOptions["capabilities"];
   #jobs: Jobs | undefined;
   #extensionCommands: AppOptions["extensionCommands"];
-  /** The block with the [Capabilities] lines as printed (the startup panel, or a fresh copy). */
-  #panel: { text: string; gap: boolean } | undefined;
-  #panelStale = false; // changed while scrolled off screen: printed again when the menu closes
   #newSessionOf: AppOptions["newSession"];
   #resumeOf: AppOptions["resumeSession"];
   #viewportRows: number | undefined;
@@ -195,6 +194,7 @@ export class App {
       rows: () => (this.#viewportRows ?? 23) + 1,
     });
     this.#scrollback = new Scrollback({ renderer: this.#renderer, state: () => this.#state(), columns: () => this.#printCols });
+    this.#startup = new StartupPanel({ scrollback: this.#scrollback, renderer: this.#renderer, current: opts.capabilities, render: () => this.render() });
     this.#editor = new Editor({ history: opts.history?.sent, onRemember: opts.history?.add });
     this.#thinking = opts.thinking;
     this.#profile = opts.thinkingProfile;
@@ -204,10 +204,9 @@ export class App {
     const apply = opts.apply;
     this.#apply = apply && (async (kind, name, change) => {
       const done = await apply(kind, name, change);
-      await this.#refreshCapabilities();
+      await this.#startup.refresh();
       return done;
     });
-    this.#capabilities = opts.capabilities;
     this.#jobs = opts.jobs;
     this.#extensionCommands = opts.extensionCommands;
     this.#jobs?.on(() => this.render()); // the label counts them
@@ -237,6 +236,16 @@ export class App {
     this.#files = new FilePicker(this.#cwd, () => this.render());
     this.#side = new SidePanel(this.#cwd, () => this.render(), opts.changes);
     this.#integrations = opts.integrations;
+    this.#extensions = new ExtensionsMenu({
+      catalogs: this.#catalogs,
+      apply: this.#apply,
+      home: this.#integrations?.home ?? userHome(),
+      menu: this.#menu,
+      marker: this.#marker,
+      commandHost: () => this.commandHost(),
+      changed: () => this.#startup.refresh(),
+      render: () => this.render(),
+    });
     this.#agent.on((e) => this.#onAgentEvent(e));
     this.#refreshPlace();
   }
@@ -284,33 +293,7 @@ export class App {
 
   /** Prints the startup panel above the region; what follows it is spaced like any other block. */
   intro(text: string, gap = false): void {
-    this.#panel = { text, gap };
-    this.#panelStale = false;
-    this.#scrollback.print("system", formatBlock("system", text, this.#scrollback.width), gap, "capabilities", (w) => formatBlock("system", text, w));
-  }
-
-  /** The [Capabilities] lines as they are now: rewritten in place while on screen, else marked
-   *  to be printed again once the menu closes. */
-  async #refreshCapabilities(): Promise<void> {
-    const panel = this.#panel;
-    const fresh = await this.#capabilities?.().catch(() => undefined);
-    if (panel === undefined || fresh === undefined) return;
-    if (this.#scrollback.later(() => void this.#refreshCapabilities())) return;
-    const text = withCapabilities(panel.text, fresh);
-    if (text === panel.text) return;
-    panel.text = text;
-    const printed = formatBlock("system", text, this.#scrollback.width);
-    const source = (w: number): string => `${panel.gap ? "\n" : ""}${formatBlock("system", text, w)}`;
-    if (!this.#renderer.rewrite("capabilities", panel.gap ? `\n${printed}` : printed, source)) this.#panelStale = true;
-    this.render();
-  }
-
-  /** The menu closed: capabilities that changed off screen are printed again, here. */
-  #menuClosed(): void {
-    if (!this.#panelStale || this.#panel === undefined) return;
-    const { lines, at, end } = capabilitiesSection(this.#panel.text);
-    if (at < 0) return;
-    this.intro(lines.slice(at, end).join("\n"), true);
+    this.#startup.print(text, gap);
   }
 
   /** Updates the available terminal height after a resize. */
@@ -1029,7 +1012,7 @@ export class App {
       // A page goes back to the root; the root closes, back to an empty input.
       if (!this.#menu.back()) {
         this.#editor.clear();
-        this.#menuClosed();
+        this.#startup.menuClosed();
       }
     } else if (key.name === "enter" && !key.alt) {
       if (page?.kind === "list") {
@@ -1098,36 +1081,7 @@ export class App {
   #closeMenu(): void {
     this.#menu.close();
     this.#editor.clear();
-    this.#menuClosed();
-  }
-
-  /** The profiles, the one in use marked; Enter switches to one (installs, switches, thinking, asks). */
-  #openProfiles(): void {
-    const home = this.#integrations?.home ?? userHome();
-    const loading: ListPage = { kind: "list", title: "Profiles", items: [], empty: "reading…", pick: () => undefined, stay: true };
-    this.#menu.open(loading);
-    void Promise.all([readProfiles(home), currentProfile(home)]).then(([all, current]) => {
-      this.#menu.refresh(loading, {
-        kind: "list",
-        title: "Profiles",
-        items: all.map((p) => ({ name: p.name, description: `${p.title} · ${p.description}`, current: p.name === current })),
-        empty: "",
-        hint: "Enter switches to it: what is on, how much it thinks, what it asks",
-        pick: (item) => {
-          const profile = all.find((p) => p.name === item.name);
-          if (profile === undefined) return;
-          this.#marker.inform(`switching to ${profile.title}…`);
-          void applyProfile(this.commandHost(), home, profile, AbortSignal.timeout(300_000))
-            .catch((e: unknown) => `${profile.title}: ${errorText(e)}`)
-            .then(async (note) => {
-              await this.#refreshCapabilities();
-              this.#marker.inform(note);
-              this.render();
-            });
-        },
-      });
-      this.render();
-    });
+    this.#startup.menuClosed();
   }
 
   #openJobs(): void {
@@ -1185,42 +1139,20 @@ export class App {
         this.#marker.inform(text);
         this.render();
       },
-      changed: () => void this.#refreshCapabilities(),
+      changed: () => void this.#startup.refresh(),
       hubRunning: this.#integrations?.hubRunning ?? (() => hubRunning(hubSocket(home))),
-      filesExtension: this.#integrations?.filesExtension ?? this.#telegramExtension(),
-    };
-  }
-
-  /** The telegram extension through the extensions catalog, as /extensions installs it. */
-  #telegramExtension(): IntegrationsHost["filesExtension"] {
-    const store = this.#catalogs.extensions;
-    if (store === undefined) return undefined;
-    const NAME = "telegram";
-    const state = async (): Promise<FilesState> => {
-      const entry = (await store.local()).find((e) => e.name === NAME);
-      return !entry?.installed ? "missing" : entry.enabled === false ? "off" : "on";
-    };
-    const apply = async (change: Change, done: Outcome): Promise<string> =>
-      done.ok && this.#apply ? `${done.note}: ${await this.#apply("extensions", NAME, change).catch((e: unknown) => `not applied: ${errorText(e)}`)}` : done.note;
-    return {
-      state,
-      turnOn: async () => {
-        const signal = AbortSignal.timeout(300_000);
-        if ((await state()) === "off") return apply("enable", await store.enable(NAME, true));
-        await store.list(signal); // the newest catalog: an old copy may not have it yet
-        return apply("install", await store.install(NAME, signal));
-      },
+      filesExtension: this.#integrations?.filesExtension ?? this.#extensions.telegram(),
     };
   }
 
   #openRoot(item: MenuItem): void {
     if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
     else if (item.name === "models") this.#models.open();
-    else if (item.name === "extensions" || item.name === "skills") this.#openCatalog(item.name);
+    else if (item.name === "extensions" || item.name === "skills") this.#extensions.openCatalog(item.name);
     else if (item.name === "sessions") openSessions(this.#sessionsHost());
     else if (item.name === "jobs") this.#openJobs();
     else if (item.name === "integrations") openIntegrations(this.#integrationsHost());
-    else if (item.name === "profile") this.#openProfiles();
+    else if (item.name === "profile") this.#extensions.openProfiles();
     else if (item.name === "copy") this.#menu.open(copyPage(snippets(this.#agent.messages), (s) => this.#copy(s.code)));
     else {
       this.#closeMenu();
@@ -1309,86 +1241,10 @@ export class App {
       },
       told: (note) => {
         this.#marker.inform(note);
-        void this.#refreshCapabilities(); // a profile switched from the phone: the panel says which
+        void this.#startup.refresh(); // a profile switched from the phone: the panel says which
         this.render();
       },
     };
-  }
-
-  /** A catalog's page: what is on disk at once, the repository's news after; install and remove. */
-  #openCatalog(which: "extensions" | "skills"): void {
-    const store = this.#catalogs[which];
-    const title = which === "skills" ? "Skills" : "Extensions";
-    if (store === undefined) {
-      this.#menu.open({ kind: "info", title, lines: ["  not available in this mode"] });
-      return;
-    }
-    const state: { repo: string; entries?: Entry[]; error?: string } = { repo: store.repo };
-    // On disk first, then into effect: loaded now, or (without `apply`) at the next start.
-    const settle = async (name: string, change: Change, done: Outcome): Promise<Outcome> => {
-      if (!done.ok) return done;
-      const how = this.#apply ? await this.#apply(which, name, change).catch((e: unknown) => `not applied: ${errorText(e)}`) : "restart kinoko to apply it";
-      return { ok: true, note: `${done.note}: ${how}` };
-    };
-    const install = (name: string): void => {
-      this.#marker.inform(`${state.entries?.find((e) => e.name === name)?.installed ? "updating" : "installing"} ${name}…`);
-      void store
-        .install(name, AbortSignal.timeout(300_000))
-        .then((done) => settle(name, "install", done))
-        .catch((e: unknown) => ({ ok: false, note: `${name} did not install: ${errorText(e)}` }))
-        .then(({ ok, note }) => {
-          this.#marker.inform(note);
-          const entry = state.entries?.find((e) => e.name === name);
-          if (entry && ok) {
-            entry.installed = true;
-            entry.enabled = true;
-          }
-          redraw();
-        });
-    };
-    // On or off, at once: loaded or taken back (a skill: told to the model), still installed.
-    const toggle = (name: string, on: boolean): void => {
-      void store
-        .enable(name, on)
-        .then((done) => settle(name, on ? "enable" : "disable", done))
-        .then(({ ok, note }) => {
-          this.#marker.inform(note);
-          const entry = state.entries?.find((e) => e.name === name);
-          if (entry && ok) entry.enabled = on;
-          redraw();
-        });
-    };
-    const remove = (name: string): void => {
-      void store
-        .remove(name)
-        .then((done) => settle(name, "remove", done))
-        .then(({ ok, note }) => {
-          this.#marker.inform(note);
-          const entry = state.entries?.find((e) => e.name === name);
-          if (entry && ok) entry.installed = false;
-          redraw();
-        });
-    };
-    const actions = { install, toggle, update: install, remove };
-    let page = catalogPage(title, state, actions);
-    const redraw = (): void => {
-      const next = catalogPage(title, state, actions);
-      this.#menu.swap(page, next); // the selection stays on the entry just acted on
-      page = next;
-      this.render();
-    };
-    this.#menu.open(page);
-    // What is on disk first (instant, and all there is offline), then the repository's news.
-    void store
-      .local()
-      .then((entries) => {
-        state.entries ??= entries;
-        redraw();
-        return store.list(AbortSignal.timeout(60_000));
-      })
-      .then((entries) => (state.entries = entries))
-      .catch((e: unknown) => (state.error = errorText(e)))
-      .then(redraw);
   }
 
   #sessionsHost(): SessionsHost {
@@ -1481,26 +1337,4 @@ function planLines(todos: Todo[]): string {
   const marks = { done: `${ANSI.dim}✓`, in_progress: `${ANSI.toolDot}●${ANSI.reset}${ANSI.bold}`, pending: "○" };
   const done = todos.filter((t) => t.status === "done").length;
   return [`${ANSI.bold}Plan${ANSI.reset} ${ANSI.dim}${done}/${todos.length}${ANSI.reset}`, ...todos.map((t) => `${marks[t.status]} ${t.text}${ANSI.reset}`)].join("\n");
-}
-
-function errorText(e: unknown): string {
-  return e instanceof Error ? e.message : String(e);
-}
-
-/** The [Capabilities] lines of a panel: the header to the next blank line (at -1: none). */
-/** The panel's head through its [Capabilities] lines: the mushroom (its face is the profile's) and
- *  what is on, all that changes when something is switched. */
-function capabilitiesSection(text: string): { lines: string[]; at: number; end: number } {
-  const lines = text.split("\n");
-  const caps = lines.findIndex((line) => line.includes("[Capabilities]"));
-  const end = lines.indexOf("", caps + 1);
-  return { lines, at: caps < 0 ? -1 : 0, end: end < 0 ? lines.length : end };
-}
-
-/** `panel` with its [Capabilities] lines taken from `fresh`. */
-export function withCapabilities(panel: string, fresh: string): string {
-  const old = capabilitiesSection(panel);
-  const now = capabilitiesSection(fresh);
-  if (old.at < 0 || now.at < 0) return panel;
-  return [...old.lines.slice(0, old.at), ...now.lines.slice(now.at, now.end), ...old.lines.slice(old.end)].join("\n");
 }
