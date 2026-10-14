@@ -30,7 +30,7 @@ import type { QueuedView, Region } from "./view.ts";
 import type { Agent } from "../loop.ts";
 import type { Session } from "../session.ts";
 import type { Image, Message } from "../types.ts";
-import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
+import { ImageRegistry, clipboardImage } from "./images.ts";
 import { FilePicker } from "./files.ts";
 import { compactingNote } from "./sprout.ts";
 import { ANSI, cells, stripAnsi } from "./style.ts";
@@ -44,6 +44,7 @@ import { SessionActions } from "./session-actions.ts";
 import { SlashMenu } from "./slash-menu.ts";
 import { SlashCommands } from "./slash-commands.ts";
 import { ThinkingLevel } from "./thinking-level.ts";
+import { PromptInput } from "./prompt-input.ts";
 import type { ModelsHost } from "./model-switch.ts";
 import { COPY, copyFor } from "./code.ts";
 import { SidePanel } from "./side.ts";
@@ -136,6 +137,7 @@ export class App {
   #editor: Editor;
   #thinking: ThinkingLevel;
   #commands: SlashCommands;
+  #input: PromptInput;
   #menu = new Menu();
   #slash: SlashMenu;
   #models: ModelSwitch;
@@ -150,7 +152,6 @@ export class App {
   #placeOf: (() => Promise<string>) | undefined;
   #place = "";
   #images = new ImageRegistry();
-  #clipboard: (signal: AbortSignal) => Promise<Image | string>;
   #cwd: string;
   #files: FilePicker;
   #side: SidePanel;
@@ -212,7 +213,6 @@ export class App {
     this.#onQuit = opts.onQuit;
     this.#handOver = opts.handOver;
     this.#placeOf = opts.place;
-    this.#clipboard = opts.clipboard ?? ((signal) => clipboardImage(signal));
     this.#cwd = opts.cwd ?? process.cwd();
     this.#files = new FilePicker(this.#cwd, () => this.render());
     this.#side = new SidePanel(this.#cwd, () => this.render(), opts.changes);
@@ -246,7 +246,7 @@ export class App {
       columns: () => this.#viewportCols,
       printColumns: () => this.#printCols,
       sideOn: () => this.#sideOn,
-      giveBack: (text) => this.#takeBack([text]),
+      giveBack: (text) => this.#input.takeBack([text]),
       refreshPlace: () => this.#refreshPlace(),
       render: () => this.render(),
     });
@@ -287,6 +287,20 @@ export class App {
       clearScreen: () => this.#clearScreen(),
       quit: () => this.#quit(),
       shell: (command) => this.#shell(command),
+      render: () => this.render(),
+    });
+    this.#input = new PromptInput({
+      agent: () => this.#agent,
+      editor: this.#editor,
+      images: this.#images,
+      run: this.#run,
+      marker: this.#marker,
+      scrollback: this.#scrollback,
+      models: this.#models,
+      command: (text) => this.command(text),
+      shell: (command) => this.#shell(command),
+      clipboard: opts.clipboard ?? ((signal) => clipboardImage(signal)),
+      cwd: this.#cwd,
       render: () => this.render(),
     });
     this.#refreshPlace();
@@ -431,94 +445,34 @@ export class App {
         this.render();
         return;
       case "pull-queued":
-        this.#pullQueued();
+        this.#input.takeBack(this.#agent.unqueue("last"));
         return;
       case "send-now":
         // The reply being streamed is cut and the steer goes in now; nothing to cut: it waits.
         if (!this.#agent.sendNow()) this.render();
         return;
       case "cancel-queued":
-        this.#takeBack(this.#agent.unqueue("all"));
+        this.#input.takeBack(this.#agent.unqueue("all"));
         return;
       case "submit":
-        void this.#submit();
+        void this.#input.submit();
         return;
       case "follow-up":
-        this.#followUp();
+        this.#input.followUp();
         return;
       case "paste-image":
-        void this.#pasteImage();
+        void this.#input.pasteImage();
         return;
       case "editor": {
-        if (key.name === "paste" && this.#pastedImage(key.char ?? "")) return;
-        // Enter submits (as a steer or a prompt, decided in #submit); the rest edits.
-        if (this.#editor.handle(key) === "submit") void this.#submit();
+        if (key.name === "paste" && this.#input.pastedImage(key.char ?? "")) return;
+        // Enter submits (a steer or a prompt: PromptInput decides); the rest edits.
+        if (this.#editor.handle(key) === "submit") void this.#input.submit();
         this.render();
         return;
       }
       default:
         return;
     }
-  }
-
-  /** Enter: prompt when idle, steer when running. A leading slash is a command, never a prompt. */
-  async #submit(): Promise<void> {
-    const text = this.#editor.text.trim();
-    if (text === "") return;
-    if (text.startsWith("!")) {
-      this.#editor.remember(text);
-      this.#editor.clear();
-      await this.#shell(text.slice(1).trim());
-      return;
-    }
-    if (text.startsWith("/")) {
-      this.#editor.clear();
-      if (!(await this.command(text))) this.#scrollback.print("system", `unknown command ${text}: try /help`);
-      this.render();
-      return;
-    }
-    // No model yet: what was typed stays, and /models opens to set one up.
-    if (this.#models.noModel) {
-      this.#models.open();
-      this.render();
-      return;
-    }
-    this.#editor.remember(text);
-    this.#editor.clear();
-    this.#marker.clear();
-    if (this.#agent.state === "running") {
-      // Already running: this is a steer. It shows in the queued area until it reaches the model
-      // ("delivered"), and only then joins the transcript.
-      this.#agent.steer(text, this.#images.attached(text));
-      this.render();
-      return;
-    }
-    this.#run.started();
-    this.#run.echoUser(text);
-    void this.#send(text);
-  }
-
-  /** Alt+Enter: follow-up when running, plain submit when idle. */
-  #followUp(): void {
-    const text = this.#editor.text.trim();
-    if (text === "") return;
-    this.#editor.remember(text);
-    this.#editor.clear();
-    this.#run.started();
-    this.#marker.clear();
-    if (this.#agent.state === "running") {
-      this.#agent.followUp(text, this.#images.attached(text));
-      this.render();
-      return;
-    }
-    this.#run.echoUser(text);
-    void this.#send(text);
-  }
-
-  async #send(text: string): Promise<void> {
-    await this.#agent.prompt(text, this.#images.attached(text));
-    this.#run.stopped();
-    this.render();
   }
 
   /**
@@ -557,53 +511,6 @@ export class App {
   #quit(): void {
     this.#renderer.release();
     this.#onQuit?.();
-  }
-
-  // ---- images ----
-
-  /** Ctrl+V: the clipboard image goes in at the cursor as [Image #N]. */
-  async #pasteImage(): Promise<void> {
-    this.#addImage(await this.#clipboard(AbortSignal.timeout(5_000)));
-  }
-
-  /**
-   * A paste that is one image file's path (a file dropped on the terminal) attaches the file; an
-   * empty paste (the terminal found no text: the clipboard holds an image) reads the clipboard.
-   * False when the paste is plain text for the editor.
-   */
-  #pastedImage(paste: string): boolean {
-    if (paste.trim() === "") {
-      void this.#pasteImage();
-      return true;
-    }
-    const path = imagePathOf(paste);
-    if (path === undefined) return false;
-    void imageFromFile(path, this.#cwd).then((image) => {
-      if (image === undefined) this.#editor.insert(paste); // no such file: it was text after all
-      else this.#addImage(image);
-      this.render();
-    });
-    return true;
-  }
-
-  #addImage(image: Image | string): void {
-    if (typeof image === "string") this.#marker.warn(`Image not attached: ${image}`);
-    else this.#editor.insert(`${this.#images.add(image)} `);
-    this.render();
-  }
-
-  /** Alt+Up: pull the newest queued message back into the editor. */
-  #pullQueued(): void {
-    this.#takeBack(this.#agent.unqueue("last"));
-  }
-
-  /** Queued messages taken back from the agent go into the editor, before what is typed there. */
-  #takeBack(texts: string[]): void {
-    if (texts.length === 0) return;
-    const current = this.#editor.text.trim();
-    const back = texts.join("\n");
-    this.#editor.setText(current === "" ? back : `${back}\n${current}`);
-    this.render();
   }
 
   // ---- the live region ----
