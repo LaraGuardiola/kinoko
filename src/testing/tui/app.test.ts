@@ -1115,6 +1115,16 @@ test("a saved model picked without a known window learns it from its endpoint, a
   expect(saved).toEqual([{ ...typed, contextWindow: 65_536 }]); // the next pick knows it at once
 });
 
+test("at start, a model its endpoint does not serve is told, with what it serves; one it does is not", async () => {
+  const wrong = await harness([], { models: ["MiniCPM-V-4.7"] });
+  await wrong.app.checkModel();
+  expect(wrong.screen()).toContain("test-model is not what");
+  expect(wrong.screen()).toContain("it serves MiniCPM-V-4.7");
+  const right = await harness([], { models: ["test-model"] });
+  await right.app.checkModel();
+  expect(right.screen()).not.toContain("is not what");
+});
+
 test("a model whose endpoint does not tell its window gets the default one, not the last model's", async () => {
   const configured: SavedModel = { model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" };
   const other: SavedModel = { model: "minicpm", baseUrl: "http://router:8086/v1", apiKey: "" };

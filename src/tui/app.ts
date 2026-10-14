@@ -30,6 +30,7 @@ import type { CommandHost } from "../commands.ts";
 import type { Catalog, Entry, Outcome, Change } from "../catalog.ts";
 import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
 import type { ModelChoice, ModelsView } from "./models-menu.ts";
+import { mismatchNote } from "./model-check.ts";
 import { DEFAULTS } from "../config.ts";
 import type { SavedModel } from "../config.ts";
 import type { Served } from "../providers/openai-compat.ts";
@@ -981,6 +982,18 @@ export class App {
   /** Started with no model: the panel is followed by how to set one up. */
   noModelHint(): void {
     if (this.#noModel) this.#print("system", NO_MODEL);
+    this.render();
+  }
+
+  /** At start: says so when the model in use is not one its endpoint serves (see model-check.ts). */
+  async checkModel(): Promise<void> {
+    if (this.#noModel) return;
+    const model = this.#model;
+    const served = await this.#agent.models(AbortSignal.timeout(5_000)).catch(() => [] as string[]);
+    const note = this.#model === model ? mismatchNote(model, served, this.#endpoint === "" ? "the engine" : hostOf(this.#endpoint)) : undefined; // a pick came first
+    if (note === undefined) return;
+    const block = (width: number): string => `${ANSI.cream}${formatBlock("system", note, width)}${ANSI.reset}`;
+    this.#print("system", block(this.#width), this.#printedAny, undefined, block); // wrapped by words, again on a resize
     this.render();
   }
 

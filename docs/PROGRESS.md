@@ -982,3 +982,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 ## release/v0.2.3: arrows through the sent messages, the default model, the phone's model (branch release/v0.2.3)
 - package.json 0.2.3; CHANGELOG 0.2.3 (history arrows, D for the default model, unknown window → default, cream notes; the phone's agents list follows the model, LaTeX in the app).
 - Tag v0.2.3 on main: release.yml builds and publishes.
+
+## feat/model-mismatch: at start, a configured model its endpoint does not serve is told (branch feat/model-mismatch)
+- Idea 1 of the 0.3.0 list, chosen by the user: their config.json named the Qwen3.6 file while :8085 served MiniCPM, and nothing said so (a local engine answers any name with what it has loaded).
+- src/tui/model-check.ts (new, pure): `mismatchNote(model, served, host)`: nothing when the endpoint serves it or does not say; else the note with up to three names it serves and "D in /models". App.checkModel asks the endpoint in use (5 s) once at start (main.ts, after the intro) and prints it in cream, wrapped by words (and again on a resize); a model picked meanwhile wins.
+- Tests: model-check (served, silent endpoint, one name, several), app (told with what it serves; nothing when it is served).
+- Checked live (tmux, the test HOME with Qwen3.6 in config, :8085 serving MiniCPM): the note under the intro.
+- Not done: only the TUI says it (an rpc agent from the phone does not).
