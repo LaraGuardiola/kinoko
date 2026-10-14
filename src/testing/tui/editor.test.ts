@@ -67,11 +67,13 @@ describe("tui editor", () => {
     expect(editor.cursor).toBe(editor.text.indexOf("second") + 5);
     editor.handle(key("up"));
     expect(editor.cursor).toBe(5);
-    // Clamped at the edges.
+    // Past the first line: to its start (no history here, so it stays there).
     editor.handle(key("up"));
-    expect(editor.cursor).toBe(5);
+    expect(editor.cursor).toBe(0);
+    editor.handle(key("up"));
+    expect(editor.cursor).toBe(0);
     editor.handle(key("down"));
-    expect(editor.cursor).toBe(editor.text.indexOf("second") + 5);
+    expect(editor.cursor).toBe(editor.text.indexOf("second"));
     editor.handle(key("down"));
     editor.handle(key("down"));
     expect(editor.cursor).toBe(editor.text.length);
@@ -179,8 +181,32 @@ describe("tui editor", () => {
     typed(editor, "draft");
     expect(editor.handle(key("up", { alt: true }))).toBe("alt-up");
     expect(editor.handle(key("down", { alt: true }))).toBe("alt-down");
-    // History belongs to ctrl-p/ctrl-n, so the two bindings never fight.
+    // Alt+arrows belong to the TUI, so they never reach the history.
     expect(editor.text).toBe("draft");
+  });
+
+  test("12b. up and down reach the history from either end of the text, as in a shell", () => {
+    const editor = new Editor();
+    editor.remember("first ask");
+    editor.remember("two\nlines");
+    expect(editor.handle(key("up"))).toBe("history-prev"); // empty: straight to the last message
+    expect(editor.text).toBe("two\nlines");
+    expect(editor.handle(key("up"))).toBe("changed"); // a message of several lines: its lines first
+    expect(editor.cursor).toBe(3);
+    expect(editor.handle(key("up"))).toBe("changed"); // the first line: to its start
+    expect(editor.cursor).toBe(0);
+    expect(editor.handle(key("up"))).toBe("history-prev");
+    expect(editor.text).toBe("first ask");
+    expect(editor.handle(key("down"))).toBe("history-next"); // at the end of the text
+    expect(editor.handle(key("down"))).toBe("history-next");
+    expect(editor.text).toBe(""); // back to the empty buffer
+    typed(editor, "draft text");
+    editor.handle(key("left"));
+    expect(editor.handle(key("up"))).toBe("changed"); // in the middle: to the start first
+    expect(editor.cursor).toBe(0);
+    expect(editor.handle(key("up"))).toBe("history-prev");
+    expect(editor.handle(key("down"))).toBe("history-next");
+    expect(editor.text).toBe("draft text"); // the draft comes back
   });
 
   test("13. alt+characters are ignored, so shortcuts do not land in the buffer", () => {

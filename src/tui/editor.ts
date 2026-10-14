@@ -129,12 +129,10 @@ export class Editor {
         return "changed";
       case "up":
         if (key.alt) return "alt-up";
-        this.#cursor = this.#moveLine(-1);
-        return "changed";
+        return this.#arrow(-1);
       case "down":
         if (key.alt) return "alt-down";
-        this.#cursor = this.#moveLine(1);
-        return "changed";
+        return this.#arrow(1);
       case "home":
       case "ctrl-a":
         this.#cursor = this.#lineStart(this.#cursor);
@@ -248,6 +246,22 @@ export class Editor {
     const trimmed = head.trimEnd();
     const at = trimmed.length - matchLength(trimmed, /\S+$/);
     return Math.max(0, at);
+  }
+
+  /** Up and Down move between lines; past the first or last one they go to its start or end, and
+   *  from either end of the text (as a shell does) to the previous or next message. */
+  #arrow(direction: -1 | 1): EditorAction {
+    const moved = this.#moveLine(direction);
+    if (moved !== this.#cursor) {
+      this.#cursor = moved;
+      return "changed";
+    }
+    if (this.#cursor === 0 || this.#cursor === this.#text.length) {
+      const step = this.#historyStep(direction);
+      if (step !== "none") return step;
+    }
+    this.#cursor = direction === -1 ? 0 : this.#text.length;
+    return "changed";
   }
 
   #historyStep(direction: -1 | 1): EditorAction {
