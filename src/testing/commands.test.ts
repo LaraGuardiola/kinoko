@@ -154,7 +154,11 @@ describe("slash commands for the phone", () => {
     expect(list.items?.[0]?.description).toMatch(/^sleep 30 · running/);
     expect(await runCommand(host, "jobs", "#2", signal)).toMatchObject({ title: expect.stringMatching(/^#2 · running/), text: "(nothing printed yet)" });
     expect((await runCommand(host, "jobs", "#9", signal)).text).toBe("no shell #9");
-    jobs.kill(slow.id);
+    // Stopped from the phone: it ends (what it started too), and the answer is its window.
+    expect((await runCommand(host, "jobs", "stop #2", signal)).title).toMatch(/^#2 · killed after/);
     await jobs.ended(slow.id);
+    expect(jobs.list().find((j) => j.id === slow.id)?.state).toBe("killed");
+    expect((await runCommand(host, "jobs", "stop #2", signal)).title).toMatch(/^#2 · killed after/); // again: nothing more
+    expect((await runCommand(host, "jobs", "stop #9", signal)).text).toBe("no shell #9");
   });
 });

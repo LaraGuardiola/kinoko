@@ -137,7 +137,9 @@ What the TUI's menu does, for a client without it: `new`, `compact`, `thinking`,
 (`{name, description, current?, off?, installed?, shared?}`: in effect, switched off, installed, a
 skill shared with other agents) to act on with an `arg`: `thinking` takes a profile's name; the
 catalogs take `on NAME`, `off NAME`, `install NAME`, `update NAME`, `remove NAME`, and answer with
-the list again and a `text` saying what was done. A `run` command answers with a `text`; `reset:
+the list again and a `text` saying what was done. `jobs` lists the shells; `#ID` answers with one's
+window (its last lines in `text`, its command in `hint`), and `stop #ID` stops it and answers with
+that window. A `run` command answers with a `text`; `reset:
 true` (new) means the conversation was replaced: attach again. A TUI linked to the hub runs them
 through itself, so its screen shows what the phone changed.
 

@@ -198,9 +198,20 @@ async function catalogCommand(host: CommandHost, kind: "extensions" | "skills", 
 const WINDOW_LINES = 300;
 
 /** The shells, the running ones first; "#2" (or the only one there is) is that one's output. */
-function jobsCommand(jobs: Jobs, arg: string): CommandResult {
+/** The shells: the list; `#id` one's window (its last lines); `stop #id` stops it (and what it
+ *  started), as the TUI's jobs page does, and answers with its window. */
+function jobsCommand(jobs: Jobs, typed: string): CommandResult {
+  const stop = /^stop\s+/.test(typed);
+  const arg = typed.replace(/^stop\s+/, "");
+  const find = (list: ReturnType<Jobs["list"]>): (typeof list)[number] | undefined =>
+    arg === "" && list.length === 1 ? list[0] : list.find((j) => `#${j.id}` === arg || String(j.id) === arg);
+  if (stop) {
+    const target = find(jobs.list());
+    if (target === undefined) return { text: `no shell ${arg}` };
+    jobs.kill(target.id); // nothing when it already ended
+  }
   const all = jobs.list().toSorted((a, b) => Number(b.state === "running") - Number(a.state === "running") || b.id - a.id);
-  const one = arg === "" && all.length === 1 ? all[0] : all.find((j) => `#${j.id}` === arg || String(j.id) === arg);
+  const one = find(all);
   const took = (j: (typeof all)[number]): string => elapsed((j.ended ?? Date.now()) - j.started);
   if (one !== undefined) {
     const how = one.state === "running" ? `running ${took(one)}` : `${one.state === "failed" ? `failed (exit ${one.code ?? "?"})` : one.state} after ${took(one)}`;
@@ -211,6 +222,6 @@ function jobsCommand(jobs: Jobs, arg: string): CommandResult {
   return {
     title: "Shells",
     items: all.map((j) => ({ name: `#${j.id}`, description: `${j.command} · ${j.state === "running" ? `running ${took(j)}` : `${j.state} after ${took(j)}`}`, current: j.state === "running" })),
-    hint: all.length > 0 ? "tap one to see what it is doing" : "no shells yet: the model starts one with bash background: true",
+    hint: all.length > 0 ? "tap one to see what it is doing (and stop it)" : "no shells yet: the model starts one with bash background: true",
   };
 }
