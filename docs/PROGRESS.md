@@ -978,3 +978,7 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Checked live (tmux, a test HOME): D on MiniCPM wrote config.json (600), the old Qwen moved to models.json, a new kinoko started with MiniCPM.
 - Not done: a default whose window the endpoint does not tell starts at the 128k default until used (the TUI learns it then, as before). A project's ./.kinoko/config.json still wins over the home one.
 - Then, from the user's test: switching Qwen (131k) → MiniCPM kept 131k until kinoko restarted. A model whose endpoint does not tell its window (or does not answer) now gets the default window, as a fresh start does, instead of the last model's; the note says so. Test: a pick without a window shows 128,000.
+
+## release/v0.2.3: arrows through the sent messages, the default model, the phone's model (branch release/v0.2.3)
+- package.json 0.2.3; CHANGELOG 0.2.3 (history arrows, D for the default model, unknown window → default, cream notes; the phone's agents list follows the model, LaTeX in the app).
+- Tag v0.2.3 on main: release.yml builds and publishes.
