@@ -1058,3 +1058,10 @@ Deferred, for whenever an Anthropic model is actually needed:
 - handoff.md and visualizer.md: steps 1 and 2 shipped; replay dropped (the owner does not miss it);
   breakpoints left as an idea, not a to-do. Also removed music-watch from kinoko-extensions (and from
   ~/.kinoko/ext and disabled.json), at the owner's request.
+
+## docs/voice: dictation and speech, the design
+- docs/voice.md: what the spike measured (Qwen3-TTS via qwentts.cpp: CPU too slow beside the LLM,
+  CUDA ~6× real time in ~2.6 GB with the LLM at NCMOE 36; whisper.cpp large-v3-turbo for Spanish),
+  the shape (one `voice` extension, three core hooks: agent_event, interrupt, registerKey), the
+  backends (OpenAI-compatible HTTP or a command), the order of work, three open questions.
+- Not built: anything. The spike's builds and samples live in the session scratchpad only.
