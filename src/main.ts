@@ -375,6 +375,7 @@ if (tui) {
   term.write(`${ansi.clearScreen}${ansi.hide}\n`);
   app.intro(startup);
   app.noModelHint();
+  void app.checkModel();
   if (previous) app.replay(agent.messages, `resumed session ${session.meta.id}`);
   app.locate(); // where the region sits on the screen: the side column is drawn from its top row
   // While `kinoko serve` runs, this terminal shows up in the phone app (KINOKO_LINK=0: it does not).
