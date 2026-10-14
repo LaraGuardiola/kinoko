@@ -30,8 +30,6 @@ import { actionFor } from "./keys.ts";
 import type { QueuedView, Region } from "./view.ts";
 import type { Agent } from "../loop.ts";
 import type { Session } from "../session.ts";
-import { sessionDir } from "../session.ts";
-import { dirname } from "node:path";
 import type { Image, Message } from "../types.ts";
 import { modelName } from "../prompt.ts";
 import { ImageRegistry, clipboardImage, imageFromFile, imagePathOf } from "./images.ts";
@@ -44,13 +42,13 @@ import { ModelSwitch } from "./model-switch.ts";
 import { StartupPanel } from "./startup-panel.ts";
 import { ExtensionsMenu } from "./extensions-menu.ts";
 import { RunView } from "./run-view.ts";
+import { SessionActions } from "./session-actions.ts";
 import type { ModelsHost } from "./model-switch.ts";
 import { COPY, copyFor } from "./code.ts";
 import { SidePanel } from "./side.ts";
 import type { ChangesSource } from "./side.ts";
 import { openIntegrations } from "./integrations-menu.ts";
 import { openSessions } from "./sessions-menu.ts";
-import type { SessionsHost } from "./sessions-menu.ts";
 import { jobsLabel, openJobs } from "./jobs-view.ts";
 import type { Jobs } from "../jobs.ts";
 import type { IntegrationsHost } from "./integrations-menu.ts";
@@ -144,12 +142,8 @@ export class App {
   #apply: AppOptions["apply"];
   #jobs: Jobs | undefined;
   #extensionCommands: AppOptions["extensionCommands"];
-  #newSessionOf: AppOptions["newSession"];
-  #resumeOf: AppOptions["resumeSession"];
   #viewportRows: number | undefined;
   #viewportCols: number | undefined;
-  #session: Session | undefined;
-  #rebuild: (() => Agent) | undefined;
   #onQuit: (() => void) | undefined;
   #handOver: AppOptions["handOver"];
   #placeOf: (() => Promise<string>) | undefined;
@@ -163,6 +157,7 @@ export class App {
 
   #marker = new Marker(); // the one-line note above the editor
   #run: RunView; // what the run in progress shows
+  #sessions: SessionActions;
 
   // The mouse is kinoko's: a click on a code block's ⧉ copies it, and while the menu is open clicks
   // pick, hovering selects and the wheel moves through it. With Shift held the terminal has it
@@ -195,11 +190,8 @@ export class App {
     this.#jobs = opts.jobs;
     this.#extensionCommands = opts.extensionCommands;
     this.#jobs?.on(() => this.render()); // the label counts them
-    this.#newSessionOf = opts.newSession;
-    this.#resumeOf = opts.resumeSession;
     this.#viewportRows = opts.viewportRows;
     this.#viewportCols = opts.viewportCols;
-    this.#session = opts.session;
     this.#models = new ModelSwitch({
       agent: () => this.#agent,
       host: opts.models,
@@ -208,11 +200,10 @@ export class App {
       noModel: opts.noModel === true,
       menu: this.#menu,
       marker: this.#marker,
-      session: () => this.#session,
+      session: () => this.#sessions.session,
       closeMenu: () => this.#closeMenu(),
       render: () => this.render(),
     });
-    this.#rebuild = opts.rebuild;
     this.#onQuit = opts.onQuit;
     this.#handOver = opts.handOver;
     this.#placeOf = opts.place;
@@ -243,6 +234,26 @@ export class App {
       render: () => this.render(),
     });
     this.#agent.on((e) => this.#run.onEvent(e));
+    this.#sessions = new SessionActions({
+      session: opts.session,
+      create: opts.newSession,
+      load: opts.resumeSession,
+      rebuild: opts.rebuild,
+      agent: () => this.#agent,
+      replaceAgent: (agent) => (this.#agent = agent),
+      cwd: this.#cwd,
+      run: this.#run,
+      side: this.#side,
+      marker: this.#marker,
+      menu: this.#menu,
+      contextWindow: () => this.#models.contextWindow,
+      width: () => this.#scrollback.width,
+      clearScreen: () => this.#clearScreen(),
+      intro: (text) => this.intro(text),
+      replay: (messages, note) => this.replay(messages, note),
+      closeMenu: () => this.#closeMenu(),
+      render: () => this.render(),
+    });
     this.#refreshPlace();
   }
 
@@ -650,7 +661,7 @@ export class App {
         return true;
       }
       case "fork": {
-        const moved = await this.#forkHead();
+        const moved = await this.#sessions.fork();
         this.#scrollback.print("system", moved);
         this.render();
         return true;
@@ -660,7 +671,7 @@ export class App {
         this.render();
         return true;
       case "new":
-        await this.#newSession();
+        await this.#sessions.startNew();
         this.render();
         return true;
       case "quit":
@@ -939,7 +950,7 @@ export class App {
     if (item.name === "thinking") this.#menu.open(this.#thinkingPage());
     else if (item.name === "models") this.#models.open();
     else if (item.name === "extensions" || item.name === "skills") this.#extensions.openCatalog(item.name);
-    else if (item.name === "sessions") openSessions(this.#sessionsHost());
+    else if (item.name === "sessions") openSessions(this.#sessions.menuHost());
     else if (item.name === "jobs") this.#openJobs();
     else if (item.name === "integrations") openIntegrations(this.#integrationsHost());
     else if (item.name === "profile") this.#extensions.openProfiles();
@@ -992,7 +1003,7 @@ export class App {
       catalogs: this.#catalogs,
       apply: this.#apply,
       newSession: async () => {
-        await this.#newSession();
+        await this.#sessions.startNew();
         this.render();
       },
       thinking: {
@@ -1018,13 +1029,13 @@ export class App {
         this.render();
       },
       fork: async () => {
-        const moved = await this.#forkHead();
+        const moved = await this.#sessions.fork();
         this.#scrollback.print("system", moved);
         this.render();
         return moved;
       },
       session: () => {
-        const s = this.#session;
+        const s = this.#sessions.session;
         if (s === undefined) return "no session";
         const facts = { path: s.path, id: s.meta.id, created: s.meta.created, messages: this.#agent.messages, context: this.#run.tokens.context, window: this.#models.contextWindow };
         return stripAnsi(sessionLines(facts, 60).join("\n"));
@@ -1037,30 +1048,6 @@ export class App {
     };
   }
 
-  #sessionsHost(): SessionsHost {
-    const s = this.#session;
-    return {
-      dir: s ? dirname(s.path) : sessionDir(this.#cwd),
-      current: s ? { id: s.meta.id, context: this.#run.tokens.context, window: this.#models.contextWindow } : undefined,
-      resume: this.#resumeOf
-        ? (path) => {
-            this.#closeMenu();
-            void this.#resumeSession(path).then(() => this.render());
-          }
-        : undefined,
-      width: () => this.#scrollback.width,
-      open: (page) => {
-        this.#menu.open(page);
-        this.render();
-      },
-      swap: (from, to) => {
-        this.#menu.swap(from, to);
-        this.render();
-      },
-    };
-  }
-
-  /** Moves the session head back one message; a fork is only ever a pointer move. */
   /** /clear: the screen and the terminal's scrollback go; the conversation stays as it was. */
   #clearScreen(): void {
     this.#marker.clear();
@@ -1069,53 +1056,6 @@ export class App {
     this.#scrollback.cleared();
   }
 
-  /** /new: a new session, the model with no history; counters and plan start again. */
-  async #newSession(): Promise<void> {
-    if (this.#run.running) {
-      this.#marker.warn("a run is going: Esc it first, then /new");
-      return;
-    }
-    if (this.#newSessionOf === undefined) {
-      this.#marker.warn("/new is not available here");
-      return;
-    }
-    const { session, intro } = await this.#newSessionOf();
-    this.#session = session;
-    this.#run.reset();
-    this.#side.history([]);
-    this.#clearScreen();
-    this.intro(intro);
-    this.#marker.inform("new session: the model starts with no history");
-  }
-
-  /** /sessions' R: that session's conversation, in place of this one (the model in use stays). */
-  async #resumeSession(path: string): Promise<void> {
-    if (this.#run.running) {
-      this.#marker.warn("a run is going: Esc it first, then resume");
-      return;
-    }
-    const { session, intro } = (await this.#resumeOf?.(path)) ?? {};
-    if (session === undefined || intro === undefined) return;
-    this.#session = session;
-    this.#run.reset();
-    this.#clearScreen();
-    this.intro(intro);
-    this.replay(this.#agent.messages, `resumed session ${session.meta.id}`);
-    this.#marker.inform("resumed: the model has that conversation again");
-  }
-
-  async #forkHead(): Promise<string> {
-    const session = this.#session;
-    if (session === undefined) return "fork: no session to fork";
-    const branch = session.activeBranch();
-    const head = branch.at(-1);
-    if (head === undefined) return "fork: the session is empty";
-    const target = branch.at(-2) ?? head;
-    if (target.id === head.id) return "fork: already at the oldest message of this branch";
-    await session.setHead(target.id);
-    if (this.#rebuild) this.#agent = this.#rebuild();
-    return `fork: head moved from ${head.role} to ${target.role} (${branch.length} -> ${branch.length - 1} messages)`;
-  }
 }
 
 /** The plan as transcript rows, for a window too narrow for the side column. */
