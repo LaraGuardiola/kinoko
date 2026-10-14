@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EXTENSIONS, SKILLS, catalog, spawnRun } from "../catalog.ts";
 import { discoverSkills } from "../context.ts";
-import { Extensions, loadExtensions } from "../ext.ts";
+import { Extensions } from "../ext.ts";
+import { loadExtensions } from "../ext-load.ts";
 import { platformsLabel, platformsOf, runsHere } from "../platforms.ts";
 
 const root = mkdtempSync(join(tmpdir(), "kinoko-platforms-"));

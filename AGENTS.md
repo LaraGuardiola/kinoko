@@ -55,7 +55,8 @@ src/providers/     one file per wire protocol + models.json (data, not code)
 src/tools/         read, write, edit, bash, search, todo, budget, tracker, registry
 src/context.ts     AGENTS.md / skills discovery      src/prompt.ts  system prompt builder
 src/session.ts     append-only JSONL (id + parentId)  src/compact.ts threshold compaction
-src/ext.ts         extension loader + event bus       src/config.ts  layered config
+src/ext.ts         extensions' API + event bus         src/ext-load.ts  loading them (start, reload)
+src/config.ts      layered config
 src/serve/         `kinoko serve`: hub for the phone app (agents as rpc children, devices, QR, Tailscale)
 src/serve/lab/     Kinoko Lab: the live harness view at /lab (pure floor logic here, the browser's in page/)
 src/commands.ts    slash commands for the phone (rpc)   src/disabled.ts extensions/skills switched off

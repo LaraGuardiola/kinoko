@@ -252,8 +252,16 @@ Two names are for math, which models write outside fences: `math` gets the TeX o
 after one, not before a digit, so "$5 and $10" stays text; `\$` is a dollar sign.
 
 Events: `session_start`, `context` (rewrite the messages before a request), `before_provider_request`,
-`tool_call` (mutate args, block, or `{ask: true, reason}` to ask the user first), `tool_result`, `turn_end`, `compact`, `run_end`. A handler that
+`tool_call` (mutate args, block, or `{ask: true, reason}` to ask the user first), `tool_result`, `turn_end`, `compact`, `run_end`,
+`agent_event` (everything the agent tells its clients, as it happens: the reply streaming in, its end), and
+`interrupt` (Esc or Ctrl-C in the TUI, a run going or not: the user wants quiet). A handler that
 throws is logged and skipped; a blocked call returns its reason to the model instead of running.
+
+For the TUI, an extension can also take a key the TUI leaves free (`registerKey("ctrl-space", handler,
+description)`, listed in /help), send text as the user (`send(text)` is Enter; `send(text, {as:
+"steer_now"})` is Alt+X, cutting the reply being streamed) and show what it is doing at the start of
+the status line (`status("● listening")`, `status(undefined)` to clear it). Where nobody types (print
+and rpc modes) `send` returns false and `status` shows nothing. The voice extension (docs/voice.md) is what they are for.
 
 The extensions live in their own repository,
 [kinoko-extensions](https://github.com/LaraGuardiola/kinoko-extensions): check-early, cliamp,

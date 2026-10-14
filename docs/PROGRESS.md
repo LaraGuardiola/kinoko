@@ -1071,3 +1071,17 @@ Deferred, for whenever an Anthropic model is actually needed:
   30 s (~9.5 s a phrase); small q5_1 with the window sized to the clip and primed with "Kinoko":
   0.2–0.35 s, the name right 4 of 4 (synthesized audio; a real microphone still to test).
 - Not built: anything. The spike's builds and samples live in the session scratchpad only.
+
+## feat/ext-voice-hooks: what the voice extension needs from the core (docs/voice.md step 1)
+- Extensions hear `agent_event` (every AgentEvent, from the loop's #emit: the reply streaming in)
+  and `interrupt` (Esc or Ctrl-C in the TUI, also while idle: before, Esc idle did nothing).
+- `registerKey("ctrl-space", handler, description)`: the key parser knows Ctrl+Space (NUL, and
+  CSI 32;5u with the kitty protocol); an extension's key goes before the core's actions; /help lists it.
+- `send(text, {as: "prompt" | "steer_now"})`: as Enter, or as Alt+X (cuts the reply, the steer goes
+  in now); false in print/rpc mode or with no model. `status(text)`: in cream at the start of the
+  status line.
+- ext.ts split: loading moved to src/ext-load.ts (ext.ts was going past 300 lines).
+- kinoko-extensions (branch feat/api-voice-hooks): api.ts and the test Bus with the new calls.
+- Checked live in tmux with a throwaway extension: Ctrl+Space sent a prompt, a second one a
+  steer_now that cut the thinking, Esc running and idle fired interrupt, the status showed.
+- Not done: the voice extension itself (steps 2–5).

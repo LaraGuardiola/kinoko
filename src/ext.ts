@@ -1,17 +1,11 @@
 // Extensions: a .ts file, or a folder with an index.ts (and its own node_modules, when it has
-// dependencies), with a default export, loaded from ~/.kinoko/ext and <cwd>/.kinoko/ext.
+// dependencies), with a default export, loaded from ~/.kinoko/ext and <cwd>/.kinoko/ext (ext-load.ts).
 //
 // They only ever get the Kinoko handle below: no imports of core internals, no monkey patching. A
 // handler that throws is logged and skipped, because a broken extension must never break a run.
 
-import { existsSync, readdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { uniqueDirs } from "./context.ts";
-import { readDisabled } from "./disabled.ts";
 import type { Message, ProviderRequest, Tool } from "./types.ts";
-import type { RunResult } from "./agent-events.ts";
-import { userHome } from "./home.ts";
-import { extensionPlatforms, runsHere } from "./platforms.ts";
+import type { AgentEvent, RunResult } from "./agent-events.ts";
 
 export interface SessionStartInfo {
   cwd: string;
@@ -58,6 +52,10 @@ export interface ExtHandlers {
   turn_end: (message: Message) => void;
   compact: (info: CompactInfo) => void;
   run_end: (result: RunResult) => void;
+  /** Everything the agent tells its clients (agent-events.ts), as it happens: read-only. */
+  agent_event: (event: AgentEvent) => void;
+  /** The user asked for quiet: Esc or Ctrl-C in the TUI, with a run going or not. */
+  interrupt: () => void;
 }
 
 export type ExtEvent = keyof ExtHandlers;
@@ -66,6 +64,17 @@ export type CommandHandler = (args: string) => string | Promise<string>;
  *  `width` columns, or undefined to show the source as code. Called with whole blocks only. */
 export type FenceRenderer = (source: string, width: number) => string[] | undefined;
 export type ExtensionFactory = (k: Kinoko) => void | Promise<void>;
+/** The keys an extension may take: ones the TUI leaves free. */
+export type ExtKey = "ctrl-space";
+export type KeyHandler = () => void | Promise<void>;
+/** A prompt (when idle, a steer otherwise), or a steer delivered now, cutting the reply being streamed. */
+export type SendAs = "prompt" | "steer_now";
+
+/** What only the TUI does for extensions: send as the user, and the line that says what one is doing. */
+export interface ExtHost {
+  send(text: string, as: SendAs): boolean;
+  status(text: string | undefined): void;
+}
 
 export interface Kinoko {
   on<E extends ExtEvent>(event: E, handler: ExtHandlers[E]): void;
@@ -73,17 +82,19 @@ export interface Kinoko {
   /** `/name args` in the TUI (listed in its slash menu with `description`), and `kinoko /name args`. */
   registerCommand(name: string, handler: CommandHandler, description?: string): void;
   registerRenderer(lang: string, render: FenceRenderer): void;
+  /** A key in the TUI (listed in /help with `description`). */
+  registerKey(key: ExtKey, handler: KeyHandler, description?: string): void;
+  /** Sends `text` as if the user typed it and pressed Enter (or Alt+X, for "steer_now"). False
+   *  where nobody types: print and rpc modes. */
+  send(text: string, opts?: { as?: SendAs }): boolean;
+  /** A short line in the TUI's status bar ("● listening"); undefined takes it away. */
+  status(text: string | undefined): void;
   log(message: string): void;
-}
-
-export interface LoadOptions {
-  cwd: string;
-  home?: string;
 }
 
 type AnyHandler = (arg: never) => unknown;
 
-function errText(e: unknown): string {
+export function errText(e: unknown): string {
   return e instanceof Error ? (e.message.split("\n")[0] ?? e.message) : String(e);
 }
 
@@ -92,7 +103,9 @@ export class Extensions implements Kinoko {
   #tools: Tool[] = [];
   #commands = new Map<string, CommandHandler>();
   #renderers = new Map<string, FenceRenderer>();
-  #described = new WeakMap<CommandHandler, string>();
+  #keys = new Map<string, KeyHandler>();
+  #described = new WeakMap<CommandHandler | KeyHandler, string>();
+  #host: ExtHost | undefined;
   #log: (line: string) => void;
   // Who registered what, so one extension can be taken back (unload) while kinoko runs.
   #owner = "";
@@ -124,6 +137,45 @@ export class Extensions implements Kinoko {
   registerRenderer(lang: string, render: FenceRenderer): void {
     this.#renderers.set(lang.toLowerCase(), render);
     this.#ownerOf.set(render, this.#owner);
+  }
+
+  registerKey(key: ExtKey, handler: KeyHandler, description?: string): void {
+    this.#keys.set(key, handler);
+    if (description) this.#described.set(handler, description);
+    this.#ownerOf.set(handler, this.#owner);
+  }
+
+  send(text: string, opts?: { as?: SendAs }): boolean {
+    return this.#host?.send(text, opts?.as ?? "prompt") ?? false;
+  }
+
+  status(text: string | undefined): void {
+    this.#host?.status(text);
+  }
+
+  /** The TUI, which types and shows for extensions. */
+  attach(host: ExtHost): void {
+    this.#host = host;
+  }
+
+  /** A key pressed: true when an extension took it. */
+  pressKey(key: string): boolean {
+    const handler = this.#keys.get(key);
+    if (handler === undefined) return false;
+    this.#owner = this.#ownerOf.get(handler) ?? "";
+    try {
+      void Promise.resolve(handler()).catch((e: unknown) => this.log(`key ${key} handler failed: ${errText(e)}`));
+    } catch (e) {
+      this.log(`key ${key} handler threw: ${errText(e)}`);
+    } finally {
+      this.#owner = "";
+    }
+    return true;
+  }
+
+  /** The keys extensions took, with what each does: /help lists them. */
+  keyList(): Array<{ key: string; description: string }> {
+    return [...this.#keys].map(([key, handler]) => ({ key, description: this.#described.get(handler) ?? "an extension's key" }));
   }
 
   /** The renderer for a fence's language, if an extension draws it. */
@@ -173,7 +225,7 @@ export class Extensions implements Kinoko {
     const tools = this.#tools.filter((t) => !mine(t));
     found ||= tools.length !== this.#tools.length;
     this.#tools = tools;
-    for (const map of [this.#commands, this.#renderers] as Map<string, unknown>[]) {
+    for (const map of [this.#commands, this.#renderers, this.#keys] as Map<string, unknown>[]) {
       for (const [key, item] of map) {
         if (!mine(item)) continue;
         map.delete(key);
@@ -255,89 +307,4 @@ function isBlock(value: unknown): value is ToolCallBlock {
 
 function isAsk(value: unknown): value is ToolCallAsk {
   return typeof value === "object" && value !== null && (value as ToolCallAsk).ask === true && typeof (value as ToolCallAsk).reason === "string";
-}
-
-/**
- * User extensions first, then project ones, each directory in name order, so load order (and
- * therefore who wins a command name) is the same on every machine. Imported in parallel, then run
- * in that order.
- */
-export async function loadExtensions(k: Extensions, opts: LoadOptions): Promise<string[]> {
-  const home = opts.home ?? userHome();
-  const dirs = uniqueDirs([join(home, ".kinoko", "ext"), join(opts.cwd, ".kinoko", "ext")]);
-  const off = new Set((await readDisabled(home)).extensions); // switched off in /extensions
-  const paths: string[] = [];
-  for (const dir of dirs) {
-    for (const name of listEntries(dir)) if (!off.has(extensionName(join(dir, name)))) paths.push(join(dir, name));
-  }
-  // Another system's (package.json "os"): not loaded, so none of its tools reach the model.
-  const here = await Promise.all(paths.map(async (path) => runsHere(await extensionPlatforms(dirname(path)))));
-  for (const [i, path] of paths.entries()) if (!here[i]) k.log(`${extensionName(path)} is not for this system: not loaded`);
-  const mods = await Promise.all(paths.map((path, i) => (here[i] ? importDefault(path, k) : null)));
-  const loaded: string[] = [];
-  for (const [index, factory] of mods.entries()) {
-    const path = paths[index];
-    if (factory === null || path === undefined) continue;
-    try {
-      // oxlint-disable-next-line no-await-in-loop -- factories run in load order on purpose
-      await k.start(extensionName(path), factory);
-      loaded.push(path);
-    } catch (e) {
-      k.log(`failed to start ${path}: ${errText(e)}`);
-    }
-  }
-  return loaded;
-}
-
-/** `name.ts` files and `name/index.ts` folders, in name order. */
-function listEntries(dir: string): string[] {
-  try {
-    return readdirSync(dir, { withFileTypes: true })
-      .toSorted((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) // the same order on every machine
-      .flatMap((e) => (e.isFile() && e.name.endsWith(".ts") ? [e.name] : e.isDirectory() && existsSync(join(dir, e.name, "index.ts")) ? [join(e.name, "index.ts")] : []));
-  } catch {
-    return [];
-  }
-}
-
-/** What an extension is called: its file without `.ts`, or its folder. */
-export function extensionName(path: string): string {
-  const parts = path.split(/[\\/]/); // either separator: Windows paths too
-  const file = parts.at(-1) ?? path;
-  return (file === "index.ts" ? (parts.at(-2) ?? file) : file).replace(/\.ts$/, "");
-}
-
-let reloads = 0;
-
-/**
- * (Re)loads one extension while kinoko runs: imported afresh (an updated file is read again), then
- * the old copy's registrations are taken back and the new one starts. An extension that fails to
- * import leaves the old copy running. Returns why it did not load, or undefined.
- */
-export async function loadOne(k: Extensions, path: string): Promise<string | undefined> {
-  const factory = await importDefault(path, k, `${path}?v=${Date.now()}-${++reloads}`); // a new module, not the cached one
-  if (factory === null) return `${extensionName(path)} did not load (see the log)`;
-  const name = extensionName(path);
-  k.unload(name);
-  try {
-    await k.start(name, factory);
-    return undefined;
-  } catch (e) {
-    k.unload(name);
-    return `${name} did not start: ${errText(e)}`;
-  }
-}
-
-async function importDefault(path: string, k: Extensions, specifier = path): Promise<null | ExtensionFactory> {
-  try {
-    const mod = (await import(specifier)) as { default?: unknown };
-    if (typeof mod.default !== "function") {
-      k.log(`${path} has no default export, skipping`);
-      return null;
-    }
-    return mod.default as ExtensionFactory;
-  } catch (e) {
-    k.log(`failed to load ${path}: ${errText(e)}`);
-    return null;
-  }
 }

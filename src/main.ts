@@ -9,7 +9,8 @@ import { Session, findSession, latestSession } from "./session.ts";
 import { readdirSync, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import { Extensions, extensionName, loadExtensions, loadOne } from "./ext.ts";
+import { Extensions } from "./ext.ts";
+import { extensionName, loadExtensions, loadOne } from "./ext-load.ts";
 import { EXTENSIONS, SKILLS, catalog } from "./catalog.ts";
 import type { Change } from "./catalog.ts";
 import { App } from "./tui/app.ts";
@@ -288,7 +289,8 @@ if (tui) {
     noModel,
     // What you sent in earlier runs, as a shell keeps it: a failed write only loses that line.
     history: { sent: await loadPromptHistory(userHome()), add: (text) => void addToPromptHistory(userHome(), text).catch(() => undefined) },
-    extensionCommands: { list: () => ext.commandList(), get: (name) => ext.command(name) },
+    extensionCommands: { list: () => ext.commandList(), get: (name) => ext.command(name), keys: () => ext.keyList() },
+    extensionKeys: { press: (key) => ext.pressKey(key), interrupt: () => ext.emit("interrupt", undefined) },
     write: (text) => term.write(text),
     model: start.model,
     contextWindow: startWindow,
@@ -370,6 +372,8 @@ if (tui) {
     },
   });
   term.on({ key: (key) => app.handleKey(key), resize: (cols, rows) => app.resize(cols, rows) });
+  // Extensions speak and say what they are doing through the TUI (the voice: what you said, "● listening").
+  ext.attach({ send: (text, as) => app.send(text, as), status: (text) => app.extensionStatus(text) });
   const loop = setInterval(() => {
     term.pollKeys(); // a lone Esc waits one frame before it counts
     app.render();

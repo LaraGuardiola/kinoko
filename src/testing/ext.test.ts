@@ -1,7 +1,8 @@
 import { expect, test, describe, afterAll } from "bun:test";
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { Extensions, extensionName, loadExtensions, loadOne } from "../ext.ts";
+import { Extensions } from "../ext.ts";
+import { extensionName, loadExtensions, loadOne } from "../ext-load.ts";
 import { Agent } from "../loop.ts";
 import type { AgentEvent } from "../agent-events.ts";
 import type { Message, Provider, StreamEvent, Tool } from "../types.ts";
@@ -235,6 +236,39 @@ describe("extension events", () => {
     expect(await ext.command("greet")!("kinoko")).toBe("hi kinoko");
     expect(ext.commandNames()).toEqual(["greet"]);
     expect(ext.command("nope")).toBeUndefined();
+  });
+
+  test("5b. a key: pressed runs its extension's handler (a failure is logged), /help lists it, unload takes it back", async () => {
+    const { ext, log } = extBus();
+    let pressed = 0;
+    await ext.start("voice", (k) => k.registerKey("ctrl-space", () => void pressed++, "Talk to kinoko"));
+    await ext.start("broken", (k) => k.registerKey("ctrl-space", async () => Promise.reject(new Error("no mic"))));
+    expect(ext.pressKey("ctrl-g")).toBe(false);
+    expect(ext.keyList()).toEqual([{ key: "ctrl-space", description: "an extension's key" }]); // the last to register has it
+    expect(ext.pressKey("ctrl-space")).toBe(true);
+    await Bun.sleep(1);
+    expect(log).toEqual(["key ctrl-space handler failed: no mic"]);
+    ext.unload("broken");
+    expect(ext.pressKey("ctrl-space")).toBe(false);
+    await ext.start("voice", (k) => k.registerKey("ctrl-space", () => void pressed++, "Talk to kinoko"));
+    expect(ext.keyList()).toEqual([{ key: "ctrl-space", description: "Talk to kinoko" }]);
+    expect(ext.pressKey("ctrl-space")).toBe(true);
+    expect(pressed).toBe(1);
+  });
+
+  test("5c. send and status go to the TUI when one is attached; elsewhere send says it could not", () => {
+    const { ext } = extBus();
+    expect(ext.send("hola")).toBe(false);
+    ext.status("● listening"); // nobody to show it: nothing happens
+    const sent: string[] = [];
+    const shown: Array<string | undefined> = [];
+    ext.attach({ send: (text, as) => sent.push(`${as}:${text}`) > 0, status: (text) => void shown.push(text) });
+    expect(ext.send("mira el test")).toBe(true);
+    expect(ext.send("para", { as: "steer_now" })).toBe(true);
+    ext.status("● listening");
+    ext.status(undefined);
+    expect(sent).toEqual(["prompt:mira el test", "steer_now:para"]);
+    expect(shown).toEqual(["● listening", undefined]);
   });
 
   test("6. context rewrites the request without touching the real history", async () => {

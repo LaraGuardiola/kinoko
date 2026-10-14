@@ -37,7 +37,8 @@ group), ripgrep, and compaction.
 - Enter while IDLE: send as prompt.
 - Enter while RUNNING: steer. Shown in a "queued" area above the editor, tagged [steer].
 - Alt+Enter while RUNNING: followUp, tagged [follow-up]. Alt+Enter while idle: same as Enter.
-- Esc while running: abort. Esc while idle: nothing.
+- Esc while running: abort. Esc while idle: nothing for the run. Either way (and Ctrl-C too) the
+  extensions hear `interrupt`: a voice reading the reply aloud stops with it.
 - Ctrl-C: running -> abort; idle with text -> clear editor; idle and empty -> press twice to quit.
 - On run_end "aborted": put `dropped` messages back into the editor (joined by newlines) and show a
   one-line "Interrupted" marker.

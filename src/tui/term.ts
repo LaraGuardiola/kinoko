@@ -34,6 +34,7 @@ export type KeyName =
   | "ctrl-t" // expand/collapse tool output
   | "ctrl-o" // unfold the plan over the side column
   | "ctrl-v" // paste an image from the clipboard
+  | "ctrl-space" // left to extensions (registerKey): the voice extension's
   | "size-report" // the terminal answering SIZE_QUERY: its window or the screen, in pixels
   | "cursor-report" // the terminal answering a position request (CSI 6 n): where the cursor is
   | "unknown";
@@ -73,6 +74,7 @@ const CSI: Record<string, KeyName> = {
 };
 
 const CTRL: Record<string, KeyName> = {
+  "\x00": "ctrl-space",
   "\x03": "ctrl-c",
   "\x04": "ctrl-d",
   "\x01": "ctrl-a",

@@ -91,6 +91,11 @@ describe("tui key parser", () => {
     expect(names("\x1b[57376u")).toEqual(["unknown"]); // F13: types nothing
   });
 
+  test("6c. Ctrl+Space, left to extensions: NUL in the legacy encoding, CSI 32;5u with the kitty protocol", () => {
+    expect(names("\x00")).toEqual(["ctrl-space"]);
+    expect(names("\x1b[32;5u")).toEqual(["ctrl-space"]);
+  });
+
   test("6b. kitty keyboard protocol: shift+enter, alt+enter, esc and ctrl/alt keys", () => {
     expect(names("\x1b[13;2u")).toEqual(["shift-enter"]);
     expect(names("\x1b[13;5u")).toEqual(["shift-enter"]);

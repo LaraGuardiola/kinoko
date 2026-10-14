@@ -4,7 +4,8 @@
 
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
-import { Extensions, loadExtensions } from "../ext.ts";
+import { Extensions } from "../ext.ts";
+import { loadExtensions } from "../ext-load.ts";
 import { setFenceRenderers } from "../tui/markdown.ts";
 
 async function mtime(path: string): Promise<number> {
