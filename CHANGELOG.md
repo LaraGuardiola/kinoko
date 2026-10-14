@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.4.0
+
+Kinoko Lab, a live look inside the harness, and talking with kinoko: it hears you and answers out
+loud.
+
+### Kinoko Lab
+- `kinoko serve` serves a page at `/lab`: one agent drawn as a small factory, live. Sixteen machines
+  (the prompt press, the toolbox, the request, the model reading the prompt, the stream, the guards,
+  the gate, the approval desk, the tools…) joined by belts, with the agent's work riding them as it
+  happens, and a sentence that says what it is doing and why. Tap a machine for what it holds right
+  now: the system prompt in its parts, the tools' schemas, the exact request as JSON, the history, the
+  gate's decisions, the token and cache counts. ½× and ¼× slow it down to follow.
+- `kinoko serve lab` prints a link for this computer and QR codes for a phone or tablet: one for the
+  local network (no Tailscale needed; the browser warns once about the hub's own certificate, and
+  the command prints its fingerprint to check), one through Tailscale. Each link pairs once, within
+  ten minutes; the page says why when one was refused.
+- A phone gets its own floor, two machines across.
+
+### Talking with kinoko (the `voice` extension)
+- Ctrl+Space turns voice mode on: say "kinoko, …" and it is your prompt; while it works, what you say
+  goes in at once as a steer. It reads its replies aloud as it writes them, sentence by sentence, in a
+  voice you can clone from a 10-second clip (Spanish from Spain too). Esc, or talking to it, stops it.
+  `/voice wake off` for a quiet room: no name needed.
+- Speech to text and text to speech are backends set in `~/.kinoko/voice.json`: whisper.cpp,
+  Qwen3-TTS through qwentts.cpp, piper, or any OpenAI-compatible server. The extension's README has
+  the setup, cloned voices and the echo cancelling speakers need. Install it from `/extensions`.
+- `music-watch` is gone from kinoko-extensions.
+
+### The TUI
+- Alt+X (send the steer now) also stops the tools running: the command is killed, the calls after it
+  do not run, and your message goes in at once. Before, a steer waited for the tools to finish.
+
+### For extensions
+- They hear every event the agent tells (`agent_event`: the reply as it streams) and the user asking
+  for quiet (`interrupt`: Esc or Ctrl-C, a run going or not).
+- They can take Ctrl+Space (`registerKey`, listed in /help), send text as the user (`send`, as Enter
+  or as Alt+X) and say what they are doing on the rule above the input (`status`).
+
+### For the phone and the hub
+- The agent tells more of what it does (the request's size, the model reading the prompt, the
+  gate's word on each call, what joins the history, the guards), and `inspect` gives the last request
+  as sent, the system prompt or the tools (docs/protocol.md).
+
 ## 0.3.0
 
 A kinoko that remembers what you sent, tells you when the model you configured is not the one
