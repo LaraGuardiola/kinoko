@@ -1,4 +1,4 @@
-# The flow visualizer: design (draft for review, no code yet)
+# Kinoko Lab: the flow visualizer (design)
 
 A live, interactive diagram of what kinoko is doing, in the browser: a small factory where the
 prompt is built, sent, streamed back, split into tool calls, gated, run, and fed back in. It is
@@ -6,8 +6,8 @@ for the owner and for anyone who wants to understand what a harness is. Every ma
 questions: **what is it doing right now**, and **why**. Clicking one shows its contents at that
 moment. Stretch goal: **breakpoints and stepping**.
 
-Nothing here is built. This document settles the shape; the open questions at the end are the
-owner's to answer before the first branch.
+Its name is **Kinoko Lab**. Reviewed with the owner on 2026-10-14; the decisions they took are at
+the end. Nothing is built yet: section 7 is the order of work.
 
 ## 1. The machines
 
@@ -78,11 +78,11 @@ request" is exactly the one about to leave, so the inspection is precise where i
 - The hub already has what the page needs: every agent (TUIs linked to it and the phone's), their
   events, the history replay on `attach`, auth, and a URL the phone reaches over Tailscale.
 - The page is a client, not policy: it decides nothing and runs nothing. It is one static file
-  (`src/serve/flow.html`: hand-written HTML, SVG and JS, no framework, no build step), embedded in
-  the binary and served at `GET /flow`.
-- Auth: the browser needs a token like any device. `kinoko serve flow` prints a link with a
-  one-time pairing code in its fragment (`http://127.0.0.1:7878/flow#c=…`); the page pairs itself
-  as a device named "flow (browser)" and keeps the token in `localStorage`. On the phone, the same
+  (`src/serve/lab/`: hand-written HTML, SVG and JS, no framework, no build step), embedded in
+  the binary and served at `GET /lab`.
+- Auth: the browser needs a token like any device. `kinoko serve lab` prints a link with a
+  one-time pairing code in its fragment (`http://127.0.0.1:7878/lab#c=…`); the page pairs itself
+  as a device named "Kinoko Lab (browser)" and keeps the token in `localStorage`. On the phone, the same
   over the tailnet URL.
 
 Why not an extension: an extension lives inside one agent process, so it would see one agent, each
@@ -124,8 +124,8 @@ breakpoint is the same thing at a phase boundary.
   AbortSignal: **Esc still aborts a paused run**, exactly like a pending approval. `step` resumes
   and pauses at the next phase of any kind; `continue` resumes to the next breakpoint.
 - Protocol: `→ {"type": "breakpoints", "agent", "phases": [...]}`, `→ {"type": "resume", "agent",
-  "mode"}`, `← event paused`. Any client may resume (first one wins, as with approvals); the TUI
-  shows "paused at before_request (flow)" in its marker and Enter resumes it there too.
+  "mode"}`, `← event paused`. Only the Lab sets and resumes them: the TUI and the app are not
+  changed (a paused agent looks like one still working; Esc still aborts it).
 - Breakpoints belong to the agent, not to the page: closing the page clears the ones it set, so an
   agent is never left paused with nobody watching (and the 10-minute approval timeout applies).
 
@@ -153,7 +153,7 @@ works, with tests for: abort while paused, step through a whole run, no cost whe
 ## 7. Order of work (each its own branch, each tested and shown before the next)
 
 1. **Events**: the five new events in loop.ts, `inspect` in rpc.ts and the hub, protocol.md. Tests.
-2. **The page, live**: `/flow`, pairing by link, the board, the machines driven by events, the
+2. **The page, live**: `/lab`, pairing by link, the board, the machines driven by events, the
    drawers. Checked by eye on a test hub (desktop and phone width).
 3. **Replay**: save a run, load one, the timeline.
 4. **Breakpoints**: the loop's pause, the protocol, the TUI's marker.
@@ -163,13 +163,11 @@ works, with tests for: abort while paused, step through a whole run, no cost whe
 LangSmith, Langfuse and OpenAI's agent tracing show traces after the fact as trees and timelines.
 None draws the harness itself as a live machine, none lets you pause it, and none is made to teach.
 
-## Open questions for the owner
+## Decisions (the owner, 2026-10-14)
 
-1. **Hub page or its own repo?** Recommended above: served by `kinoko serve` at `/flow`. The
-   alternative is a `kinoko-flow` repo (a static site that connects to a hub): easier to host for
-   the world, but a browser on GitHub Pages cannot reach the LAN address (self-signed certificate).
-2. **Name**: "flow", "factory", "kinoko lab"…?
-3. **Replay first or live first?** Live first is assumed (it is what the owner uses); replay is what
-   the world sees.
-4. **Language of the captions**: English (the rest of the project), or English + Spanish?
-5. **Breakpoints in the TUI too** (Enter resumes there), or only from the page?
+1. **In the hub**: the page is served by `kinoko serve` at `/lab`.
+2. **Name**: Kinoko Lab.
+3. **Live first**; replay after.
+4. **English only** (an i18n layer may come later as its own feature: keep the page's strings in
+   one table so it is easy).
+5. **Breakpoints from the page only**: the TUI is not touched. The Lab is an extra, not core UX.
