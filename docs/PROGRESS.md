@@ -1133,3 +1133,8 @@ Deferred, for whenever an Anthropic model is actually needed:
 - Then, from the owner: the wake word can be switched off for a quiet room ("wake": false in
   voice.json, or /voice wake off|on while kinoko runs); everything said goes in then, except
   whisper's inventions on noise ("¡Suscríbete!", "Gracias.", subtitle credits).
+
+## release/v0.4.0: Kinoko Lab and the voice (branch release/v0.4.0)
+- package.json 0.4.0, CHANGELOG 0.4.0 (Kinoko Lab; the voice extension; Alt+X stops tools; the
+  extension hooks; the new events and inspect), README lists voice, handoff.md's next steps (the APK's
+  size, the voice on the phone). 0.4.0 and not 0.3.1: two new features and a changed key.

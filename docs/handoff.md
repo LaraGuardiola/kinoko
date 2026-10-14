@@ -1,6 +1,6 @@
 # Handoff: where kinoko stands, and what comes next
 
-Written 2026-10-14, at v0.3.0, for a new context picking the work up cold. Read this, then
+Written 2026-10-14, at v0.3.0; updated 2026-10-15 at v0.4.0, for a new context picking the work up cold. Read this, then
 AGENTS.md (the rules), then the last entries of docs/PROGRESS.md (what each branch did and did NOT do).
 
 ## The project in one paragraph
@@ -82,11 +82,26 @@ Each repo has its own AGENTS.md. kinoko-android: `./gradlew testDebugUnitTest as
 - Messages typed on the phone are not in the TUI's history.
 - app.ts is 648 lines (its constructor is ~190 lines of wiring); run-view.ts is 324.
 - LaTeX inside thinking blocks stays as TeX.
-- `music-watch` (written by the local model, broken) was removed from `~/.kinoko/ext`, but its
-  folder is still in the kinoko-extensions repo. Ask before deleting it there.
 - Ideas floated earlier: a job's end note headlining "ended at once but left processes running";
   a non-blocking `music wait` in cliamp.
 - Android: the release build still signs with the debug key; no npm package; no FUNDING.yml.
+
+## Next (the owner's list, 2026-10-15)
+
+1. **The APK grew from ~2 MB to ~20 MB recently**: find out why (a dependency, resources, an
+   unshrunk release, native libraries) and bring it back down.
+2. **The voice on the phone**: the app should hear kinoko talk too (and maybe speak to it). The
+   voice today lives in the `voice` extension on the computer (whisper.cpp in, Qwen3-TTS out:
+   docs/voice.md); the phone would need the hub to stream the audio, a feature of its own.
+
+## Voice: talking with kinoko (done, 2026-10-15, v0.4.0)
+
+docs/voice.md is the design and what was built. The core has the hooks (agent_event, interrupt,
+registerKey, send, status; Alt+X stops tools too); the rest is the `voice` extension in
+kinoko-extensions (its README documents every backend). This machine: whisper.cpp and qwentts.cpp
+under `~/Projects`, `~/bin/tts-serve.sh` (:8091), `~/.kinoko/voice.json`, `~/.kinoko/voices/`
+(wheatley), PipeWire echo cancelling as the user service `kinoko-echo-cancel`. The TTS needs ~2.6 GB
+of VRAM: start the LLM with `NCMOE=38 ~/bin/minicpm-serve.sh` (or `NCMOE=36` for lfm-serve.sh).
 
 ## Kinoko Lab, the harness flow visualizer (done, 2026-10-14)
 
