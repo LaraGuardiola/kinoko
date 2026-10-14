@@ -1130,3 +1130,6 @@ Deferred, for whenever an Anthropic model is actually needed:
   its audio should have been heard plus 3 s, and a sentence may take 60 s from the backend; /voice
   shows the last problem (the TUI shows no extension's log). Checked on the Bluetooth speaker: the
   voice plays, and the echo canceller's reference followed the new output (its monitor).
+- Then, from the owner: the wake word can be switched off for a quiet room ("wake": false in
+  voice.json, or /voice wake off|on while kinoko runs); everything said goes in then, except
+  whisper's inventions on noise ("¡Suscríbete!", "Gracias.", subtitle credits).
