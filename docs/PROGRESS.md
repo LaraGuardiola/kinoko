@@ -1124,3 +1124,9 @@ Deferred, for whenever an Anthropic model is actually needed:
   sentence; utterances are cut at 15 s; /voice lists what it heard lately. The volume dip on any
   speech is gone (it dipped for everyone in the room): only "kinoko, …" stops it. TTS "temperature"
   and the model's own voice (/voice none), because the Wheatley clone sounded overdone.
+- Then the voice went silent for good after kinoko switched the output to a Bluetooth speaker
+  mid-conversation (the owner asked it to; the STT went on). Not reproduced exactly (switching the
+  default sink mid-sentence did not hang), but two waits had no limit: a player is now killed once
+  its audio should have been heard plus 3 s, and a sentence may take 60 s from the backend; /voice
+  shows the last problem (the TUI shows no extension's log). Checked on the Bluetooth speaker: the
+  voice plays, and the echo canceller's reference followed the new output (its monitor).
