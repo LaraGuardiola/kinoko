@@ -2,8 +2,8 @@
 
 "The dream of talking with robots" (the owner, 2026-10-14). Three features for the TUI:
 
-- **Dictation (STT)**: a key starts recording, the same key stops it, and the words land in the
-  editor to read over before sending. Pluggable backends.
+- **Listening (STT)**: Ctrl+Space turns voice mode on; what you say to kinoko by name becomes a
+  prompt. Pluggable backends.
 - **Speech (TTS)**, "the dream": kinoko reads its replies aloud **while the model writes them**,
   sentence by sentence, in a cloned voice of your choosing, Spanish with a Spain accent, and
   **it can be cut** like a run (Esc).
@@ -35,10 +35,9 @@ The default Spanish voice sounds Latin American; **the accent comes from the ref
 cloning. A clone from 11 s of Spain-Spanish game dialogue (Wheatley, Portal 2) kept the accent
 and the character; its expressive line was the owner's favourite.
 
-**Dictation: whisper.cpp, large-v3-turbo q5_0** (574 MB) on the CPU: 8 minutes of Spain-Spanish
-speech in 2 m 43 s, clean punctuation. Dictation happens while the model is idle, so the CPU is
-free; a 10 s phrase should take 1–3 s (to measure in step 2). Parakeet TDT v3 is the fast
-alternative if that is not enough.
+**Listening: whisper.cpp** on the CPU. large-v3-turbo q5_0 transcribed 8 minutes of Spain-Spanish
+speech in 2 m 43 s with clean punctuation; for short phrases the small model is the fast one
+(section 4b has the numbers). Parakeet TDT v3 is an alternative if that is not enough.
 
 Others looked at: Chatterbox Multilingual v3 (MIT, 23 languages, the "beats ElevenLabs" one, needs
 the GPU, no CPU numbers), Voxtral TTS (non-commercial, cloning only through Mistral's API),
@@ -50,25 +49,30 @@ Policy lives in extensions, so the voice is **one extension, `voice`, in kinoko-
 records, calls the backends, splits the text, plays the audio. kinoko does not start or manage the
 speech servers (they are services, like llama-server); the extension's README says how to run them.
 
-The core grows three hooks, each small and useful to other extensions:
+The core grows four hooks, each small and useful to other extensions:
 
 1. **`k.on("agent_event", (event) => …)`**: every AgentEvent the TUI sees (src/agent-events.ts),
    read-only. The voice needs `message_delta` (the reply as it streams), `run_start` and `run_end`.
    One general hook instead of a new event per need.
 2. **`k.on("interrupt", () => …)`**: the user asked for quiet: Esc or Ctrl-C, **also while idle**
    (today Esc does nothing then). The first Esc after a run stops the voice.
-3. **`k.registerKey(key, description, handler)`**, TUI only: the handler gets `insert(text)` (into
-   the editor at the cursor) and `status(text | undefined)` (a line under the editor:
-   "● recording 0:04", "transcribing…"). Listed in /help. Core keys cannot be taken.
+3. **`k.registerKey(key, description, handler)`**, TUI only: the handler gets `status(text |
+   undefined)`, a line under the editor ("● listening", "transcribing…"). Listed in /help. Core
+   keys cannot be taken.
+4. **`k.send(text, { as: "prompt" | "steer_now" })`**: the extension speaking for the user, exactly
+   as if typed and sent (section 4b).
 
 Zero runtime dependencies: `fetch`, `Bun.spawn`, PipeWire's `pw-record` and `pw-play`.
 
-## 3. Dictation
+## 3. The key: Ctrl+Space
 
-- **Ctrl+Space** (proposed): starts `pw-record` (16 kHz mono WAV in a temp file); the same key stops
-  it, the backend transcribes, the text goes into the editor. **Not sent**: Enter sends, as always.
-- Esc while recording throws the recording away. Two minutes at most.
-- Terminals do not report key releases, so it is a toggle, not hold-to-talk.
+Everything voice starts **off** when kinoko opens. **Ctrl+Space turns voice mode on**: kinoko
+listens for its name (section 4b) and reads its replies aloud (section 4). Ctrl+Space again turns
+it all off at once: the microphone closes and the voice stops. `/voice` does the same by command
+and picks the voice. A line under the editor says what it is doing: "● listening", "● kinoko
+hears you", "transcribing…".
+
+Terminals do not report key releases, so it is a toggle, not hold-to-talk.
 
 ## 4. Speech
 
@@ -88,14 +92,16 @@ Zero runtime dependencies: `fetch`, `Bun.spawn`, PipeWire's `pw-record` and `pw-
 
 ## 4b. Conversation: always listening, barge-in
 
-Turned on with `/voice listen` (until kinoko closes or `/voice listen off`), or the dictation key
-held to its own job. While it is on, a line under the editor says so: "● listening".
+On while voice mode is (Ctrl+Space). **The wake word is "kinoko"**: only what starts with it is
+for kinoko ("Kinoko, mira por qué falla el test"; "Oye kinoko, para"). The word itself is taken
+out before the text reaches the model.
 
 - **The microphone streams** (`pw-record`, 16 kHz mono raw PCM on stdout) into the extension.
 - **Voice activity**: a small detector in the extension (energy over a noise floor that adapts,
   with a short hangover; plain TypeScript, tested on recorded PCM) finds where speech starts and ends.
-- **Barge-in**: 300 ms of speech while kinoko talks **cuts its voice at once** (the same path as
-  Esc), before the words are even transcribed.
+- **Barge-in**: 300 ms of speech while kinoko talks **lowers its voice at once** (before anything is
+  transcribed); when the transcript starts with "kinoko", it is **cut** (the same path as Esc)
+  and the rest is the steer; when it does not (someone else in the room), the voice comes back up.
 - **The utterance**: when ~700 ms of silence ends it, the segment goes to the STT backend, and the
   text becomes **a prompt when idle, a steer sent now when a run is going** (Alt+X's path: the
   reply being streamed is cut and the model reads the steer next). It shows in the transcript as
@@ -107,15 +113,24 @@ held to its own job. While it is on, a line under the editor says so: "● liste
   (WebRTC AEC, installed here: `libpipewire-module-echo-cancel`, `libspa-aec-webrtc`) gives a
   microphone with what the speakers play taken out, cliamp's music included; the extension records
   from it. Part of this machine's setup (step 4). With headphones it is not needed.
-- **The room**: an open microphone hears everyone (the TV, a call). An optional **wake word**
-  (`"wake": "kinoko"`: only utterances that start with it count) and the key to mute it at once.
+- **The room**: an open microphone hears everyone (the TV, a call): that is what the wake word is
+  for, and Ctrl+Space closes the microphone at once.
+- **Hearing its name**: whisper may write it "Quinoco" or "Kinokoko"; the first two words are
+  matched loosely (qu/c → k, one letter off), and whisper is primed with the word (`--prompt
+  "Kinoko"`), which in the spike made even the small model spell it right every time.
 
-**Latency** (to measure): the end of speech ~0.7 s, the transcription ~0.5–1.5 s on the CPU, then
-the model. In conversation the STT's speed matters more than in dictation: if the CPU is too slow,
-a smaller whisper model, or the GPU with NCMOE a little higher.
+**Latency**: the end of speech ~0.7 s, then the transcription. Measured in the spike on clean,
+synthesized phrases (a real microphone in a room still to test), CPU, 8 threads:
 
-Core hook 4, for this: **`k.send(text, { as: "prompt" | "steer_now" })`**, the extension speaking
-for the user, exactly as if typed.
+| whisper.cpp model | 1–3 s phrase | Wrote "Kinoko" |
+|---|---|---|
+| large-v3-turbo q5_0, default window (always 30 s of audio) | **~9.5 s**: unusable | yes |
+| large-v3-turbo q5_0, window sized to the clip (`-ac`) | 0.85–1.3 s | yes |
+| **small q5_1, window sized, primed with "Kinoko"** | **0.2–0.35 s** | **yes, 4 of 4** |
+| small q5_1, not primed | 0.5 s | "Quinoco" |
+
+So the default is **small**, with the window sized to each utterance and the prompt primed;
+large-v3-turbo stays one config line away when accuracy matters more than speed.
 
 ## 5. Backends (config: `~/.kinoko/voice.json`)
 
@@ -139,25 +154,23 @@ Two kinds, both for STT and TTS, so any engine fits:
 
 1. **Core hooks** (kinoko, `feat/ext-voice-hooks`): `agent_event`, `interrupt` (and Esc while idle
    firing it), `registerKey` with `insert` and `status`, `send`. Tests. api.ts in kinoko-extensions.
-2. **Dictation** (kinoko-extensions, `feat/voice-dictation`): recording, both backend kinds,
-   `voice.json`. Measured on Spanish phrases.
+2. **Hearing** (kinoko-extensions, `feat/voice-hear`): the microphone, voice activity, the wake
+   word, both backend kinds, `voice.json`, Ctrl+Space; utterances become prompts. Measured on
+   Spanish phrases spoken into this laptop.
 3. **Speech** (kinoko-extensions, `feat/voice-speech`): the sentence splitter (tested hard), the
    queue, playback, cutting, voices, `/voice`. Checked by ear by the owner.
 4. **This machine**: whisper.cpp and qwentts.cpp built with CUDA under `~/Projects`, models in place,
    `~/bin/tts-serve.sh` and `~/bin/stt-serve.sh` beside `lfm-serve.sh` (its NCMOE to 36), the
    Wheatley voice in `~/.kinoko/voices`, PipeWire's echo cancellation.
-5. **Conversation** (kinoko-extensions, `feat/voice-listen`): the streaming microphone, voice
-   activity, barge-in, utterances as prompts and steers, the wake word. Tuned by voice with the owner.
+5. **Conversation** (kinoko-extensions, `feat/voice-converse`): barge-in (lower, then cut or come
+   back), utterances as steers while a run goes. Tuned by voice with the owner.
 
 Not in this work: the phone and Kinoko Lab (the phone already has its keyboard's dictation; speech
 there would be the hub streaming audio, a feature of its own).
 
-## 7. Decisions and open questions
+## 7. Decisions (the owner, 2026-10-14)
 
-Decided (2026-10-14): a key for dictation **and** a mode that listens while kinoko is open;
-speaking over kinoko cuts it and becomes a steer at once.
-
-Open:
-1. Ctrl+Space for dictation and to mute the listening, or another key?
-2. Speech on by default once set up, or off until `/voice on`?
-3. The wake word: off (everything said is for kinoko) or on ("kinoko, …")?
+1. **Ctrl+Space** turns voice mode on and off; everything voice is **off** when kinoko opens.
+2. A mode that listens while kinoko is open; speaking over kinoko cuts it and becomes a steer at once.
+3. **The wake word is "kinoko"** ("not something I say by mistake").
+4. No separate "dictate into the editor" key: voice mode is the one way in. (Easy to add later.)

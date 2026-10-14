@@ -1066,4 +1066,8 @@ Deferred, for whenever an Anthropic model is actually needed:
   backends (OpenAI-compatible HTTP or a command), the order of work, three open questions.
 - Then, from the owner: a listening mode while kinoko is open, and barge-in (speaking over kinoko
   cuts it and becomes a steer at once): section 4b, core hook `send`, step 5.
+- Then the owner's decisions: Ctrl+Space turns voice mode on/off (all off at start), the wake word
+  is "kinoko", no separate dictation key. Spike: whisper large-v3-turbo on the CPU always encodes
+  30 s (~9.5 s a phrase); small q5_1 with the window sized to the clip and primed with "Kinoko":
+  0.2–0.35 s, the name right 4 of 4 (synthesized audio; a real microphone still to test).
 - Not built: anything. The spike's builds and samples live in the session scratchpad only.
