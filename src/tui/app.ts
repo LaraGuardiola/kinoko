@@ -75,6 +75,8 @@ export interface AppOptions {
   agent: Agent;
   /** Started with no model set up anywhere: the status says so, and a prompt leads to /models. */
   noModel?: boolean;
+  /** The messages sent in earlier runs (↑ brings them back), and where to keep each new one. */
+  history?: { sent: string[]; add: (text: string) => void };
   /** Extensions' slash commands: in the menu, run by `/name args`. */
   extensionCommands?: { list: () => Array<{ name: string; description: string }>; get: (name: string) => ((args: string) => string | Promise<string>) | undefined };
   write: (text: string) => void;
@@ -221,7 +223,7 @@ export class App {
       columns: () => this.#viewportCols ?? 80,
       rows: () => (this.#viewportRows ?? 23) + 1,
     });
-    this.#editor = new Editor();
+    this.#editor = new Editor({ history: opts.history?.sent, onRemember: opts.history?.add });
     this.#model = opts.model;
     this.#window = opts.contextWindow;
     this.#thinking = opts.thinking;
