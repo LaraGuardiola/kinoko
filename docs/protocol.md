@@ -200,6 +200,7 @@ Message {
 | `compacting` / `compacted` | `phase, done, total?` / `keep` | the history is being summarised |
 | `retry` | `attempt, of, inMs, error` | a transient failure; trying again |
 | `jobs` | `running` | how many background jobs run now (it updates `AgentInfo.jobs`; not replayed) |
+| `model` | `model` | the model was switched, from the app, the TUI or Telegram (it updates `AgentInfo.model`; not replayed) |
 | `approval_request` | `id`, `call {id, name, args}`, `reason` | the call waits for the user: Allow / Deny / For this session |
 | `approval_end` | `id`, `allow`, `by: tui \| app \| telegram \| timeout \| abort` | answered: the card shows the outcome |
 | `run_end` | `reason: done \| aborted \| error \| limit`, `detail?` | idle again |

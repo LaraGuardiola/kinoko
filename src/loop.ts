@@ -37,6 +37,7 @@ export type AgentEvent =
   | { type: "approval_request"; id: string; call: ToolCall; reason: string } // an extension asks the user first
   | { type: "approval_end"; id: string; allow: boolean; by: ApprovalBy } // answered (the first answer wins)
   | { type: "jobs"; running: number } // background jobs running now (bash background: true), when the count changes
+  | { type: "model"; model: string } // the model was switched (from the next request on)
   | { type: "retry"; attempt: number; of: number; inMs: number; error: string } // a transient failure: the same request again
   | { type: "run_end"; reason: "done" | "aborted" | "error" | "limit"; dropped?: string[]; detail?: string };
 
@@ -151,7 +152,9 @@ export class Agent {
 
   /** The next request uses `model` (a run in progress keeps going with it from its next request). */
   setModel(model: string): void {
+    if (model === this.#model) return;
     this.#model = model;
+    this.#emit({ type: "model", model });
   }
 
   /** The context window of the model in use (compaction triggers against it). */

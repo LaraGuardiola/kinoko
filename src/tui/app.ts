@@ -199,7 +199,7 @@ export class App {
   #compacting: CompactProgress | undefined; // a summary on its way: the note animates
   #marker = ""; // one-line note above the editor ("Interrupted", "Compacted", ...)
   #retrying = false; // the marker says a retry is coming: the next reply's first token clears it
-  #quiet = ""; // a marker that only informs (an extension or skill installed or removed): cream, no background
+  #quiet = ""; // a marker that only informs (an extension or skill installed, a model or thinking level picked): cream, no background
   #tokens = { context: 0, input: 0, cacheRead: 0, output: 0 };
   #cost = 0;
 
@@ -1320,7 +1320,7 @@ export class App {
     this.#agent.setThinking(profile.effort, this.#budgets ? profile.budget : undefined);
     this.#profile = profile.name;
     this.#thinking = profileLabel(profile, this.#budgets);
-    this.#marker = `thinking: ${this.#thinking} from the next request`;
+    this.#marker = this.#quiet = `thinking: ${this.#thinking} from the next request`;
     return this.#marker;
   }
 
@@ -1510,7 +1510,7 @@ export class App {
       .then((saved) => {
         this.#saved = saved;
         if (page) this.#menu.refresh(page, redraw());
-        this.#marker = `removed ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}`;
+        this.#marker = this.#quiet = `removed ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}`;
       })
       .catch(() => (this.#marker = `could not remove ${modelName(entry.model)}`))
       .finally(() => this.render());
@@ -1543,7 +1543,7 @@ export class App {
         ?.save(entry)
         .then((saved) => {
           this.#saved = saved;
-          this.#marker = `model: ${modelName(entry.model)} at ${host}, saved`;
+          this.#marker = this.#quiet = `model: ${modelName(entry.model)} at ${host}, saved`;
         })
         .catch(() => (this.#marker = `model: ${modelName(entry.model)} at ${host} (could not save it)`))
         .finally(() => this.render());
@@ -1571,7 +1571,7 @@ export class App {
     }
     this.#agent.setModel(entry.model);
     this.#model = entry.model;
-    this.#marker = `model: ${modelName(entry.model)}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`;
+    this.#marker = this.#quiet = `model: ${modelName(entry.model)}${entry.baseUrl === "" ? "" : ` at ${hostOf(entry.baseUrl)}`} from the next request`;
     if (entry.contextWindow) this.#useWindow(entry.contextWindow);
     else this.#learnWindow(entry);
     this.#recordModel(entry, entry.contextWindow);
@@ -1602,7 +1602,7 @@ export class App {
         const window = served.find((s) => s.id === entry.model)?.contextWindow;
         if (this.#model !== entry.model) return; // another pick came first
         if (!window) {
-          this.#marker = `model: ${modelName(entry.model)} (its context window is unknown: keeping ${this.#window.toLocaleString("en-US")})`;
+          this.#marker = this.#quiet = `model: ${modelName(entry.model)} (its context window is unknown: keeping ${this.#window.toLocaleString("en-US")})`;
           return;
         }
         this.#useWindow(window);

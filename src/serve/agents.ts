@@ -249,8 +249,9 @@ export class Agents {
 
   #event(agent: Running, event: AgentEvent): void {
     const info = agent.info;
-    if (event.type === "jobs") {
-      info.jobs = event.running > 0 ? event.running : undefined;
+    if (event.type === "jobs" || event.type === "model") {
+      if (event.type === "jobs") info.jobs = event.running > 0 ? event.running : undefined;
+      else info.model = event.model;
       this.#onChange();
       return; // not part of the run: nothing to replay to a late attach
     }
