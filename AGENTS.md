@@ -6,7 +6,8 @@ Pi-style: small core, six tools (read, write, edit, bash, search, todo), everyth
 ## How we work
 - The phased build is finished (`docs/phases/` is history, not a to-do list). We are now polishing and
   finishing the project: bug fixes, rough edges, small features the user asks for.
-- Before starting: read this file and the latest entries of `docs/PROGRESS.md`.
+- Before starting: read this file, `docs/handoff.md` (where things stand, how the owner works, what is next)
+  and the latest entries of `docs/PROGRESS.md`.
 - Do only what was asked. If something was not asked for, do not build it.
 - Every change gets its own branch off main (`feat/...`, `fix/...`), even a small one. Commit there;
   merge into main (`--no-ff`, "Merge branch '<name>': <what>") only when the user says so, then
