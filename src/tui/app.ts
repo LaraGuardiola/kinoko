@@ -30,6 +30,7 @@ import type { CommandHost } from "../commands.ts";
 import type { Catalog, Entry, Outcome, Change } from "../catalog.ts";
 import { endpointOf, endpointPage, hostOf, keyPage, labelPage, modelsPage, namePage, servedPage } from "./models-menu.ts";
 import type { ModelChoice, ModelsView } from "./models-menu.ts";
+import { DEFAULTS } from "../config.ts";
 import type { SavedModel } from "../config.ts";
 import type { Served } from "../providers/openai-compat.ts";
 import type { Provider } from "../types.ts";
@@ -138,8 +139,10 @@ export interface ModelsHost {
   save: (entry: SavedModel) => Promise<SavedModel[]>;
   /** Removes one saved entry; answers with the list to offer from now on. */
   remove: (entry: SavedModel) => Promise<SavedModel[]>;
-  /** Entries that cannot be removed from the TUI (the configured model). */
+  /** Entries that cannot be removed from the TUI (the configured model, the default). */
   fixed: (entry: SavedModel) => boolean;
+  /** Makes one the model new sessions start with; answers with the list to offer from now on. */
+  setDefault?: (entry: SavedModel) => Promise<SavedModel[]>;
 }
 
 export class App {
@@ -1081,6 +1084,9 @@ export class App {
       }
     } else if (page?.kind === "info" && key.name === "char" && page.keys?.[key.char?.toLowerCase() ?? ""]) {
       page.keys[key.char?.toLowerCase() ?? ""]?.();
+    } else if (page?.kind === "list" && key.name === "char" && page.keys?.[key.char?.toLowerCase() ?? ""]) {
+      const item = page.items[this.#menu.index];
+      if (item !== undefined && !item.header) page.keys[key.char?.toLowerCase() ?? ""]?.(item);
     } else if (page?.kind === "list" && page.update && key.name === "char" && key.char?.toLowerCase() === "u") {
       const item = page.items[this.#menu.index];
       if (item !== undefined && !item.header) page.update(item);
@@ -1397,11 +1403,13 @@ export class App {
       saved: this.#saved,
       canAdd: this.#host !== undefined,
       fixed: this.#host?.fixed,
+      canDefault: this.#host?.setDefault !== undefined,
     });
     const choose = (choice: ModelChoice): void => {
       if (choice.kind === "add") this.#addProvider();
       // The redrawn page becomes the one later answers refresh.
       else if (choice.kind === "remove") this.#removeModel(choice.entry, () => (page = modelsPage(view(), choose)));
+      else if (choice.kind === "default") this.#defaultModel(choice.entry, () => (page = modelsPage(view(), choose)));
       else this.#useModel(choice.entry);
     };
     let page = modelsPage(view(), choose);
@@ -1516,6 +1524,20 @@ export class App {
       .finally(() => this.render());
   }
 
+  /** Makes a model the default for new sessions (config.json); the models page stays open, redrawn. */
+  #defaultModel(entry: SavedModel, redraw: () => ListPage): void {
+    const page = this.#menu.page;
+    void this.#host
+      ?.setDefault?.(entry)
+      .then((saved) => {
+        this.#saved = saved;
+        if (page) this.#menu.swap(page, redraw()); // the same model stays selected
+        this.#marker = this.#quiet = `default: ${modelName(entry.model)} at ${hostOf(entry.baseUrl)}, for new sessions`;
+      })
+      .catch(() => (this.#marker = `could not make ${modelName(entry.model)} the default`))
+      .finally(() => this.render());
+  }
+
   /** Its name, endpoint, API key, then one of the models it serves (or its id typed by hand). */
   #addProvider(): void {
     this.#menu.open(
@@ -1591,18 +1613,22 @@ export class App {
   /**
    * A model picked without a known window (typed by hand, or served by the engine in use): ask its
    * endpoint, use what it says, and keep it on a saved entry so the next pick knows it at once.
-   * Until then (or if it never says) the previous window stands, and the marker says so.
+   * Until then the previous window stands; if it never says (or does not answer), the default one,
+   * as a fresh start has, and the marker says so.
    */
   #learnWindow(entry: SavedModel): void {
     const host = this.#host;
     if (!host || entry.baseUrl === "") return;
     void host
       .discover(entry.baseUrl, entry.apiKey, AbortSignal.timeout(10_000))
+      .catch(() => [] as Served[])
       .then(async (served) => {
         const window = served.find((s) => s.id === entry.model)?.contextWindow;
         if (this.#model !== entry.model) return; // another pick came first
         if (!window) {
-          this.#marker = this.#quiet = `model: ${modelName(entry.model)} (its context window is unknown: keeping ${this.#window.toLocaleString("en-US")})`;
+          // The last model's window says nothing about this one: the default, as a fresh start has.
+          this.#useWindow(DEFAULTS.contextWindow);
+          this.#marker = this.#quiet = `model: ${modelName(entry.model)} (its context window is unknown: ${DEFAULTS.contextWindow.toLocaleString("en-US")}, the default)`;
           return;
         }
         this.#useWindow(window);

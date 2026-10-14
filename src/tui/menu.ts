@@ -28,6 +28,8 @@ export interface ListPage {
   pick: (item: MenuItem) => void;
   /** Removes a `removable` item, after Del was pressed on it twice. */
   remove?: (item: MenuItem) => void;
+  /** Letters that act on the selected item (D: a model made the default), lower case. */
+  keys?: Record<string, (item: MenuItem) => void>;
   /** U: updates the item (a catalog's entry, fetched again from its repository). */
   update?: (item: MenuItem) => void;
   /** Enter leaves the page open (switching several things on and off in a row). */

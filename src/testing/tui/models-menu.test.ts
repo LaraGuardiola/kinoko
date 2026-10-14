@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { rmSync, statSync } from "node:fs";
-import { loadSavedModels, removeModel, saveModel } from "../../config.ts";
+import { mkdir } from "node:fs/promises";
+import { loadSavedModels, removeModel, saveModel, setDefaultModel } from "../../config.ts";
 import { endpointOf, hostOf, modelsPage } from "../../tui/models-menu.ts";
 import type { ModelChoice } from "../../tui/models-menu.ts";
 
@@ -96,5 +97,34 @@ describe("saved models", () => {
       ["+ add provider", false],
     ]);
     expect(page.hint).toBe("Enter to use · Del twice to remove a saved model");
+  });
+
+  test("the default is marked; D makes the selected one the default", () => {
+    const configured = { model: "qwen", baseUrl: "http://local:8081/v1", apiKey: "" };
+    const added = { model: "llama", baseUrl: "http://box:8080/v1", apiKey: "" };
+    const chosen: ModelChoice[] = [];
+    const page = modelsPage(
+      { model: "llama", endpoint: "http://box:8080/v1", served: new Map(), loading: false, saved: [configured, added], canAdd: true, fixed: (e) => e === configured, canDefault: true },
+      (c) => chosen.push(c),
+    );
+    expect(page.items.filter((i) => !i.header).map((i) => [i.name, i.description])).toEqual([
+      ["  llama", "in use"],
+      ["  qwen", "default"],
+      ["+ add provider", "An engine or API that serves models (OpenAI-compatible)"],
+    ]);
+    expect(page.hint).toBe("Enter to use · D: the default for new sessions · Del twice to remove a saved model");
+    page.keys?.d?.(page.items.find((i) => i.name === "  llama")!);
+    page.keys?.d?.(page.items.find((i) => i.name === "+ add provider")!); // not a model: nothing
+    expect(chosen).toEqual([{ kind: "default", entry: added }]);
+  });
+
+  test("the default goes into config.json: the rest of the file kept, the old model's window and label gone", async () => {
+    await mkdir(`${HOME}/.kinoko`, { recursive: true });
+    await Bun.write(`${HOME}/.kinoko/config.json`, JSON.stringify({ model: "old", baseUrl: "http://a/v1", apiKey: "k", contextWindow: 131072, label: "strata", maxTurns: 9 }));
+    await setDefaultModel({ model: "new", baseUrl: "http://b/v1", apiKey: "" }, HOME);
+    expect(await Bun.file(`${HOME}/.kinoko/config.json`).json()).toEqual({ model: "new", baseUrl: "http://b/v1", apiKey: "", maxTurns: 9 });
+    if (process.platform !== "win32") expect(statSync(`${HOME}/.kinoko/config.json`).mode & 0o777).toBe(0o600);
+    await setDefaultModel({ model: "x", baseUrl: "http://c/v1", apiKey: "", contextWindow: 8000, provider: "anthropic" }, `${HOME}/fresh`);
+    expect(await Bun.file(`${HOME}/fresh/.kinoko/config.json`).json()).toEqual({ model: "x", baseUrl: "http://c/v1", apiKey: "", provider: "anthropic", contextWindow: 8000 });
   });
 });

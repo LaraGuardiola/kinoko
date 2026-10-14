@@ -1037,6 +1037,35 @@ describe("removing a saved model", () => {
     expect(h.app.menuPage).toStartWith("Models"); // still on the page, redrawn
     expect(h.app.marker).toBe("removed coder at 127.0.0.1:8081");
   });
+
+  test("D on a model makes it the default; the page stays, redrawn, and says so", async () => {
+    const configured: SavedModel = { model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" };
+    const other: SavedModel = { model: "coder", baseUrl: "http://127.0.0.1:8081/v1", apiKey: "" };
+    let current = configured;
+    const models: ModelsHost = {
+      endpoint: configured.baseUrl,
+      saved: [configured, other],
+      connect: () => scripted([]).provider as never,
+      discover: async () => [],
+      save: async () => [configured],
+      remove: async () => [configured],
+      fixed: (entry) => entry === current,
+      setDefault: async (entry) => ((current = entry), [entry, configured]),
+    };
+    const h = await harness([], { models: [], modelsHost: models });
+    h.press("/models\r");
+    await new Promise((r) => setTimeout(r, 10));
+    h.press("\x1b[A"); // up to "coder"
+    h.press("d");
+    await new Promise((r) => setTimeout(r, 40));
+    expect(current).toBe(other);
+    expect(h.app.menuPage).toStartWith("Models");
+    expect(h.app.marker).toBe("default: coder at 127.0.0.1:8081, for new sessions");
+    h.app.render();
+    expect(frame(h).some((row) => row.includes("→") && row.includes("coder") && row.includes("default"))).toBe(true); // still selected
+    expect(frame(h).some((row) => row.includes("test-model") && row.includes("default"))).toBe(false);
+    expect(h.app.statusLine).toContain("test-model"); // the model in use stays until one is picked
+  });
 });
 
 test("adding a provider at an endpoint where nothing answers says so before asking for an id", async () => {
@@ -1084,6 +1113,28 @@ test("a saved model picked without a known window learns it from its endpoint, a
   await new Promise((r) => setTimeout(r, 10));
   expect(h.app.statusLine).toContain("/65,536 tok");
   expect(saved).toEqual([{ ...typed, contextWindow: 65_536 }]); // the next pick knows it at once
+});
+
+test("a model whose endpoint does not tell its window gets the default one, not the last model's", async () => {
+  const configured: SavedModel = { model: "test-model", baseUrl: "http://local:8081/v1", apiKey: "" };
+  const other: SavedModel = { model: "minicpm", baseUrl: "http://router:8086/v1", apiKey: "" };
+  const models: ModelsHost = {
+    endpoint: configured.baseUrl,
+    saved: [configured, other],
+    connect: () => scripted([]).provider as never,
+    discover: async () => [{ id: "minicpm" }], // listed, without a window
+    save: async () => [configured, other],
+    remove: async () => [],
+    fixed: (entry) => entry === configured,
+  };
+  const h = await harness([], { models: [], modelsHost: models });
+  expect(h.app.statusLine).toContain("/1,000 tok");
+  h.press("/models\r");
+  await new Promise((r) => setTimeout(r, 10));
+  h.press("\x1b[B\r"); // "minicpm"
+  await new Promise((r) => setTimeout(r, 10));
+  expect(h.app.statusLine).toContain("/128,000 tok");
+  expect(h.app.marker).toBe("model: minicpm (its context window is unknown: 128,000, the default)");
 });
 
 /** Clipboard reads and file checks are async: give them a moment. */

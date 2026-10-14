@@ -9,7 +9,8 @@ import type { InputPage, ListPage, MenuItem } from "./menu.ts";
 export type ModelChoice =
   | { kind: "use"; entry: SavedModel }
   | { kind: "add" }
-  | { kind: "remove"; entry: SavedModel };
+  | { kind: "remove"; entry: SavedModel }
+  | { kind: "default"; entry: SavedModel };
 
 export interface ModelsView {
   model: string;
@@ -21,8 +22,11 @@ export interface ModelsView {
   saved: SavedModel[];
   /** Offer "+ add provider" (there is somewhere to save it). */
   canAdd: boolean;
-  /** Entries that cannot be removed here (the configured model: it lives in config.json). */
+  /** Entries that cannot be removed here (the configured model: it lives in config.json). It is
+   *  also the default, the model new sessions start with. */
   fixed?: (entry: SavedModel) => boolean;
+  /** D makes the selected model the default. */
+  canDefault?: boolean;
 }
 
 export function hostOf(url: string): string {
@@ -76,8 +80,10 @@ export function modelsPage(view: ModelsView, choose: (choice: ModelChoice) => vo
       const key = `${baseUrl}\u0000${entry.model}`;
       choices.set(key, { kind: "use", entry });
       const current = baseUrl === view.endpoint && entry.model === view.model;
-      const removable = saved && view.canAdd && !(view.fixed?.(entry) ?? false);
-      items.push({ name: `  ${modelName(entry.model)}`, description: current ? "in use" : "", current, key, removable });
+      const isDefault = view.fixed?.(entry) ?? false;
+      const removable = saved && view.canAdd && !isDefault;
+      const description = [current ? "in use" : "", isDefault ? "default" : ""].filter((d) => d !== "").join(" · ");
+      items.push({ name: `  ${modelName(entry.model)}`, description, current, key, removable });
     }
   }
   if (view.canAdd) {
@@ -97,7 +103,17 @@ export function modelsPage(view: ModelsView, choose: (choice: ModelChoice) => vo
       const choice = item.key === undefined ? undefined : choices.get(item.key);
       if (choice?.kind === "use" && item.removable) choose({ kind: "remove", entry: choice.entry });
     },
-    hint: items.some((item) => item.removable) ? "Enter to use · Del twice to remove a saved model" : undefined,
+    ...(view.canDefault
+      ? {
+          keys: {
+            d: (item: MenuItem) => {
+              const choice = item.key === undefined ? undefined : choices.get(item.key);
+              if (choice?.kind === "use") choose({ kind: "default", entry: choice.entry });
+            },
+          },
+        }
+      : {}),
+    hint: ["Enter to use", view.canDefault ? "D: the default for new sessions" : "", items.some((item) => item.removable) ? "Del twice to remove a saved model" : ""].filter((h) => h !== "").join(" · "),
   };
 }
 
