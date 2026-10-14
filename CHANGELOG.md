@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.3.0
+
+A kinoko that remembers what you sent, tells you when the model you configured is not the one
+answering, lets the phone stop a shell, and a TUI whose code reads like prose.
+
+### The TUI
+- The messages you sent are kept across runs, as a shell keeps its history: ↑ in a new kinoko
+  brings back what you sent in the last one (`~/.kinoko/history.jsonl`, the newest 200, 0600).
+- At start, a model your endpoint does not serve is told, with what it does serve and how to make
+  that the default (`D` in `/models`). A local engine answers any name with the model it has
+  loaded, so a config naming another file used to go unnoticed.
+
+### The phone
+- A running shell's window has Stop: two taps end it, and everything it started (`/jobs stop #N`
+  for any client). The app needs its main build for the button.
+
+### Inside
+- `src/tui/app.ts` (1,770 lines, one class doing ten jobs) is now its parts, each in a file named
+  for what it does: the scrollback, the run's view, where what you type goes, the slash menu and
+  its pages and commands, the model switch, the extensions menu, sessions, the startup panel, the
+  thinking level, the note above the editor. `app.ts` wires them together; its header lists them.
+  Nothing you see changed.
+
 ## 0.2.3
 
 The messages you sent back with the arrows, a default model chosen from the menu, and the phone
