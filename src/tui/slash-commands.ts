@@ -21,6 +21,8 @@ import type { ThinkingLevel } from "./thinking-level.ts";
 export type ExtensionCommands = {
   list: () => Array<{ name: string; description: string }>;
   get: (name: string) => ((args: string) => string | Promise<string>) | undefined;
+  /** The keys extensions took, for /help. */
+  keys?: () => Array<{ key: string; description: string }>;
 };
 
 export interface SlashCommandsOptions {
@@ -55,9 +57,11 @@ export class SlashCommands {
     const { scrollback, marker, models, sessions, render } = this.#opts;
     const [name = ""] = input.replace(/^\//, "").split(" ");
     switch (name) {
-      case "help":
-        scrollback.print("system", helpText(scrollback.width), undefined, undefined, (w) => helpText(w));
+      case "help": {
+        const keys = this.#opts.extensionCommands?.keys?.() ?? [];
+        scrollback.print("system", helpText(scrollback.width, keys), undefined, undefined, (w) => helpText(w, keys));
         break;
+      }
       case "model":
         scrollback.print("system", `model: ${modelName(models.model)}  context: ${models.contextWindow} tokens`);
         break;

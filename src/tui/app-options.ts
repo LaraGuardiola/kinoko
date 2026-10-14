@@ -18,6 +18,8 @@ export interface AppOptions {
   noModel?: boolean;
   /** The messages sent in earlier runs (↑ brings them back), and where to keep each new one. */
   history?: { sent: string[]; add: (text: string) => void };
+  /** Extensions' keys (Ctrl+Space) and their word that the user asked for quiet (Esc, Ctrl-C). */
+  extensionKeys?: { press: (key: string) => boolean; interrupt: () => void };
   /** Extensions' slash commands: in the menu, run by `/name args`. */
   extensionCommands?: ExtensionCommands;
   write: (text: string) => void;

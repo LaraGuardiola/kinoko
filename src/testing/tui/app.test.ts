@@ -99,6 +99,7 @@ async function harness(
     capabilities?: AppOptions["capabilities"];
     jobs?: Jobs;
     extensionCommands?: AppOptions["extensionCommands"];
+    extensionKeys?: AppOptions["extensionKeys"];
     noModel?: boolean;
     handOver?: AppOptions["handOver"];
     /** /sessions' R: the harness loads the session and restarts the agent, as main does. */
@@ -153,6 +154,7 @@ async function harness(
     capabilities: opts.capabilities,
     jobs: opts.jobs,
     extensionCommands: opts.extensionCommands,
+    extensionKeys: opts.extensionKeys,
     noModel: opts.noModel,
     handOver: opts.handOver,
     resumeSession: opts.resume
@@ -405,6 +407,53 @@ describe("TUI app with the agent", () => {
     expect(app.editorText).toBe("");
     app.feed("\x03"); // idle and empty -> quit
     expect(quit).toBe(true);
+  });
+
+  test("7b. extensions: Ctrl+Space is theirs, Esc and Ctrl-C ask for quiet even when idle, /help lists their keys", async () => {
+    const pressed: string[] = [];
+    let quiet = 0;
+    const h = await harness([[{ type: "text", delta: "x" }], [{ type: "done", stop: "end" }]], {
+      pace: 30,
+      extensionKeys: { press: (key) => key === "ctrl-space" && pressed.push(key) > 0, interrupt: () => void quiet++ },
+      extensionCommands: { list: () => [], get: () => undefined, keys: () => [{ key: "ctrl-space", description: "Talk to kinoko" }] },
+    });
+    h.press("\x00");
+    expect(pressed).toEqual(["ctrl-space"]);
+    expect(h.app.editorText).toBe(""); // not typed
+    h.press("\x1b");
+    expect(quiet).toBe(1); // idle: nothing else to stop
+    h.press("go\r");
+    await new Promise((r) => setTimeout(r, 5));
+    h.press("\x1b"); // running: the run stops, and the voice with it
+    await settle(h.agent);
+    expect(quiet).toBe(2);
+    expect(h.agent.state).toBe("idle");
+    h.press("/help\r");
+    expect(h.screen()).toContain("Ctrl+Space");
+    expect(h.screen()).toContain("Talk to kinoko");
+  });
+
+  test("7c. an extension speaks for the user: a prompt when idle, a steer sent at once while running; its status leads the status line", async () => {
+    const h = await harness(
+      [
+        [{ type: "thinking", delta: "thinking " }, { type: "thinking", delta: "and thinking " }, { type: "thinking", delta: "and more " }, { type: "text", delta: "x" }, { type: "done", stop: "end" }],
+        [{ type: "text", delta: "steered" }, { type: "done", stop: "end" }],
+      ],
+      { pace: 60 },
+    );
+    expect(h.app.send("mira el test", "prompt")).toBe(true);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(h.app.send("para, usa rg", "steer_now")).toBe(true);
+    await settle(h.agent);
+    expect(h.agent.messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["mira el test", "para, usa rg"]);
+    expect(h.agent.messages.find((m) => m.stop === "aborted")?.thinking).toStartWith("thinking"); // cut, as Alt+X does
+    expect(h.screen()).toContain("mira el test");
+    h.app.extensionStatus("● listening");
+    expect(h.app.statusLine.replace(ANSI, "")).toStartWith("● listening | IDLE");
+    h.app.extensionStatus(undefined);
+    expect(h.app.statusLine.replace(ANSI, "")).toStartWith("IDLE");
+    const none = await harness([], { noModel: true });
+    expect(none.app.send("hola", "prompt")).toBe(false);
   });
 
   test("8. the status line shows the model, usage, cache and the run state", async () => {

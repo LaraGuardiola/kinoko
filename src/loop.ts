@@ -178,6 +178,7 @@ export class Agent {
 
   #emit(e: AgentEvent): void {
     for (const l of this.#listeners) l(e);
+    this.#ext?.emit("agent_event", e);
   }
 
   #notifyQueueChange(): void {

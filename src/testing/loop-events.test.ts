@@ -155,4 +155,15 @@ describe("inspect: what the model sees, for a person", () => {
     expect(request.messages).toEqual([expect.objectContaining({ role: "user", content: "look", images: [{ mime: "image/png", data: "", size: 3 }] })]);
     expect(JSON.parse(JSON.stringify(request))).toEqual(request);
   });
+
+  test("extensions hear every event too (agent_event), in the order the clients do", async () => {
+    const ext = new Extensions(() => undefined);
+    const heard: string[] = [];
+    await ext.start("voice", (k) => k.on("agent_event", (e) => void heard.push(e.type === "message_delta" ? `delta:${e.delta}` : e.type)));
+    const { agent, events } = agentWith(scripted([[{ type: "text", delta: "ho" }, { type: "text", delta: "la" }, { type: "done", stop: "end" }]]), { extensions: ext });
+    await agent.prompt("hi");
+    expect(heard).toEqual(events.map((e) => (e.type === "message_delta" ? `delta:${e.delta}` : e.type)));
+    expect(heard).toContain("delta:ho");
+    expect(heard.at(-1)).toBe("run_end");
+  });
 });

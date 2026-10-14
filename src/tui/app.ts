@@ -107,6 +107,9 @@ export class App {
   #images = new ImageRegistry();
   #handOver: AppOptions["handOver"];
   #onQuit: (() => void) | undefined;
+  #extKeys: AppOptions["extensionKeys"];
+  /** What an extension says it is doing ("● listening"), at the start of the status line. */
+  #extStatus: string | undefined;
 
   constructor(opts: AppOptions) {
     this.#agent = opts.agent;
@@ -115,6 +118,7 @@ export class App {
     this.#viewportCols = opts.viewportCols;
     this.#handOver = opts.handOver;
     this.#onQuit = opts.onQuit;
+    this.#extKeys = opts.extensionKeys;
     this.#placeOf = opts.place;
     this.#jobs = opts.jobs;
     const cwd = opts.cwd ?? process.cwd();
@@ -360,13 +364,26 @@ export class App {
   }
 
   get statusLine(): string {
-    return statusLine({
+    const line = statusLine({
       running: this.#run.running,
       model: this.#models.noModel ? "no model yet" : this.#models.model,
       tokens: this.#run.tokens,
       contextWindow: this.#models.contextWindow,
       cost: this.#run.cost,
     });
+    return this.#extStatus ? `${ANSI.cream}${this.#extStatus}${ANSI.reset}${ANSI.dim} | ${ANSI.reset}${line}` : line;
+  }
+
+  /** An extension speaking for the user (k.send): see PromptInput.send. */
+  send(text: string, as: "prompt" | "steer_now"): boolean {
+    return this.#input.send(text, as === "steer_now");
+  }
+
+  /** An extension's status line ("● listening"); undefined takes it away. */
+  extensionStatus(text: string | undefined): void {
+    if (text === this.#extStatus) return;
+    this.#extStatus = text;
+    this.render();
   }
 
   // ---- keys, the shell, quitting ----
@@ -396,6 +413,9 @@ export class App {
     // An open menu takes its keys first: arrows, Enter, Esc (which must not abort a run there).
     if (this.#slash.key(key)) return;
     if (this.#planKey(key)) return;
+    if (this.#extKeys?.press(key.name)) return;
+    // Esc and Ctrl-C ask for quiet, a run going or not: an extension's voice stops with them.
+    if (key.name === "escape" || key.name === "ctrl-c") this.#extKeys?.interrupt();
     const action = actionFor(key, {
       running: this.#run.running || this.#agent.state === "running",
       editorEmpty: this.#editor.empty,

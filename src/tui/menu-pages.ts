@@ -153,11 +153,20 @@ const KEYS: Array<[string, string]> = [
 ];
 
 /** /help: one table for the keys, one for the menu (built from ROOT, so it cannot fall behind). */
-export function helpText(width: number): string {
+/** "ctrl-space" → "Ctrl+Space". */
+function keyName(key: string): string {
+  return key
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join("+");
+}
+
+export function helpText(width: number, extensionKeys: Array<{ key: string; description: string }> = []): string {
   const table = (head: string, rows: Array<[string, string]>): string[] =>
     renderTable([`| ${head} | |`, "|---|---|", ...rows.map(([k, v]) => `| ${cell(k)} | ${cell(v)} |`)], width, (text) => text);
   const menu = ROOT.map((item): [string, string] => [`/${item.name}`, item.description]);
-  return [...table("Keys", KEYS), "", ...table("Menu", menu)].join("\n");
+  const keys = [...KEYS, ...extensionKeys.map(({ key, description }): [string, string] => [keyName(key), description])];
+  return [...table("Keys", keys), "", ...table("Menu", menu)].join("\n");
 }
 
 /** The session page: one table of what this session is and what it has cost. */

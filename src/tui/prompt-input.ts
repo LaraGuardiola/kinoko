@@ -79,6 +79,25 @@ export class PromptInput {
     void this.#prompt(text);
   }
 
+  /** An extension speaking for the user (k.send): a prompt when idle; a steer when running, sent
+   *  at once with `now` (Alt+X's way). False when there is no model to send to. */
+  send(text: string, now: boolean): boolean {
+    const { run, marker, render } = this.#opts;
+    const agent = this.#opts.agent();
+    if (this.#opts.models.noModel || text.trim() === "") return false;
+    marker.clear();
+    if (agent.state === "running") {
+      agent.steer(text);
+      if (now) agent.sendNow();
+      render();
+      return true;
+    }
+    run.started();
+    run.echoUser(text);
+    void this.#prompt(text);
+    return true;
+  }
+
   /** Alt+Enter: a follow-up when running (it waits for the run to end), a plain prompt when idle. */
   followUp(): void {
     const { editor, marker, run, render } = this.#opts;
