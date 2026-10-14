@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Extensions } from "../ext.ts";
 import { Agent } from "../loop.ts";
-import type { AgentEvent } from "../loop.ts";
+import type { AgentEvent } from "../agent-events.ts";
 import type { Message, Provider, StreamEvent, Tool } from "../types.ts";
 
 /** A model that calls `bash` with each command in turn (one per reply); "" or none says "done". */
@@ -134,11 +134,11 @@ describe("approvals", () => {
     expect(toolResults(agent.messages)).toEqual(["ERROR: denied by the user: it did not run", "ran", "ran"]);
   });
 
-  test("a block wins over an ask from an earlier handler", () => {
+  test("a block wins over an ask from an earlier handler, and says which extension decided", async () => {
     const ext = new Extensions(() => undefined);
-    ext.on("tool_call", () => ({ ask: true, reason: "ask" }));
-    ext.on("tool_call", () => ({ block: true, reason: "never" }));
-    expect(ext.beforeTool({ name: "bash", args: {}, signal: new AbortController().signal })).toEqual({ block: true, reason: "never" });
+    await ext.start("asker", (k) => k.on("tool_call", () => ({ ask: true, reason: "ask" })));
+    await ext.start("blocker", (k) => k.on("tool_call", () => ({ block: true, reason: "never" })));
+    expect(ext.beforeTool({ name: "bash", args: {}, signal: new AbortController().signal })).toEqual({ block: true, reason: "never", by: "blocker" });
   });
 
   test("auto approve (a profile that asks nothing): an ask runs at once, unasked; a block still blocks", async () => {

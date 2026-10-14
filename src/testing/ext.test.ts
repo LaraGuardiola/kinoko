@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Extensions, extensionName, loadExtensions, loadOne } from "../ext.ts";
 import { Agent } from "../loop.ts";
-import type { AgentEvent } from "../loop.ts";
+import type { AgentEvent } from "../agent-events.ts";
 import type { Message, Provider, StreamEvent, Tool } from "../types.ts";
 
 const ROOT = `${process.cwd()}/.tmp-ext-test-${process.pid}`;

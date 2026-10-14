@@ -8,8 +8,9 @@ import { isPipe } from "./link.ts";
 import { dirname, join } from "node:path";
 import { stat } from "node:fs/promises";
 import type { Server, ServerWebSocket } from "bun";
-import type { AgentEvent } from "../loop.ts";
-import type { Image, Message } from "../types.ts";
+import type { AgentEvent } from "../agent-events.ts";
+import type { Image } from "../types.ts";
+import { withoutImageBytes } from "../inspect.ts";
 import { Agents, lineQueue } from "./agents.ts";
 import type { Child, Hello, Spawn } from "./agents.ts";
 import type { Device, Devices } from "./devices.ts";
@@ -50,11 +51,6 @@ export interface ServeOptions {
   log?: (line: string) => void;
 }
 
-/** A message as the app gets it: images as their type and size, not their bytes. */
-function light(m: Message): Message & { images?: Array<Image & { size?: number }> } {
-  return m.images ? { ...m, images: m.images.map((i) => ({ mime: i.mime, data: "", size: Math.round(i.data.length * 0.75) })) } : m;
-}
-
 type Incoming = {
   id?: string;
   type?: string;
@@ -72,6 +68,7 @@ type Incoming = {
   allow?: boolean;
   remember?: boolean;
   path?: string; // folders: what was typed so far
+  what?: string; // inspect: request, system or tools
 };
 
 export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Server<Socket>; agents: Agents; watch: (listener: Watcher) => () => void; announce: (msg: object) => void; stop: () => void } {
@@ -90,7 +87,7 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Serve
     onChange: () => broadcast({ type: "agents", agents: agents.list() }),
     onEvent: (id: string, event: AgentEvent) => {
       for (const w of watchers) w(id, event);
-      const msg = JSON.stringify({ type: "event", agent: id, event: event.type === "message_end" ? { ...event, message: light(event.message) } : event });
+      const msg = JSON.stringify({ type: "event", agent: id, event: event.type === "message_end" ? { ...event, message: withoutImageBytes(event.message) } : event });
       for (const ws of sockets) if (ws.data.attached.has(id)) ws.send(msg);
     },
   });
@@ -123,7 +120,7 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Serve
         const snapshot = await agents.snapshot(agent);
         if (snapshot === undefined) return fail(`no agent ${agent}`);
         ws.data.attached.add(agent);
-        return send(ws, { type: "history", id: msg.id, agent, info: agents.info(agent), messages: snapshot.messages.map(light), live: snapshot.live });
+        return send(ws, { type: "history", id: msg.id, agent, info: agents.info(agent), messages: snapshot.messages.map(withoutImageBytes), live: snapshot.live });
       }
       case "detach":
         ws.data.attached.delete(agent);
@@ -155,6 +152,12 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Serve
       case "command": {
         const reply = await agents.send(agent, { type: "command", name: msg.name, arg: msg.arg });
         return reply.type === "ok" ? send(ws, { type: "command_result", id: msg.id, agent, result: reply.result ?? {} }) : fail(reply.detail ?? "refused");
+      }
+      case "inspect": {
+        // What the model sees, asked for when Kinoko Lab opens a machine (too big to send each step).
+        const what = msg.what === "system" || msg.what === "tools" ? msg.what : "request";
+        const reply = await agents.send(agent, { type: "inspect", what });
+        return reply.type === "ok" ? send(ws, { type: "inspected", id: msg.id, agent, what, data: reply.data }) : fail(reply.detail ?? "refused");
       }
       case "render": {
         // A code block, a diff, a tree, a diagram, a table: drawn here exactly as in the terminal.

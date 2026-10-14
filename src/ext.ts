@@ -9,7 +9,7 @@ import { dirname, join } from "node:path";
 import { uniqueDirs } from "./context.ts";
 import { readDisabled } from "./disabled.ts";
 import type { Message, ProviderRequest, Tool } from "./types.ts";
-import type { RunResult } from "./loop.ts";
+import type { RunResult } from "./agent-events.ts";
 import { userHome } from "./home.ts";
 import { extensionPlatforms, runsHere } from "./platforms.ts";
 
@@ -233,13 +233,14 @@ export class Extensions implements Kinoko {
   }
 
   /** tool_call: args may be mutated in place; the first block wins, even over an earlier ask. */
-  beforeTool(call: ToolCallEvent): ToolCallDecision | undefined {
-    let ask: ToolCallAsk | undefined;
+  beforeTool(call: ToolCallEvent): (ToolCallDecision & { by: string }) | undefined {
+    let ask: (ToolCallAsk & { by: string }) | undefined;
     for (const handler of this.#handlers.get("tool_call") ?? []) {
       try {
         const decision = (handler as (c: ToolCallEvent) => unknown)(call);
-        if (isBlock(decision)) return decision;
-        if (ask === undefined && isAsk(decision)) ask = decision;
+        const by = this.#ownerOf.get(handler) ?? "";
+        if (isBlock(decision)) return { ...decision, by };
+        if (ask === undefined && isAsk(decision)) ask = { ...decision, by };
       } catch (e) {
         this.log(`tool_call handler threw, skipping: ${errText(e)}`);
       }

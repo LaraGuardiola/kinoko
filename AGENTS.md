@@ -49,6 +49,7 @@ Never disable a rule just to make code pass; fix the code. A disable comment nee
 src/main.ts        CLI entry, modes (tui | print | rpc)     src/args.ts  command-line parsing
 src/types.ts       shared contracts (Message, Provider, Tool, StreamEvent...)
 src/loop.ts        Agent class: linear loop + abort/steer/followUp   src/approvals.ts  calls waiting for the user
+src/agent-events.ts  what an Agent tells its listeners (the TUI, rpc, the hub, Kinoko Lab)
 src/jobs.ts        background jobs (bash background: true)          src/integrations.ts  integrations.json
 src/providers/     one file per wire protocol + models.json (data, not code)
 src/tools/         read, write, edit, bash, search, todo, budget, tracker, registry

@@ -6,7 +6,7 @@
 // from its start.
 
 import { basename } from "node:path";
-import type { AgentEvent } from "../loop.ts";
+import type { AgentEvent } from "../agent-events.ts";
 import type { RpcCommand, RpcReply, RpcState } from "../rpc.ts";
 import type { Message, ToolCall } from "../types.ts";
 

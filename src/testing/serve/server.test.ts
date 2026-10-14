@@ -46,6 +46,7 @@ const fakeSpawn: Spawn = (cmd, cwd): Child => {
       if (c.type === "get_state") out.push(JSON.stringify({ type: "ok", id: c.id, state: { running: false, model: "qwen", messages: 0, session: "s-1", cwd } }));
       if (c.type === "get_messages") out.push(JSON.stringify({ type: "ok", id: c.id, messages }));
       if (c.type === "get_commands") out.push(JSON.stringify({ type: "ok", id: c.id, commands: [{ name: "thinking", description: "d", kind: "list" }] }));
+      if (c.type === "inspect") out.push(JSON.stringify({ type: "ok", id: c.id, data: { asked: (c as { what?: string }).what } }));
       if (c.type === "command") out.push(JSON.stringify({ type: "ok", id: c.id, result: { text: `ran ${(c as { name?: string }).name} ${(c as { arg?: string }).arg}` } }));
       if (c.type === "prompt") {
         out.push(JSON.stringify({ type: "ok", id: c.id, text: "started" }));
@@ -342,6 +343,27 @@ describe("serve: the hub", () => {
       await c.next("ok");
       expect(got.filter((g) => g.type === "prompt")[1]?.text).toMatch(/^\[sent from the phone: \S+-notes\.txt \(2 B\)\]$/);
       c.close();
+    } finally {
+      hub.stop();
+    }
+  });
+
+  test("inspect: a client asks what the model sees, the agent answers, the hub hands it on", async () => {
+    const devices = new Devices(join(dir, "inspect.json"));
+    const hub = serve({ port: 0, devices, command: ["kinoko"], sessionsDir: dir, version: "t", spawn: fakeSpawn });
+    try {
+      const base = `http://127.0.0.1:${hub.server.port}`;
+      const { token } = (await (await fetch(`${base}/v1/pair`, { method: "POST", body: JSON.stringify({ code: await devices.code(), name: "lab" }) })).json()) as { token: string };
+      const lab = client(`ws://127.0.0.1:${hub.server.port}/v1/ws`, token);
+      const id = hub.agents.start({ cwd: dir }).id;
+      lab.send({ id: "1", type: "inspect", agent: id, what: "system" });
+      expect(await lab.next("inspected")).toEqual({ type: "inspected", id: "1", agent: id, what: "system", data: { asked: "system" } });
+      // Anything else asks for the last request.
+      lab.send({ id: "2", type: "inspect", agent: id, what: "everything" });
+      expect((await lab.next("inspected")).data).toEqual({ asked: "request" });
+      lab.send({ id: "3", type: "inspect", agent: "nobody", what: "tools" });
+      expect(((await lab.next("error")) as { detail: string }).detail).toBe("no agent nobody");
+      lab.close();
     } finally {
       hub.stop();
     }

@@ -1,19 +1,21 @@
 // RPC mode: JSONL over stdio, one object per line, in both directions.
 //
 // Commands in: prompt, steer, follow_up, abort, get_state, get_messages, and (with a command host)
-// get_commands and command: the slash commands a phone runs; approve answers an approval_request. Events out: the AgentEvent stream.
+// get_commands and command: the slash commands a phone runs; approve answers an approval_request;
+// inspect gives what the model sees (Kinoko Lab). Events out: the AgentEvent stream.
 // steer, follow_up and abort work while a run is in progress, because they go straight to the
 // Agent. One request at a time: a second prompt while busy is refused, never queued silently.
 
-import type { Agent, RunResult } from "./loop.ts";
-import type { AgentEvent } from "./loop.ts";
+import type { AgentEvent, RunResult } from "./agent-events.ts";
+import type { Agent } from "./loop.ts";
 import type { ApprovalBy } from "./approvals.ts";
 import type { Image, Message } from "./types.ts";
 import { commandList, runCommand } from "./commands.ts";
 import type { CommandHost, CommandInfo, CommandResult } from "./commands.ts";
+import type { Inspectable } from "./inspect.ts";
 
 export interface RpcCommand {
-  type: "prompt" | "steer" | "follow_up" | "abort" | "get_state" | "get_messages" | "get_commands" | "command" | "approve";
+  type: "prompt" | "steer" | "follow_up" | "abort" | "get_state" | "get_messages" | "get_commands" | "command" | "approve" | "inspect";
   name?: string; // command: which (new, thinking, extensions…)
   arg?: string; // command: what to do with it ("off web", "high")
   text?: string;
@@ -23,6 +25,7 @@ export interface RpcCommand {
   allow?: boolean; // approve: run it or not
   remember?: boolean; // approve: allow the same call for the rest of the session
   by?: ApprovalBy; // approve: who answered ("app" when not said)
+  what?: Inspectable; // inspect: the last request, the system prompt or the tools
 }
 
 export interface RpcReply {
@@ -34,6 +37,7 @@ export interface RpcReply {
   messages?: Message[]; // get_messages: the conversation so far
   commands?: CommandInfo[]; // get_commands
   result?: CommandResult; // command
+  data?: unknown; // inspect
 }
 
 export interface RpcState {
@@ -134,6 +138,13 @@ export class Rpc {
         const by = command.by === "telegram" || command.by === "tui" ? command.by : "app";
         const settled = this.#agent.approve(command.request, command.allow, { by, remember: command.remember === true });
         this.#reply(settled ? { type: "ok", id: command.id, text: command.allow ? "allowed" : "denied" } : { type: "error", id: command.id, detail: "not waiting: already answered" });
+        return;
+      }
+      case "inspect": {
+        const what = command.what;
+        if (what !== "request" && what !== "system" && what !== "tools") return this.#reply({ type: "error", id: command.id, detail: "inspect needs what: request, system or tools" });
+        const data = this.#agent.inspect(what);
+        this.#reply(data === undefined ? { type: "error", id: command.id, detail: "nothing sent to the model yet" } : { type: "ok", id: command.id, data });
         return;
       }
       case "get_commands":
