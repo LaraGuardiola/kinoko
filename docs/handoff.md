@@ -88,7 +88,17 @@ Each repo has its own AGENTS.md. kinoko-android: `./gradlew testDebugUnitTest as
   a non-blocking `music wait` in cliamp.
 - Android: the release build still signs with the debug key; no npm package; no FUNDING.yml.
 
-## Next: the harness flow visualizer (agreed, not started)
+## Next: Kinoko Lab, the harness flow visualizer (in progress)
+
+Design reviewed and decided: docs/visualizer.md (its "Decisions" and "Order of work"). Done:
+step 1, the loop's finer events and `inspect` (feat/lab-events); step 2, the live page at `/lab`
+(feat/lab-page: src/serve/lab, `kinoko serve lab`). Next: step 3 replay, step 4 breakpoints (from
+the page only: the owner does not want the TUI touched). To see it: a test hub
+(`kinoko serve --local --no-lan --port 7880` with a test HOME), `kinoko serve lab` with the same
+HOME, a TUI with that HOME (it links itself), and headless Chromium driven over CDP for screenshots
+(`chromium --headless=new --remote-debugging-port=9333`).
+
+The brief it started from:
 
 The owner definitely wants this, "for me and for the world to understand what a harness is":
 an interactive, live diagram of everything kinoko does, web, beautiful, **"like Factorio"**, in

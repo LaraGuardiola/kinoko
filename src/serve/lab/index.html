@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Kinoko Lab</title>
+    <link rel="stylesheet" href="./lab.css" />
+  </head>
+  <body>
+    <header class="bar">
+      <div class="brand">
+        <span id="mascot" class="mascot"></span>
+        <span class="brand-name">Kinoko <b>Lab</b></span>
+        <span id="link" class="link" title="Connecting…"></span>
+      </div>
+      <label class="picker">
+        <span class="picker-label">Agent</span>
+        <select id="agent" aria-label="The agent to follow"></select>
+      </label>
+      <div id="speed" class="speed" role="group" aria-label="Speed"></div>
+    </header>
+
+    <main>
+      <p class="intro">
+        A live look inside <b>kinoko</b>, a coding-agent harness. The model only writes text; everything else on this
+        floor is the harness around it. Tap a machine to see what it holds right now.
+      </p>
+      <p id="caption" class="caption" aria-live="polite"></p>
+      <div id="board" class="board"></div>
+      <p id="stats" class="stats"></p>
+    </main>
+
+    <aside id="drawer" class="drawer" aria-hidden="true"></aside>
+
+    <div id="signin" class="signin" hidden>
+      <div class="signin-card">
+        <h1>Kinoko Lab</h1>
+        <p>This page shows a kinoko agent at work. It needs the hub's permission, like any device.</p>
+        <p>On the computer running <code>kinoko serve</code>, run:</p>
+        <pre>kinoko serve lab</pre>
+        <p>and open the link it prints (or scan its QR code with your phone). The link works once, for ten minutes.</p>
+      </div>
+    </div>
+
+    <script type="module" src="./page/main.ts"></script>
+  </body>
+</html>

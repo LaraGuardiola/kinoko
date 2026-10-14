@@ -1,6 +1,7 @@
 // `kinoko serve`: the hub the phone app talks to.
 //   kinoko serve [--port 7878] [--public-port 8443] [--lan-port 7879] [--funnel | --local | --no-lan | --no-tailscale]
 //   kinoko serve pair          a QR code to pair a device (starting the hub when it is not running)
+//   kinoko serve lab           links to Kinoko Lab (a live view of the harness), paired once each
 //   kinoko serve devices       the paired devices
 //   kinoko serve revoke <id>   forget one
 // By default it is shared with your tailnet through Tailscale (`--funnel`: with the internet;
@@ -76,6 +77,19 @@ async function showPairing(devices: Devices, url: string, lan?: State["lan"]): P
   if (url.startsWith("http://127.0.0.1") && !lan) out(dim("this address is this computer only: without Tailscale the phone cannot reach it"));
 }
 
+/** Kinoko Lab's links: one for this computer's browser, one (and its QR) for the phone. Each pairs once. */
+async function showLab(devices: Devices, state: State): Promise<void> {
+  const here = `http://127.0.0.1:${state.port}/lab#c=${await devices.code()}`;
+  out(`Kinoko Lab, a live look inside kinoko: open ${bold(here)}`);
+  if (!state.url.startsWith("http://127.0.0.1")) {
+    const away = `${state.url}/lab#c=${await devices.code()}`;
+    out("");
+    out(qrText(away));
+    out(`On the phone (through Tailscale): scan it, or open ${away}`);
+  }
+  out(dim("Each link works once, for ten minutes; the browser stays paired (`kinoko serve devices`)."));
+}
+
 export async function runServe(argv: string[], opts: { command: string[]; version: string }): Promise<void> {
   const devices = new Devices(join(HOME, "serve.json"));
   const sub = argv[0]?.startsWith("--") ? undefined : argv[0];
@@ -89,6 +103,16 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
       return;
     }
   }
+  if (sub === "lab") {
+    const state = await running();
+    if (state === undefined) {
+      out("kinoko serve is not running: start it first (`kinoko serve`), then `kinoko serve lab`.");
+      process.exitCode = 1;
+      return;
+    }
+    await showLab(devices, state);
+    return;
+  }
   if (sub === "devices") {
     const list = await devices.list();
     if (list.length === 0) out("no paired devices: `kinoko serve pair`");
@@ -101,7 +125,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
     return;
   }
   if (sub !== undefined && !pairNow) {
-    out(`unknown: kinoko serve ${sub} (pair, devices, revoke)`);
+    out(`unknown: kinoko serve ${sub} (pair, lab, devices, revoke)`);
     process.exitCode = 1;
     return;
   }

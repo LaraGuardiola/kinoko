@@ -29,7 +29,7 @@ the page shows; the source is where a curious reader goes next.
 | **Gate** | Extensions' `tool_call` decision: pass, rewrite, block, or ask | "Policy lives in extensions. permission-gate asks before `rm -rf`." | ext.ts, approvals.ts |
 | **Approval desk** | A call waiting for the user (TUI, phone, Telegram; first answer wins) | "The loop waits here, but Esc still cuts it." | approvals.ts |
 | **Workbench** | The tool running (read, write, edit, bash, search, todo, extensions') | "This is kinoko acting on your machine." | tools/ |
-| **Background yard** | Shells left running (`bash background: true`), their own lane | "Not part of the run: they outlive it and tell the model when they end." | jobs.ts |
+| **Shell yard** | Shells left running (`bash background: true`), their own lane | "Not part of the run: they outlive it and tell the model when they end." | jobs.ts |
 | **Return belt** | Results going back into the history (`ERROR: …` is a failed one) | "A tool error is just a message. The loop never crashes on one." | loop.ts |
 | **Queue** | Steers and follow-ups waiting | "What you typed mid-run. A steer goes in at the next step, a follow-up when it would stop." | loop.ts |
 | **Exit** | The run's end and its reason: done, aborted, limit, error | "Why it stopped." | loop.ts |
@@ -152,6 +152,12 @@ works, with tests for: abort while paused, step through a whole run, no cost whe
   14,210 tokens of prompt (62%)…", "permission-gate asked you about `rm -rf build`".
 
 ## 7. Order of work (each its own branch, each tested and shown before the next)
+
+Built so far: 1 (feat/lab-events) and 2 (feat/lab-page). Two things came out differently from the
+plan above: the phone does not get the wide floor turned into a single line but a floor of its own,
+two machines across (src/serve/lab/machines.ts `PHONE_FLOOR`, the same belts laid), and the
+Background yard is called the Shell yard. Each tile also carries a few words that say what it is
+("the model's memory", "one per step").
 
 1. **Events**: the five new events in loop.ts, `inspect` in rpc.ts and the hub, protocol.md. Tests.
 2. **The page, live**: `/lab`, pairing by link, the board, the machines driven by events, the

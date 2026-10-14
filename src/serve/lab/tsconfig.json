@@ -1,0 +1,11 @@
+{
+  // Kinoko Lab's page runs in a browser: DOM types, no Bun. It may import types from the core only
+  // where they are pure (agent-events.ts and what it names); the root tsconfig leaves page/ out.
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": []
+  },
+  "include": ["page", "*.ts"],
+  "exclude": []
+}

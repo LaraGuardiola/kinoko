@@ -32,7 +32,7 @@ Pi-style: small core, six tools (read, write, edit, bash, search, todo), everyth
 
 ## Checks (all must pass with zero warnings before you report)
 - `bun run lint`      (oxlint, with --deny-warnings)
-- `bunx tsc --noEmit`
+- `bunx tsc --noEmit` (and `bunx tsc --noEmit -p src/serve/lab`: Kinoko Lab's page, with DOM types)
 - `bun test`
 `bun run check` runs all three. oxlint is the only linter: add no other linter or formatter.
 Never disable a rule just to make code pass; fix the code. A disable comment needs a one-line reason.
@@ -57,6 +57,7 @@ src/context.ts     AGENTS.md / skills discovery      src/prompt.ts  system promp
 src/session.ts     append-only JSONL (id + parentId)  src/compact.ts threshold compaction
 src/ext.ts         extension loader + event bus       src/config.ts  layered config
 src/serve/         `kinoko serve`: hub for the phone app (agents as rpc children, devices, QR, Tailscale)
+src/serve/lab/     Kinoko Lab: the live harness view at /lab (pure floor logic here, the browser's in page/)
 src/commands.ts    slash commands for the phone (rpc)   src/disabled.ts extensions/skills switched off
 src/tui/           raw-ANSI renderer, editor, markdown-lite, slash menu, side panel (plan + git changes);
                    app.ts wires the TUI's parts together (its header lists them: scrollback, run-view, ...)

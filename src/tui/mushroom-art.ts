@@ -1,9 +1,10 @@
-// Kinoko in the terminal: the app's mushroom as pixel art, two pixels per character (▀ ▄ with
-// 24-bit colours), with the face of the profile in use, as the phone draws it. Amanita goes super
-// saiyan, Psilocybe is past the wardrobe, Shiitake wears glasses, Morchella round gold ones, Cordyceps
-// conducts the orchestra, Mycena is already leaving. Any other profile, or none: the plain smile.
+// Kinoko in the terminal (and in Kinoko Lab): the app's mushroom as pixel art, two pixels per
+// character (▀ ▄ with 24-bit colours), with the face of the profile in use, as the phone draws it.
+// Amanita goes super saiyan, Psilocybe is past the wardrobe, Shiitake wears glasses, Morchella round
+// gold ones, Cordyceps conducts the orchestra, Mycena is already leaving. Any other profile, or
+// none: the plain smile.
 
-const RGB: Record<string, string> = {
+export const MUSHROOM_RGB: Record<string, string> = {
   R: "232;36;36", // cap
   W: "238;222;186", // cream: spots, stem
   K: "21;22;30", // ink: eyes, mouth
@@ -109,13 +110,19 @@ const FACES: Record<string, (grid: Grid) => void> = {
 // oxlint-disable-next-line no-control-regex -- the colours are exactly what is cut
 const empty = (row: string): boolean => row.replace(/\x1b\[[0-9;]*m/g, "").trim() === "";
 
-const fg = (c: string): string => `\x1b[38;2;${RGB[c]}m`;
-const bg = (c: string): string => `\x1b[48;2;${RGB[c]}m`;
+const fg = (c: string): string => `\x1b[38;2;${MUSHROOM_RGB[c]}m`;
+const bg = (c: string): string => `\x1b[48;2;${MUSHROOM_RGB[c]}m`;
+
+/** The mushroom for `profile` as 20 × 18 colour letters (MUSHROOM_RGB), "." where it is empty. */
+export function mushroomGrid(profile?: string): string[][] {
+  const grid: Grid = BASE.map((row) => row.split(""));
+  FACES[profile ?? ""]?.(grid);
+  return grid;
+}
 
 /** The mushroom for `profile` as terminal rows, its empty rows above and below left out. */
 export function mushroomArt(profile?: string): string[] {
-  const grid: Grid = BASE.map((row) => row.split(""));
-  FACES[profile ?? ""]?.(grid);
+  const grid = mushroomGrid(profile);
   const rows: string[] = [];
   for (let y = 0; y < grid.length; y += 2) {
     const top = grid[y] ?? [];

@@ -4,8 +4,17 @@
 // the harness does between the lines a chat shows, and a client that does not draw them ignores them.
 
 import type { ApprovalBy } from "./approvals.ts";
-import type { RequestSize } from "./inspect.ts";
 import type { Message, ToolCall } from "./types.ts";
+
+/** What a request carries (inspect.ts measures it). */
+export interface RequestSize {
+  messages: number;
+  tools: number;
+  /** Everything the model reads: the system prompt, the tool schemas, the history. */
+  chars: number;
+  /** An estimate: the server's own count of the last reply when there is one, chars/4 otherwise. */
+  tokens: number;
+}
 
 /** Why a message joined the history: the user's, the model's, a tool's, or the harness's own. */
 export type AppendKind = "prompt" | "steer" | "follow_up" | "reply" | "result" | "note" | "nudge";
