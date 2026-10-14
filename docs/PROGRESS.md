@@ -1058,3 +1058,16 @@ Deferred, for whenever an Anthropic model is actually needed:
 - handoff.md and visualizer.md: steps 1 and 2 shipped; replay dropped (the owner does not miss it);
   breakpoints left as an idea, not a to-do. Also removed music-watch from kinoko-extensions (and from
   ~/.kinoko/ext and disabled.json), at the owner's request.
+
+## docs/voice: dictation and speech, the design
+- docs/voice.md: what the spike measured (Qwen3-TTS via qwentts.cpp: CPU too slow beside the LLM,
+  CUDA ~6× real time in ~2.6 GB with the LLM at NCMOE 36; whisper.cpp large-v3-turbo for Spanish),
+  the shape (one `voice` extension, three core hooks: agent_event, interrupt, registerKey), the
+  backends (OpenAI-compatible HTTP or a command), the order of work, three open questions.
+- Then, from the owner: a listening mode while kinoko is open, and barge-in (speaking over kinoko
+  cuts it and becomes a steer at once): section 4b, core hook `send`, step 5.
+- Then the owner's decisions: Ctrl+Space turns voice mode on/off (all off at start), the wake word
+  is "kinoko", no separate dictation key. Spike: whisper large-v3-turbo on the CPU always encodes
+  30 s (~9.5 s a phrase); small q5_1 with the window sized to the clip and primed with "Kinoko":
+  0.2–0.35 s, the name right 4 of 4 (synthesized audio; a real microphone still to test).
+- Not built: anything. The spike's builds and samples live in the session scratchpad only.
