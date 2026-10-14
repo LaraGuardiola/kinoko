@@ -1,12 +1,15 @@
-# Voice: dictation in, speech out (design)
+# Voice: talking with kinoko (design)
 
-Two features for the TUI, both from the owner (2026-10-14):
+"The dream of talking with robots" (the owner, 2026-10-14). Three features for the TUI:
 
 - **Dictation (STT)**: a key starts recording, the same key stops it, and the words land in the
   editor to read over before sending. Pluggable backends.
 - **Speech (TTS)**, "the dream": kinoko reads its replies aloud **while the model writes them**,
   sentence by sentence, in a cloned voice of your choosing, Spanish with a Spain accent, and
   **it can be cut** like a run (Esc).
+- **Conversation**, the goal: kinoko listens for as long as it is open. Say something and it is a
+  prompt; say something **while it talks or works** and it stops talking and takes it as a steer
+  **at once** (barge-in). Section 4b.
 
 For the owner and for their partner, so Spanish first, multilingual welcome. Nothing is built
 yet: section 6 is the order of work, section 7 the questions still open.
@@ -83,6 +86,37 @@ Zero runtime dependencies: `fetch`, `Bun.spawn`, PipeWire's `pw-record` and `pw-
   registers them with the server when it starts and again if the server restarts.
   `/voice <name>` picks one, `/voice off` and `/voice on` toggle speech, `/voice` lists them.
 
+## 4b. Conversation: always listening, barge-in
+
+Turned on with `/voice listen` (until kinoko closes or `/voice listen off`), or the dictation key
+held to its own job. While it is on, a line under the editor says so: "● listening".
+
+- **The microphone streams** (`pw-record`, 16 kHz mono raw PCM on stdout) into the extension.
+- **Voice activity**: a small detector in the extension (energy over a noise floor that adapts,
+  with a short hangover; plain TypeScript, tested on recorded PCM) finds where speech starts and ends.
+- **Barge-in**: 300 ms of speech while kinoko talks **cuts its voice at once** (the same path as
+  Esc), before the words are even transcribed.
+- **The utterance**: when ~700 ms of silence ends it, the segment goes to the STT backend, and the
+  text becomes **a prompt when idle, a steer sent now when a run is going** (Alt+X's path: the
+  reply being streamed is cut and the model reads the steer next). It shows in the transcript as
+  the user's message, marked as spoken.
+- **Noise is not a prompt**: empty transcripts and whisper's known hallucinations on silence
+  ("Gracias.", "Subtítulos por…") are dropped; so is anything shorter than ~2 words, unless asked.
+- **Its own voice is not the user**: kinoko speaks through the laptop's speakers and listens with
+  its microphone, so without care it would interrupt itself. PipeWire's echo-cancel module
+  (WebRTC AEC, installed here: `libpipewire-module-echo-cancel`, `libspa-aec-webrtc`) gives a
+  microphone with what the speakers play taken out, cliamp's music included; the extension records
+  from it. Part of this machine's setup (step 4). With headphones it is not needed.
+- **The room**: an open microphone hears everyone (the TV, a call). An optional **wake word**
+  (`"wake": "kinoko"`: only utterances that start with it count) and the key to mute it at once.
+
+**Latency** (to measure): the end of speech ~0.7 s, the transcription ~0.5–1.5 s on the CPU, then
+the model. In conversation the STT's speed matters more than in dictation: if the CPU is too slow,
+a smaller whisper model, or the GPU with NCMOE a little higher.
+
+Core hook 4, for this: **`k.send(text, { as: "prompt" | "steer_now" })`**, the extension speaking
+for the user, exactly as if typed.
+
 ## 5. Backends (config: `~/.kinoko/voice.json`)
 
 Two kinds, both for STT and TTS, so any engine fits:
@@ -104,20 +138,26 @@ Two kinds, both for STT and TTS, so any engine fits:
 ## 6. Order of work (one branch each, merged before the next)
 
 1. **Core hooks** (kinoko, `feat/ext-voice-hooks`): `agent_event`, `interrupt` (and Esc while idle
-   firing it), `registerKey` with `insert` and `status`. Tests. api.ts in kinoko-extensions.
+   firing it), `registerKey` with `insert` and `status`, `send`. Tests. api.ts in kinoko-extensions.
 2. **Dictation** (kinoko-extensions, `feat/voice-dictation`): recording, both backend kinds,
    `voice.json`. Measured on Spanish phrases.
 3. **Speech** (kinoko-extensions, `feat/voice-speech`): the sentence splitter (tested hard), the
    queue, playback, cutting, voices, `/voice`. Checked by ear by the owner.
 4. **This machine**: whisper.cpp and qwentts.cpp built with CUDA under `~/Projects`, models in place,
    `~/bin/tts-serve.sh` and `~/bin/stt-serve.sh` beside `lfm-serve.sh` (its NCMOE to 36), the
-   Wheatley voice in `~/.kinoko/voices`.
+   Wheatley voice in `~/.kinoko/voices`, PipeWire's echo cancellation.
+5. **Conversation** (kinoko-extensions, `feat/voice-listen`): the streaming microphone, voice
+   activity, barge-in, utterances as prompts and steers, the wake word. Tuned by voice with the owner.
 
 Not in this work: the phone and Kinoko Lab (the phone already has its keyboard's dictation; speech
-there would be the hub streaming audio, a feature of its own), talking over the voice to cut it.
+there would be the hub streaming audio, a feature of its own).
 
-## 7. Open questions for the owner
+## 7. Decisions and open questions
 
-1. Ctrl+Space for dictation, or another key?
+Decided (2026-10-14): a key for dictation **and** a mode that listens while kinoko is open;
+speaking over kinoko cuts it and becomes a steer at once.
+
+Open:
+1. Ctrl+Space for dictation and to mute the listening, or another key?
 2. Speech on by default once set up, or off until `/voice on`?
-3. The STT on the CPU (GPU free for the LLM and the TTS), or on the GPU too (faster, ~1 GB more)?
+3. The wake word: off (everything said is for kinoko) or on ("kinoko, …")?

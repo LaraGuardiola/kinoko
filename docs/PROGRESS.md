@@ -1064,4 +1064,6 @@ Deferred, for whenever an Anthropic model is actually needed:
   CUDA ~6× real time in ~2.6 GB with the LLM at NCMOE 36; whisper.cpp large-v3-turbo for Spanish),
   the shape (one `voice` extension, three core hooks: agent_event, interrupt, registerKey), the
   backends (OpenAI-compatible HTTP or a command), the order of work, three open questions.
+- Then, from the owner: a listening mode while kinoko is open, and barge-in (speaking over kinoko
+  cuts it and becomes a steer at once): section 4b, core hook `send`, step 5.
 - Not built: anything. The spike's builds and samples live in the session scratchpad only.
