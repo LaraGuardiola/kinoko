@@ -13,7 +13,7 @@ import type { Key } from "./term.ts";
 import { Editor } from "./editor.ts";
 import { Renderer } from "./render.ts";
 import type { RenderState } from "./render.ts";
-import { ABORTED, formatBlock, liveRegion, splitStable, statusLine, wrapTo } from "./view.ts";
+import { ABORTED, formatBlock, liveRegion, statusLine, wrapTo } from "./view.ts";
 import { errorBlock, pulseLevel, toolBlock, toolFailed, toolSummary } from "./tools.ts";
 import { TODO_TOOL } from "./todos.ts";
 import type { Todo } from "./todos.ts";
@@ -36,7 +36,7 @@ import type { SavedModel } from "../config.ts";
 import type { Served } from "../providers/openai-compat.ts";
 import type { Provider } from "../types.ts";
 import { actionFor } from "./keys.ts";
-import type { BlockKind, OpenBlock, QueuedView, Region, ToolLine, ToolView } from "./view.ts";
+import type { QueuedView, Region, ToolLine, ToolView } from "./view.ts";
 import type { Agent, RunResult } from "../loop.ts";
 import type { AgentEvent } from "../loop.ts";
 import type { Session } from "../session.ts";
@@ -49,6 +49,7 @@ import { FilePicker } from "./files.ts";
 import { compactingNote } from "./sprout.ts";
 import { ANSI, cells, stripAnsi } from "./style.ts";
 import { Marker } from "./marker.ts";
+import { Scrollback } from "./scrollback.ts";
 import { COPY, copyFor } from "./code.ts";
 import type { CompactProgress } from "../compact.ts";
 import { SidePanel } from "./side.ts";
@@ -152,6 +153,7 @@ export interface ModelsHost {
 export class App {
   #agent: Agent;
   #renderer: Renderer;
+  #scrollback: Scrollback;
   #parser = new KeyParser();
   #editor: Editor;
   #model: string;
@@ -180,8 +182,6 @@ export class App {
   #rebuild: (() => Agent) | undefined;
   #onQuit: (() => void) | undefined;
   #handOver: AppOptions["handOver"];
-  /** The terminal is the shell's: nothing is painted, and what would be printed waits here. */
-  #away: Array<() => void> | undefined;
   #placeOf: (() => Promise<string>) | undefined;
   #place = "";
   #images = new ImageRegistry();
@@ -192,10 +192,7 @@ export class App {
   #integrations: AppOptions["integrations"];
 
   #running = false;
-  // The block being streamed (thinking or answer).
-  #open: OpenBlock | undefined;
   #thinkingSeen = false; // this message already streamed its thinking
-  #printedAny = false; // something is already in the scrollback: every later block gets a blank row above
   #tool: ToolView | undefined;
   // The reply's calls not started yet, in order: written so far while it streams, then all of them.
   #calls: Array<{ id?: string; index?: number; name: string; args: string }> = [];
@@ -223,6 +220,7 @@ export class App {
       columns: () => this.#viewportCols ?? 80,
       rows: () => (this.#viewportRows ?? 23) + 1,
     });
+    this.#scrollback = new Scrollback({ renderer: this.#renderer, state: () => this.#state(), columns: () => this.#printCols });
     this.#editor = new Editor({ history: opts.history?.sent, onRemember: opts.history?.add });
     this.#model = opts.model;
     this.#window = opts.contextWindow;
@@ -275,7 +273,7 @@ export class App {
 
   /** Repaints the live region (throttled). */
   render(): void {
-    if (this.#away) return;
+    if (this.#scrollback.held) return;
     this.#renderer.update(this.#state());
     this.#renderer.frame();
     const menuOpen = this.#menu.page !== undefined || (this.#rootItems()?.length ?? 0) > 0;
@@ -289,8 +287,8 @@ export class App {
 
   /** A resumed session: its conversation goes to the scrollback, and the context counter is back. */
   replay(messages: Message[], note: string): void {
-    this.#print("system", note);
-    for (const block of replayBlocks(messages, this.#printCols)) this.#print(block.kind, block.text, undefined, undefined, block.render && ((w) => block.render!(w + 2)));
+    this.#scrollback.print("system", note);
+    for (const block of replayBlocks(messages, this.#printCols)) this.#scrollback.print(block.kind, block.text, undefined, undefined, block.render && ((w) => block.render!(w + 2)));
     this.#images.startAfter(messages.reduce((n, m) => n + (m.images?.length ?? 0), 0));
     this.#side.history(messages);
     const usage = messages.findLast((m) => m.usage !== undefined)?.usage;
@@ -308,7 +306,7 @@ export class App {
   intro(text: string, gap = false): void {
     this.#panel = { text, gap };
     this.#panelStale = false;
-    this.#print("system", formatBlock("system", text, this.#width), gap, "capabilities", (w) => formatBlock("system", text, w));
+    this.#scrollback.print("system", formatBlock("system", text, this.#scrollback.width), gap, "capabilities", (w) => formatBlock("system", text, w));
   }
 
   /** The [Capabilities] lines as they are now: rewritten in place while on screen, else marked
@@ -317,14 +315,11 @@ export class App {
     const panel = this.#panel;
     const fresh = await this.#capabilities?.().catch(() => undefined);
     if (panel === undefined || fresh === undefined) return;
-    if (this.#away) {
-      this.#away.push(() => void this.#refreshCapabilities());
-      return;
-    }
+    if (this.#scrollback.later(() => void this.#refreshCapabilities())) return;
     const text = withCapabilities(panel.text, fresh);
     if (text === panel.text) return;
     panel.text = text;
-    const printed = formatBlock("system", text, this.#width);
+    const printed = formatBlock("system", text, this.#scrollback.width);
     const source = (w: number): string => `${panel.gap ? "\n" : ""}${formatBlock("system", text, w)}`;
     if (!this.#renderer.rewrite("capabilities", panel.gap ? `\n${printed}` : printed, source)) this.#panelStale = true;
     this.render();
@@ -394,7 +389,7 @@ export class App {
   // ---- input ----
 
   handleKey(key: Key): void {
-    if (this.#away) return; // the shell has the keyboard (a stray SIGINT included)
+    if (this.#scrollback.held) return; // the shell has the keyboard (a stray SIGINT included)
     // The terminal answering the size query: the side panel may come or go.
     if (key.name === "size-report" || key.name === "cursor-report") {
       if (key.size) this.#side.size(key.size);
@@ -480,7 +475,7 @@ export class App {
     }
     if (text.startsWith("/")) {
       this.#editor.clear();
-      if (!(await this.command(text))) this.#print("system", `unknown command ${text}: try /help`);
+      if (!(await this.command(text))) this.#scrollback.print("system", `unknown command ${text}: try /help`);
       this.render();
       return;
     }
@@ -546,19 +541,17 @@ export class App {
       return;
     }
     this.#marker.clear();
-    this.#print("system", command ? `${ANSI.dim}!${ANSI.reset} ${command}` : `${ANSI.dim}your shell: exit (or Ctrl-D) comes back to kinoko${ANSI.reset}`);
+    this.#scrollback.print("system", command ? `${ANSI.dim}!${ANSI.reset} ${command}` : `${ANSI.dim}your shell: exit (or Ctrl-D) comes back to kinoko${ANSI.reset}`);
     this.#renderer.update(this.#state());
     this.#renderer.flush();
-    this.#away = [];
+    this.#scrollback.hold();
     this.#renderer.suspend();
     const code = await this.#handOver(command).catch(() => -1);
-    const held = this.#away;
-    this.#away = undefined;
     this.#renderer.resume();
     // The shell turned the mouse off: clicks (⧉, the jobs label) are kinoko's again.
     this.#mouse = false;
     this.#write("\x1b[?1000h\x1b[?1006h");
-    for (const print of held) print();
+    this.#scrollback.release();
     if (code !== 0) this.#marker.warn(`${command ? "the command" : "the shell"} exited with ${code}`);
     this.render();
   }
@@ -628,11 +621,11 @@ export class App {
         }
         return;
       case "message_delta":
-        this.#append("assistant", e.delta);
+        this.#scrollback.append("assistant", e.delta);
         return;
       case "thinking_delta":
         this.#thinkingSeen = true;
-        this.#append("thinking", e.delta);
+        this.#scrollback.append("thinking", e.delta);
         return;
       case "request_start":
         // A request starts afresh: calls left from the last reply (an unknown tool's) are gone.
@@ -641,7 +634,7 @@ export class App {
         return;
       case "tool_pending": {
         // The text before the call is final; the call itself shows at once, its bullet pulsing.
-        this.#closeBlock();
+        this.#scrollback.closeBlock();
         // Its name first, then what it acts on as soon as that arg is complete (a write's path).
         // Each call of the reply has its own row: a new index is a new call.
         const args = e.args ? toolSummary(e.name, e.args, false) : "";
@@ -652,7 +645,7 @@ export class App {
         return;
       }
       case "tool_start": {
-        this.#closeBlock();
+        this.#scrollback.closeBlock();
         const at = this.#calls.findIndex((c) => c.id === e.call.id);
         this.#calls.splice(at < 0 ? 0 : at, 1);
         this.#side.toolCall(e.call);
@@ -698,7 +691,7 @@ export class App {
         return;
       case "retry":
         // What streamed before the failure stays on screen; the model starts that reply over.
-        this.#closeBlock();
+        this.#scrollback.closeBlock();
         this.#calls = [];
         this.#thinkingSeen = false;
         this.#marker.warn(`${e.error} · retry ${e.attempt}/${e.of} in ${Math.round(e.inMs / 1000)}s`);
@@ -740,14 +733,14 @@ export class App {
       this.#tokens.output += usage.output ?? 0;
       this.#cost += usage.cost ?? 0;
     }
-    this.#closeBlock();
+    this.#scrollback.closeBlock();
     // The calls as written, each on its row until it runs; one cut off before its args were complete
     // never starts, so its pulsing line goes.
     if (message.role === "assistant") this.#written = true;
     if (message.role === "assistant") this.#calls = (message.toolCalls ?? []).map((tc) => ({ id: tc.id, name: tc.name, args: toolSummary(tc.name, tc.args) }));
     // A provider that only reports the reasoning at the end (no deltas): better late than lost.
     const thinking = message.thinking ?? "";
-    if (!this.#thinkingSeen && thinking.trim() !== "") this.#print("thinking", formatBlock("thinking", thinking));
+    if (!this.#thinkingSeen && thinking.trim() !== "") this.#scrollback.print("thinking", formatBlock("thinking", thinking));
     this.#thinkingSeen = false;
     this.render();
   }
@@ -763,12 +756,12 @@ export class App {
   #printTool(): void {
     const tool = this.#tool;
     if (!tool) return;
-    this.#closeBlock();
+    this.#scrollback.closeBlock();
     this.#tool = undefined;
     // With the side column on, the plan is there: its todo calls need no block in the transcript.
     if (tool.name === TODO_TOOL && !tool.aborted && !toolFailed(tool.output) && this.#sideOn) return;
     const full = this.#toolBlocksFull;
-    this.#print("tool", toolBlock(tool, full, this.#printCols), undefined, undefined, (w) => toolBlock(tool, full, w + 2));
+    this.#scrollback.print("tool", toolBlock(tool, full, this.#printCols), undefined, undefined, (w) => toolBlock(tool, full, w + 2));
   }
 
   #refreshPlace(): void {
@@ -786,7 +779,7 @@ export class App {
     this.#running = false;
     this.#calls = [];
     this.#queued = [];
-    this.#closeBlock();
+    this.#scrollback.closeBlock();
     this.#thinkingSeen = false;
     if (dropped !== undefined && dropped.length > 0) {
       // Nothing the user typed is ever lost: it goes back into the editor.
@@ -799,61 +792,13 @@ export class App {
     } else if (reason === "error") {
       // A failed run says why where it happened, on a band like a failed tool's; the marker points at it.
       const why = detail ?? "unknown error";
-      this.#print("tool", errorBlock(why, this.#width), undefined, undefined, (w) => errorBlock(why, w));
+      this.#scrollback.print("tool", errorBlock(why, this.#scrollback.width), undefined, undefined, (w) => errorBlock(why, w));
       this.#marker.warn("Stopped — error");
     } else if (reason === "limit") {
       // A run that stops on its own must say why, or it looks like the model gave up.
       this.#marker.warn(`Stopped — ${detail ?? reason}`);
     }
     this.render();
-  }
-
-  // ---- ordered blocks ----
-
-  /** Adds streamed text to the open block; a different kind of text closes it first. */
-  #append(kind: "thinking" | "assistant", delta: string): void {
-    if (this.#open !== undefined && this.#open.kind !== kind) this.#closeBlock();
-    // Whitespace between two blocks must not open a block of its own.
-    if (this.#open === undefined && delta.trim() === "") return;
-    const open = (this.#open ??= { kind: kind, text: "", gap: this.#printedAny });
-    open.text += delta;
-    this.#spill();
-  }
-
-  /** Streaming text taller than the region: the stable head moves to the scrollback, in order. */
-  #spill(): void {
-    const open = this.#open;
-    if (open === undefined) return;
-    const split = splitStable(open.text, this.#printCols);
-    if (split === undefined) return;
-    const chunk = formatBlock(open.kind, split.commit, this.#width);
-    const gap = open.gap;
-    this.#open = { kind: open.kind, text: split.rest, gap: split.gap };
-    if (chunk !== "") this.#print(open.kind, chunk, gap, undefined, (w) => formatBlock(open.kind, split.commit, w));
-  }
-
-  /** Prints what is left of the open block and forgets it. */
-  #closeBlock(): void {
-    const open = this.#open;
-    if (open === undefined) return;
-    this.#open = undefined;
-    const text = formatBlock(open.kind, open.text, this.#width);
-    if (text !== "") this.#print(open.kind, text, open.gap, undefined, (w) => formatBlock(open.kind, open.text, w));
-  }
-
-  /** Sends one finished piece to the scrollback. `gap` defaults to the usual blank row between blocks. */
-  #print(kind: BlockKind, text: string, gap = this.#printedAny, key?: string, render?: (width: number) => string): void {
-    if (text === "") return;
-    if (this.#away) {
-      this.#away.push(() => this.#print(kind, text, gap, key, render));
-      return;
-    }
-    // The renderer repaints the region right after the text: it has to know the current state.
-    this.#renderer.update(this.#state());
-    // `render` draws it again at another text width (a resize): a reply rewraps, a band refills.
-    const source = render && ((w: number): string => (gap ? `\n${render(w)}` : render(w)));
-    this.#renderer.printAbove(gap ? `\n${text}` : text, key, source);
-    this.#printedAny = true;
   }
 
   #syncQueued(steer: string[], followUp: string[]): void {
@@ -866,20 +811,15 @@ export class App {
 
   #echoUser(text: string): void {
     // Closing first keeps the order true: what was already streamed stays above the message.
-    this.#closeBlock();
+    this.#scrollback.closeBlock();
     // kinoko's own words to the model (a background job ended) are not the user's.
     const note = `⚙ ${text.slice(9).split("\n")[0]}`;
-    if (text.startsWith("[kinoko] ")) this.#print("system", formatBlock("system", note, this.#width), undefined, undefined, (w) => formatBlock("system", note, w));
-    else this.#print("user", formatBlock("user", text));
+    if (text.startsWith("[kinoko] ")) this.#scrollback.print("system", formatBlock("system", note, this.#scrollback.width), undefined, undefined, (w) => formatBlock("system", note, w));
+    else this.#scrollback.print("user", formatBlock("user", text));
     this.render();
   }
 
   // ---- the live region ----
-
-  /** Columns a printed row may take: the renderer keeps a margin on each side. */
-  get #width(): number {
-    return (this.#printCols ?? 80) - 2;
-  }
 
   /** The transcript's columns: the window's, less the side column's when it is on. */
   get #printCols(): number | undefined {
@@ -911,11 +851,11 @@ export class App {
     const editorWidth = Math.max(1, (cols ?? 80) - 3);
     const view = this.#editor.view(wrapTo(editorWidth));
     return liveRegion({
-      open: this.#open,
+      open: this.#scrollback.open,
       tools: this.#toolLines(),
       // Until the result is in, the bullet fades in and out (the render timer repaints each step).
       pulse: this.#tool || this.#calls.length > 0 ? pulseLevel(Date.now()) : undefined,
-      toolGap: this.#printedAny,
+      toolGap: this.#scrollback.printedAny,
       // While compacting: mushrooms and how far it is (the clock moves them on each frame).
       marker: this.#compacting ? compactingNote(this.#compacting, Date.now()) : this.#marker.text,
       markerAlert: !this.#compacting && this.#marker.tone === "alert",
@@ -943,11 +883,11 @@ export class App {
     const [name = ""] = input.replace(/^\//, "").split(" ");
     switch (name) {
       case "help":
-        this.#print("system", helpText(this.#width), undefined, undefined, (w) => helpText(w));
+        this.#scrollback.print("system", helpText(this.#scrollback.width), undefined, undefined, (w) => helpText(w));
         this.render();
         return true;
       case "model":
-        this.#print("system", `model: ${modelName(this.#model)}  context: ${this.#window} tokens`);
+        this.#scrollback.print("system", `model: ${modelName(this.#model)}  context: ${this.#window} tokens`);
         this.render();
         return true;
       case "compact": {
@@ -958,7 +898,7 @@ export class App {
       }
       case "fork": {
         const moved = await this.#forkHead();
-        this.#print("system", moved);
+        this.#scrollback.print("system", moved);
         this.render();
         return true;
       }
@@ -983,7 +923,7 @@ export class App {
 
   /** Started with no model: the panel is followed by how to set one up. */
   noModelHint(): void {
-    if (this.#noModel) this.#print("system", NO_MODEL);
+    if (this.#noModel) this.#scrollback.print("system", NO_MODEL);
     this.render();
   }
 
@@ -995,7 +935,7 @@ export class App {
     const note = this.#model === model ? mismatchNote(model, served, this.#endpoint === "" ? "the engine" : hostOf(this.#endpoint)) : undefined; // a pick came first
     if (note === undefined) return;
     const block = (width: number): string => `${ANSI.cream}${formatBlock("system", note, width)}${ANSI.reset}`;
-    this.#print("system", block(this.#width), this.#printedAny, undefined, block); // wrapped by words, again on a resize
+    this.#scrollback.print("system", block(this.#scrollback.width), this.#scrollback.printedAny, undefined, block); // wrapped by words, again on a resize
     this.render();
   }
 
@@ -1003,12 +943,12 @@ export class App {
   async #extensionCommand(name: string, args: string): Promise<boolean> {
     const run = this.#extensionCommands?.get(name);
     if (run === undefined) return false;
-    this.#print("system", `${ANSI.dim}/${name}${args ? ` ${args}` : ""}…${ANSI.reset}`);
+    this.#scrollback.print("system", `${ANSI.dim}/${name}${args ? ` ${args}` : ""}…${ANSI.reset}`);
     this.render();
     const answer = await Promise.resolve()
       .then(() => run(args))
       .catch((e: unknown) => `/${name} failed: ${e instanceof Error ? e.message : String(e)}`);
-    this.#print("system", answer);
+    this.#scrollback.print("system", answer);
     this.render();
     return true;
   }
@@ -1044,7 +984,7 @@ export class App {
     if (key.name === "ctrl-o") {
       if (column !== undefined) this.#side.toggle();
       else if (this.#side.todos.length === 0) this.#marker.warn("no plan yet");
-      else this.#print("system", planLines(this.#side.todos));
+      else this.#scrollback.print("system", planLines(this.#side.todos));
       this.render();
       return true;
     }
@@ -1386,7 +1326,7 @@ export class App {
       },
       fork: async () => {
         const moved = await this.#forkHead();
-        this.#print("system", moved);
+        this.#scrollback.print("system", moved);
         this.render();
         return moved;
       },
@@ -1666,7 +1606,7 @@ export class App {
             void this.#resumeSession(path).then(() => this.render());
           }
         : undefined,
-      width: () => this.#width,
+      width: () => this.#scrollback.width,
       open: (page) => {
         this.#menu.open(page);
         this.render();
@@ -1684,7 +1624,7 @@ export class App {
     this.#marker.clear();
     this.#renderer.update(this.#state());
     this.#renderer.clear();
-    this.#printedAny = false;
+    this.#scrollback.cleared();
   }
 
   /** /new: a new session, the model with no history; counters and plan start again. */
