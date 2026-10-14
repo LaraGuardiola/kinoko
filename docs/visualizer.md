@@ -162,8 +162,8 @@ Background yard is called the Shell yard. Each tile also carries a few words tha
 1. **Events**: the five new events in loop.ts, `inspect` in rpc.ts and the hub, protocol.md. Tests.
 2. **The page, live**: `/lab`, pairing by link, the board, the machines driven by events, the
    drawers. Checked by eye on a test hub (desktop and phone width).
-3. **Replay**: save a run, load one, the timeline.
-4. **Breakpoints**: the loop's pause, the protocol, the TUI's marker.
+3. ~~**Replay**: save a run, load one, the timeline.~~ Dropped: the owner does not miss it.
+4. **Breakpoints**: the loop's pause, the protocol (from the page only). An idea, not planned.
 
 ## Prior art
 

@@ -1053,3 +1053,8 @@ Deferred, for whenever an Anthropic model is actually needed:
   bed covering the belts laid before it, so a lit belt's cream path looked cut in places. Each belt is
   now its own group (bed + line) and a lit one is raised above the rest; its cream is brighter (75%).
 - Checked live in headless Chromium at ¼×. Not done: no unit test (SVG drawing order, checked by eye).
+
+## docs/lab-done: Kinoko Lab is done
+- handoff.md and visualizer.md: steps 1 and 2 shipped; replay dropped (the owner does not miss it);
+  breakpoints left as an idea, not a to-do. Also removed music-watch from kinoko-extensions (and from
+  ~/.kinoko/ext and disabled.json), at the owner's request.
