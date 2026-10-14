@@ -158,13 +158,27 @@ Two kinds, both for STT and TTS, so any engine fits:
 2. **Hearing** (kinoko-extensions, `feat/voice-hear`): the microphone, voice activity, the wake
    word, both backend kinds, `voice.json`, Ctrl+Space; utterances become prompts. Measured on
    Spanish phrases spoken into this laptop.
-3. **Speech** (kinoko-extensions, `feat/voice-speech`): the sentence splitter (tested hard), the
-   queue, playback, cutting, voices, `/voice`. Checked by ear by the owner.
-4. **This machine**: whisper.cpp and qwentts.cpp built with CUDA under `~/Projects`, models in place,
-   `~/bin/tts-serve.sh` and `~/bin/stt-serve.sh` beside `lfm-serve.sh` (its NCMOE to 36), the
-   Wheatley voice in `~/.kinoko/voices`, PipeWire's echo cancellation.
-5. **Conversation** (kinoko-extensions, `feat/voice-converse`): barge-in (lower, then cut or come
-   back), utterances as steers while a run goes. Tuned by voice with the owner.
+3. **Speech** (kinoko-extensions, `feat/voice-speak`): the sentence splitter (tested hard), the
+   queue, playback, cutting, voices, `/voice`. Checked by ear by the owner. Built 2026-10-14: one
+   pw-play per reply fed sentence after sentence (synthesis ~5× faster than speech, so the next is
+   ready before the last ends); the clone taught to the server as latents encoded ahead on the CPU
+   (`qwen-codec`: encoding the clip on the GPU beside the LLM ran out of memory and crashed the
+   server); its own voice heard back is dropped (3+ words, mostly its recent words). MiniCPM
+   beside it: `NCMOE=38` (5.0 GB; 726 tok/s prompt, 37.9 generation, vs ~850 / ~42 at 34).
+4. **This machine**: whisper.cpp and qwentts.cpp built (CUDA) under `~/Projects`, models in place,
+   `~/bin/tts-serve.sh` beside `lfm-serve.sh`/`minicpm-serve.sh` (their NCMOE for it in their headers),
+   the Wheatley voice in `~/.kinoko/voices`. Echo cancelling (done 2026-10-14): PipeWire's WebRTC AEC
+   as its own pipewire process (`~/.config/pipewire/kinoko-echo-cancel.conf`, user service
+   `kinoko-echo-cancel`), `monitor.mode` (the reference is whatever the speakers play), source
+   `kinoko-aec-source`, not the default microphone; voice.json records from it. Measured: the
+   speakers' speech goes from about -50 dB to -81 dB after a second or two of settling; music
+   playing in the room is gone too; kinoko talking a whole reply with the microphone open: the
+   plain microphone transcribed it (and its own name: it would have answered itself), the
+   cancelled one not a word of it.
+5. **Conversation**: utterances as steers sent now (done with step 2's fixes), and barge-in: kinoko stops
+   talking when what you say starts with "kinoko". Lowering its volume the moment anyone speaks was
+   built and taken out at the owner's request: other people talking in the room made it dip all the
+   time. Tuned by voice with the owner.
 
 Not in this work: the phone and Kinoko Lab (the phone already has its keyboard's dictation; speech
 there would be the hub streaming audio, a feature of its own).

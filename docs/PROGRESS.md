@@ -1101,3 +1101,35 @@ Deferred, for whenever an Anthropic model is actually needed:
   the calls after it "ERROR: not run: …", and the steer is the next message. Background jobs are
   untouched. Test in loop.test.ts; live with MiniCPM: `sleep 25` cut, "CORTADO" 2 s after Alt+X.
 - The voice extension sends what it hears as `steer_now` (a prompt when idle).
+
+## Voice, step 3: kinoko talks (kinoko-extensions feat/voice-speak; docs/voice.md)
+- In voice mode (Ctrl+Space) the reply is read aloud as it streams, sentence by sentence (code
+  blocks, tables, addresses and markdown marks left out), in a cloned voice; Esc, a new run, an
+  abort or talking to it stop it; `/voice <name>`, `/voice quiet`, `/voice talk`.
+- This machine: ~/Projects/qwentts.cpp (CUDA) and ~/bin/tts-serve.sh (port 8091); the Wheatley clip
+  in ~/.kinoko/voices (with .spk/.rvq encoded ahead on the CPU); "tts" in ~/.kinoko/voice.json;
+  minicpm-serve.sh and lfm-serve.sh say which NCMOE leaves room for it (38, 36).
+- Checked: a real reply recorded from the speakers' output and transcribed back: said once, whole.
+- Not done: barge-in that lowers the voice the moment you start speaking (step 5), echo cancellation
+  (step 4); without it, kinoko's own voice is filtered by words, not removed from the microphone.
+- Then, before the owner tested it (they wanted echo cancelling first): PipeWire's WebRTC echo
+  canceller as a separate pipewire process (~/.config/pipewire/kinoko-echo-cancel.conf, user service
+  kinoko-echo-cancel, source kinoko-aec-source; the default microphone unchanged) and voice.json
+  recording from it. Checked: a whole reply spoken with the microphone open, the plain microphone
+  transcribed it (its own name included), the cancelled one none of it. And barge-in: speech
+  starting while kinoko talks lowers it to 20 % at once, then it stops (said "kinoko…") or comes
+  back. Not checked: a real voice in the room through the canceller (needs the owner).
+- Then, from the owner's test: their voice got through, but people talking nearby left no silence
+  before it, so "Kinoko, …" arrived mid-utterance: the name is now looked for at the start of any
+  sentence; utterances are cut at 15 s; /voice lists what it heard lately. The volume dip on any
+  speech is gone (it dipped for everyone in the room): only "kinoko, …" stops it. TTS "temperature"
+  and the model's own voice (/voice none), because the Wheatley clone sounded overdone.
+- Then the voice went silent for good after kinoko switched the output to a Bluetooth speaker
+  mid-conversation (the owner asked it to; the STT went on). Not reproduced exactly (switching the
+  default sink mid-sentence did not hang), but two waits had no limit: a player is now killed once
+  its audio should have been heard plus 3 s, and a sentence may take 60 s from the backend; /voice
+  shows the last problem (the TUI shows no extension's log). Checked on the Bluetooth speaker: the
+  voice plays, and the echo canceller's reference followed the new output (its monitor).
+- Then, from the owner: the wake word can be switched off for a quiet room ("wake": false in
+  voice.json, or /voice wake off|on while kinoko runs); everything said goes in then, except
+  whisper's inventions on noise ("¡Suscríbete!", "Gracias.", subtitle credits).
