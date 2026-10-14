@@ -31,7 +31,7 @@ export interface KeyContext {
  *   Ctrl-C         abort / clear the editor / quit on a second press
  *   Alt+Up         pull the last queued message back
  *   Ctrl-V         paste the clipboard image as [Image #N]
- *   Alt+X          send the queued steer now (cuts the reply being streamed)
+ *   Alt+X          send the queued steer now (cuts the reply being streamed, or stops the tools running)
  *   Alt+C          cancel the queued messages (they go back into the editor)
  */
 export function actionFor(key: Key, ctx: KeyContext): KeyAction {

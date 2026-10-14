@@ -16,6 +16,10 @@ group), ripgrep, and compaction.
    the order typed (joined by a blank line, images kept): several typed during one reply all reach
    the model at its next step. If the model was streaming a plain answer with no
    tools, it is delivered right after that message ends and the loop continues instead of stopping.
+   SEND NOW (Alt+X, or an extension's send "steer_now": the voice): the steer goes in at once. A
+   reply being streamed is cut (its text and thinking kept, its calls not); tools running are
+   stopped (the call running answers "ERROR: stopped: the user sent a message", the calls after it
+   "ERROR: not run: …"); then the steer is the next message.
 5. FOLLOW-UP: followUp(text) is delivered ONLY when the agent would otherwise stop (no tool calls and
    an empty steer queue). Steer always has priority over follow-up. Each queue is FIFO.
 6. ABORT and queues: on abort, queued messages are NOT run. Emit queue_change and return the dropped

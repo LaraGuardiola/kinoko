@@ -142,7 +142,7 @@ const KEYS: Array<[string, string]> = [
   ["Ctrl-O", "Unfold the plan over the side column (↑↓ PgUp PgDn scroll, Esc folds); narrow: print it"],
   ["Ctrl-V", "Paste the clipboard image as [Image #N] (also drop an image file)"],
   ["Alt+Up", "Pull the last queued message back into the input"],
-  ["Alt+X", "Send the waiting steer now: cuts the reply being written (thinking included)"],
+  ["Alt+X", "Send the waiting steer now: cuts the reply being written (thinking included) or stops the tools running"],
   ["Alt+C", "Cancel the queued messages: they go back into the input"],
   ["↑↓ / Ctrl-P Ctrl-N", "Previous / next message you sent, earlier runs too (arrows: from the start or end of the text)"],
   ["/", "Open the menu below; type to narrow it, arrows and Enter to choose"],

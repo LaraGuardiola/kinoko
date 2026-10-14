@@ -39,6 +39,8 @@ export class Agent {
   /** The reply being streamed: `sendNow` cuts it (and only it) to deliver a steer at once. */
   #turn: AbortController | undefined;
   #cutForSteer = false;
+  /** The tool calls running: `sendNow` stops them too (the rest of the batch does not run). */
+  #toolsCut: AbortController | undefined;
   #queued = 0; // orders the two queues, for taking back the newest
   #followUpQueue: Queued[] = [];
   #malformedCount = 0;
@@ -220,13 +222,19 @@ export class Agent {
 
   /**
    * Delivers the queued steer now: the reply being streamed is cut (its text and thinking so far
-   * are kept, unfinished tool calls are not) and the steer becomes the next message. False when
-   * there is no steer, or no reply streaming (a steer during tools goes right after them anyway).
+   * are kept, unfinished tool calls are not), or the tools running are stopped (the one running
+   * says so, the rest of the batch does not run), and the steer becomes the next message. False
+   * when there is no steer, or nothing to cut (between steps it goes in next anyway).
    */
   sendNow(): boolean {
-    if (this.#state !== "running" || this.#steerQueue.length === 0 || this.#turn === undefined) return false;
-    this.#cutForSteer = true;
-    this.#turn.abort();
+    if (this.#state !== "running" || this.#steerQueue.length === 0) return false;
+    if (this.#turn !== undefined) {
+      this.#cutForSteer = true;
+      this.#turn.abort();
+      return true;
+    }
+    if (this.#toolsCut === undefined || this.#toolsCut.signal.aborted) return false;
+    this.#toolsCut.abort();
     return true;
   }
 
@@ -443,9 +451,16 @@ export class Agent {
 
       // In the order the model wrote them: [write a, read a] must read the new a.
       let stuck = 0;
+      const toolsCut = new AbortController();
+      this.#toolsCut = toolsCut;
       for (const tc of valid) {
+        if (toolsCut.signal.aborted && !this.#abortController!.signal.aborted) {
+          // A steer sent now stopped the batch: the calls after it are answered, not run.
+          await this.#push({ id: crypto.randomUUID(), role: "tool", content: NOT_RUN_FOR_STEER, toolCallId: tc.id }, "result");
+          continue;
+        }
         // oxlint-disable-next-line no-await-in-loop -- sequential execution required so the next model request sees tool results in order
-        const msg = await this.#runTool(tc);
+        const msg = await this.#runTool(tc, toolsCut.signal);
         const repeats = this.#calls.record(tc, msg.content);
         const failures = this.#calls.failures(tc, msg.content);
         if (repeats >= WARN_CALLS) {
@@ -459,6 +474,7 @@ export class Agent {
         await this.#push(msg, "result");
       }
 
+      this.#toolsCut = undefined;
       if (this.#abortController!.signal.aborted) {
         return this.#handleAbort();
       }
@@ -535,10 +551,10 @@ export class Agent {
     return true;
   }
 
-  async #runTool(tc: ToolCall): Promise<Message> {
+  async #runTool(tc: ToolCall, cut: AbortSignal): Promise<Message> {
     const tool = this.#tools.find((t) => t.name === tc.name)!;
     this.#emit({ type: "tool_start", call: tc });
-    const signal = this.#abortController!.signal;
+    const signal = AbortSignal.any([this.#abortController!.signal, cut]);
     const cwd = process.cwd();
     const background = this.#background;
     const ctx: ToolContext = { signal: signal, cwd, ...(background ? { background: (command: string) => background(command, cwd) } : {}) };
@@ -571,9 +587,10 @@ export class Agent {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       const isAborted = msg === "Aborted by user" || this.#abortController!.signal.aborted;
-      this.#emit({ type: "tool_output", call: tc, output: isAborted ? "Aborted by user" : `ERROR: ${msg}` });
+      const content = cut.aborted && !this.#abortController!.signal.aborted ? STOPPED_FOR_STEER : isAborted ? "Aborted by user" : `ERROR: ${msg}`;
+      this.#emit({ type: "tool_output", call: tc, output: content });
       this.#emit({ type: "tool_end", call: tc });
-      return { id: crypto.randomUUID(), role: "tool", content: isAborted ? "Aborted by user" : `ERROR: ${msg}`, toolCallId: tc.id };
+      return { id: crypto.randomUUID(), role: "tool", content, toolCallId: tc.id };
     }
   }
 
@@ -646,6 +663,9 @@ interface Queued {
 
 /** Prefill progress is told at most this often (llama.cpp sends it per batch). */
 const PREFILL_EVERY_MS = 250;
+/** What the model reads for a call cut, or never run, because the user sent a message now (Alt+X). */
+const STOPPED_FOR_STEER = "ERROR: stopped: the user sent a message, read it next";
+const NOT_RUN_FOR_STEER = "ERROR: not run: the user sent a message first, read it next";
 
 function userMessage(q: Queued): Message {
   const msg: Message = { id: crypto.randomUUID(), role: "user", content: q.text };

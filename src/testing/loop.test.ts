@@ -1,6 +1,6 @@
 import { expect, test, describe } from "bun:test";
 import { Agent } from "../loop";
-import type { Message, StreamEvent, Provider as RealProvider } from "../types";
+import type { Message, StreamEvent, Tool, Provider as RealProvider } from "../types";
 
 describe("Agent loop with abort, steer and follow-up", () => {
   test("1. abort() while idle is a no-op; after abort agent is idle <100ms and reusable", async () => {
@@ -341,6 +341,48 @@ describe("Agent loop with abort, steer and follow-up", () => {
     expect(cut.content).toBe("partial");
     expect(cut.thinking).toBe("long musing");
     expect(seen[1]!.slice(-2)).toEqual(["assistant:partial", "user:use rg"]); // the steer right after the cut reply
+  });
+
+  test("sendNow while tools run: the running call stops, the rest of the batch is answered unrun, the steer goes in next", async () => {
+    const seen: string[][] = [];
+    let turn = 0;
+    const provider = {
+      stream: async function* (req: { messages: Message[] }): AsyncIterable<StreamEvent> {
+        seen.push(req.messages.map((m) => `${m.role}:${m.content}`));
+        if (turn++ === 0) {
+          yield { type: "tool_call", call: { id: "a", name: "wait", args: {} } };
+          yield { type: "tool_call", call: { id: "b", name: "wait", args: {} } };
+          yield { type: "done", stop: "tool_use" };
+          return;
+        }
+        yield { type: "text", delta: "stopped" };
+        yield { type: "done", stop: "end" };
+      },
+    } as unknown as RealProvider;
+    let started = 0;
+    const wait: Tool = {
+      name: "wait",
+      description: "",
+      schema: {},
+      run: async (_args: unknown, ctx: { signal: AbortSignal }) => {
+        started++;
+        // a long command, until it is stopped
+        // oxlint-disable-next-line no-await-in-loop -- a tool that runs until it is cut
+        while (!ctx.signal.aborted) await new Promise((r) => setTimeout(r, 5));
+        throw new Error("killed");
+      },
+    };
+    const agent = new Agent({ provider, model: "t", system: "", tools: [wait], maxTurns: 10, maxCost: 100 });
+    const run = agent.prompt("wait a lot");
+    await new Promise((r) => setTimeout(r, 30));
+    agent.steer("stop, say stopped");
+    const at = Date.now();
+    expect(agent.sendNow()).toBe(true);
+    const result = await run;
+    expect(Date.now() - at).toBeLessThan(200);
+    expect(result.reason).toBe("done");
+    expect(started).toBe(1); // the second call never ran
+    expect(seen[1]!.slice(-3)).toEqual(["tool:ERROR: stopped: the user sent a message, read it next", "tool:ERROR: not run: the user sent a message first, read it next", "user:stop, say stopped"]);
   });
 
   test("unqueue takes messages back so they are never delivered: the newest, or all, in order", async () => {
