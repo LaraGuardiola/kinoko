@@ -175,10 +175,10 @@ Two kinds, both for STT and TTS, so any engine fits:
    playing in the room is gone too; kinoko talking a whole reply with the microphone open: the
    plain microphone transcribed it (and its own name: it would have answered itself), the
    cancelled one not a word of it.
-5. **Conversation**: utterances as steers sent now (done with step 2's fixes), and barge-in (done
-   2026-10-14 with step 3): someone speaks while kinoko talks → 20 % volume at once (the player is
-   fed a quarter of a second ahead, the rest waits in the extension), then stopped when the words
-   start with "kinoko", back up otherwise. Tuned by voice with the owner.
+5. **Conversation**: utterances as steers sent now (done with step 2's fixes), and barge-in: kinoko stops
+   talking when what you say starts with "kinoko". Lowering its volume the moment anyone speaks was
+   built and taken out at the owner's request: other people talking in the room made it dip all the
+   time. Tuned by voice with the owner.
 
 Not in this work: the phone and Kinoko Lab (the phone already has its keyboard's dictation; speech
 there would be the hub streaming audio, a feature of its own).

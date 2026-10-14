@@ -1119,3 +1119,8 @@ Deferred, for whenever an Anthropic model is actually needed:
   transcribed it (its own name included), the cancelled one none of it. And barge-in: speech
   starting while kinoko talks lowers it to 20 % at once, then it stops (said "kinoko…") or comes
   back. Not checked: a real voice in the room through the canceller (needs the owner).
+- Then, from the owner's test: their voice got through, but people talking nearby left no silence
+  before it, so "Kinoko, …" arrived mid-utterance: the name is now looked for at the start of any
+  sentence; utterances are cut at 15 s; /voice lists what it heard lately. The volume dip on any
+  speech is gone (it dipped for everyone in the room): only "kinoko, …" stops it. TTS "temperature"
+  and the model's own voice (/voice none), because the Wheatley clone sounded overdone.
