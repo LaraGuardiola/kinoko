@@ -192,12 +192,13 @@ class Lab {
 
 async function start(): Promise<void> {
   drawMascot($("mascot"), undefined);
-  const token = await signIn().catch(() => undefined);
-  if (token === undefined) {
+  const signed = await signIn().catch(() => ({ refused: "kinoko serve did not answer." }));
+  if (!("token" in signed)) {
+    if (signed.refused) $("signin-why").textContent = signed.refused;
     $("signin").hidden = false;
     return;
   }
-  const lab = new Lab(token);
+  const lab = new Lab(signed.token);
   Object.assign(window, { kinokoLab: lab }); // there to poke at from the console
 }
 

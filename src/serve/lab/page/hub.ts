@@ -23,26 +23,31 @@ function store(token: string | undefined): void {
   }
 }
 
+/** Signed in (the token), or why not: no link was followed, or its code was refused (used, expired). */
+export type SignIn = { token: string } | { refused?: string };
+
 /** The token this page talks with: the one kept here, or a new one for the code in the link. */
-export async function signIn(): Promise<string | undefined> {
-  const code = new URLSearchParams(location.hash.slice(1)).get("c");
+export async function signIn(): Promise<SignIn> {
+  // `?c=` (a link from `kinoko serve lab`); `#c=` from an older one.
+  const code = new URLSearchParams(location.search).get("c") ?? new URLSearchParams(location.hash.slice(1)).get("c");
+  let refused: string | undefined;
   if (code) {
     history.replaceState(null, "", location.pathname); // the code works once: out of sight
     const answer = await fetch("/v1/pair", { method: "POST", body: JSON.stringify({ code, name: "Kinoko Lab (browser)" }) });
     if (answer.ok) {
       const { token } = (await answer.json()) as { token: string };
       store(token);
-      return token;
+      return { token };
     }
+    refused = answer.status === 429 ? "Too many tries: wait a minute." : "This link was already used, or it expired (they last ten minutes).";
   }
   const token = stored();
-  if (token === undefined) return undefined;
-  const check = await fetch("/v1/agents", { headers: { authorization: `Bearer ${token}` } });
-  if (check.status === 401) {
+  if (token !== undefined) {
+    const check = await fetch("/v1/agents", { headers: { authorization: `Bearer ${token}` } });
+    if (check.status !== 401) return { token };
     store(undefined); // revoked, or this hub never knew it
-    return undefined;
   }
-  return token;
+  return refused ? { refused } : {};
 }
 
 export class Hub {

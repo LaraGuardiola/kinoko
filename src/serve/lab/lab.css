@@ -530,6 +530,12 @@ button.fetch:hover {
   padding: 22px 26px;
   line-height: 1.55;
 }
+.signin-why {
+  color: var(--tool);
+}
+.signin-why:empty {
+  display: none;
+}
 .signin-card h1 {
   margin: 0 0 8px;
 }

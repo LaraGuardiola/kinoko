@@ -83,25 +83,28 @@ function fingerprintHex(fingerprint: string): string {
 }
 
 /** Kinoko Lab's links: one for this computer's browser, and a QR code for each way a phone or tablet
- *  reaches the hub (the local network, Tailscale). Each pairs one browser, once. */
+ *  reaches the hub (the local network, Tailscale), each titled above it. Each pairs one browser, once. */
 async function showLab(devices: Devices, state: State): Promise<void> {
-  const here = `http://127.0.0.1:${state.port}/lab#c=${await devices.code()}`;
-  out(`Kinoko Lab, a live look inside kinoko: open ${bold(here)}`);
+  const link = async (base: string): Promise<string> => `${base}/lab?c=${await devices.code()}`;
+  out(`Kinoko Lab, a live look inside kinoko. On this computer: ${bold(await link(`http://127.0.0.1:${state.port}`))}`);
   if (state.lan) {
-    const home = `${state.lan.url}/lab#c=${await devices.code()}`;
+    const home = await link(state.lan.url);
     out("");
+    out(bold("▼ AT HOME: this network, no Tailscale needed"));
     out(qrText(home));
-    out(`At home (this network, no Tailscale needed): scan it, or open ${home}`);
+    out(dim(home));
     // Nobody can vouch for a certificate on 192.168.x: the browser warns once, and asks to go on.
-    out(dim(`The browser will warn about the certificate: it is this hub's own. Its SHA-256 should read`));
+    out(dim("The browser warns about the certificate once: it is this hub's own. Its SHA-256 should read"));
     out(dim(fingerprintHex(state.lan.fingerprint)));
   }
   if (!state.url.startsWith("http://127.0.0.1") && state.url !== state.lan?.url) {
-    const away = `${state.url}/lab#c=${await devices.code()}`;
+    const away = await link(state.url);
     out("");
+    out(bold("▼ ANYWHERE: through Tailscale (the device needs it)"));
     out(qrText(away));
-    out(`Anywhere (through Tailscale): scan it, or open ${away}`);
+    out(dim(away));
   }
+  out("");
   out(dim("Each link works once, for ten minutes; a browser stays paired (`kinoko serve devices`)."));
 }
 

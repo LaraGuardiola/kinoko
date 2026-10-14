@@ -136,7 +136,7 @@ any agent, but cannot `stop` it: it ends in its terminal. `KINOKO_LINK=0` keeps 
 
 `GET /lab` (no auth) is a page the hub serves: a live view of one agent as a factory floor
 (src/serve/lab, docs/visualizer.md). It is a client of this protocol like the app: it pairs with a
-code (`kinoko serve lab` prints a link carrying one in its fragment, `/lab#c=<code>`: for this
+code (`kinoko serve lab` prints a link carrying one in its fragment, `/lab?c=<code>`: for this
 computer, the local network and the tailnet, each with its own code), keeps its
 token in the browser, opens `/v1/ws?token=`, attaches to an agent, draws its events, and asks
 `inspect` for what the model sees when a machine is opened. It shows up in `kinoko serve devices`
