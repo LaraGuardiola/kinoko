@@ -5,6 +5,8 @@ import type { Tool, ToolContext } from "../types";
 const DEFAULT_MAX_TOKENS = 4000;
 /** A command that never ends (a dev server, a prompt for input) must not hang the run forever. */
 const DEFAULT_TIMEOUT_MS = 300_000;
+/** Once the shell has ended, how long its output may take to finish arriving. */
+const DRAIN_MS = 200;
 
 interface BashArgs {
   command?: unknown;
@@ -46,12 +48,13 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
   const pid = child.pid;
 
   const chunks: string[] = [];
+  let answered = false;
   // utf8 decoding per stream: a multi-byte character split across two chunks stays whole.
   const read = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
     const decoder = new TextDecoder();
     for await (const bytes of stream) {
       const s = decoder.decode(bytes, { stream: true });
-      if (s === "") continue;
+      if (s === "" || answered) continue; // past the answer: read and dropped, so a writer never blocks
       chunks.push(s);
       ctx.onOutput?.(s);
     }
@@ -77,7 +80,12 @@ async function bashRun(args: BashArgs, ctx: ToolContext): Promise<string> {
     aborted.resolve("aborted");
   };
   ctx.signal.addEventListener("abort", onAbort, { once: true });
-  const ended = await Promise.race([Promise.all([child.exited, drained]).then(() => "ended" as const), aborted.promise]);
+  // The shell's end is the command's end. Something it put aside with & may hold the output open for
+  // ever (`cd app && server > log &`: the subshell running the list waits on the server with the
+  // pipes still open), so the output is waited for only briefly after it.
+  const exited = child.exited.then(() => Promise.race([drained, Bun.sleep(DRAIN_MS)]));
+  const ended = await Promise.race([exited.then(() => "ended" as const), aborted.promise]);
+  answered = true;
   clearTimeout(timer);
   ctx.signal.removeEventListener("abort", onAbort);
   if (ended === "aborted") return "Aborted by user";

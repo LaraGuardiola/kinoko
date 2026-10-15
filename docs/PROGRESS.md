@@ -1152,3 +1152,14 @@ Deferred, for whenever an Anthropic model is actually needed:
   comes back up. Without it, its own voice covered the owner's. Kept the hang protection (end waits
   the last quarter second plus 3 s). Checked: a whole reply recorded from the output, transcribed
   whole.
+
+## fix/bash-leftovers: a server started with & no longer holds bash for five minutes
+- `cd app && bun server.ts > log 2>&1 &` (what models write to start a server) hung bash until its
+  5-minute timeout, and the timeout then killed the server: `&` puts the whole `cd && …` list in a
+  subshell that waits on the server with bash's output pipes still open. Same with `server &` and
+  no redirect. Now the shell's end is the command's end: the output gets 200 ms more to arrive, the
+  answer goes back with the existing "left processes running (& or nohup)" note, and whatever the
+  leftovers still write is read and dropped (a full pipe would block them).
+- NOT done: a command that truly never ends in the foreground (`torrente-cli get` with no Torrente
+  open: a download that runs for hours) still waits for the timeout or Esc. The torrente skill
+  already says `--detach`; the model did not read it.
