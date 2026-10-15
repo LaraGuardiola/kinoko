@@ -7,7 +7,7 @@ the hub gets it from the computer's text-to-speech backend (option B of three: A
 had no cloned voice; the hub speaking every reply by itself would work even with nobody listening).
 
 Hearing only. Talking to kinoko from the phone is the keyboard's dictation today; the microphone to
-whisper on the computer would be its own feature. The hub's side is built (`src/serve/speech.ts`); the app's is next. Section 5 is the order.
+whisper on the computer would be its own feature. Both sides are built: the hub's (`src/serve/speech.ts`) and the app's (kinoko-android `Voice.kt`, a speaker in each chat's bar). Section 5 is the order.
 
 ## 1. The hub: `/v1/speech`
 
