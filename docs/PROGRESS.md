@@ -1173,3 +1173,11 @@ Deferred, for whenever an Anthropic model is actually needed:
   whisper hears the sentence back word for word.
 - NOT done: the app (step 2, kinoko-android feat/voice). The teach-again path is tested with a fake
   server only (restarting the real one was not worth it).
+
+## docs/phone-voice-app: the phone reads replies aloud (step 2, kinoko-android feat/voice, merged)
+- The app: a speaker in each chat's bar (only when GET /v1/speech says the computer can speak; off
+  by default, remembered). On, the open chat's live reply is read sentence by sentence through
+  POST /v1/speech, terminal agents included; music ducks; Stop, sending, leaving the chat or the
+  speaker off is silence at once. The sentence cut is sentences.ts ported to Kotlin, same tests.
+- Checked on the emulator through Android's audio state, then by the owner on the phone.
+- NOT done: speaking to the phone (STT on the phone), history read aloud.
