@@ -19,6 +19,8 @@ import type { Identity } from "./tls.ts";
 import { expandHome, folders } from "./dirs.ts";
 import { projects } from "./projects.ts";
 import { saveUploads, uploadsOf, withUploads } from "./uploads.ts";
+import { speech } from "./speech.ts";
+import type { SpeechPlace } from "./speech.ts";
 import lab from "./lab/index.html";
 
 export const PROTOCOL = 1;
@@ -50,6 +52,8 @@ export interface ServeOptions {
   /** The local network too: listened on with TLS (the hub's own certificate), the app pins it. */
   lan?: { port: number; host?: string; identity: Identity; urls: string[] };
   spawn?: Spawn;
+  /** Where the voice is set up (~/.kinoko/voice.json): the phone reads replies aloud with it. */
+  speech?: SpeechPlace;
   log?: (line: string) => void;
 }
 
@@ -212,6 +216,7 @@ export function serve(opts: ServeOptions): { server: Server<Socket>; lan?: Serve
           return Response.json({ error: "expected a WebSocket" }, { status: 400 });
         }
         if (url.pathname === "/v1/agents") return Response.json({ agents: agents.list() });
+        if (url.pathname === "/v1/speech") return speech(req, opts.speech);
         // The app's "Forget this computer": the device unpairs itself, so this side forgets it too.
         if (url.pathname === "/v1/device" && req.method === "DELETE") {
           await opts.devices.revoke(device.id);

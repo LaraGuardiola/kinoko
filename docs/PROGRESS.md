@@ -1163,3 +1163,13 @@ Deferred, for whenever an Anthropic model is actually needed:
 - NOT done: a command that truly never ends in the foreground (`torrente-cli get` with no Torrente
   open: a download that runs for hours) still waits for the timeout or Esc. The torrente skill
   already says `--detach`; the model did not read it.
+
+## feat/hub-speech: the hub speaks for the phone (step 1 of docs/phone-voice.md)
+- src/serve/speech.ts: `GET /v1/speech` (available, voice, language; or why not) and `POST
+  /v1/speech` `{"text"}` → the sentence's raw PCM streamed from the "tts" of ~/.kinoko/voice.json
+  (http or command), `audio/pcm; rate=24000`. A voice qwentts.cpp forgot is taught again from
+  ~/.kinoko/voices and asked once more. Paired devices only. docs/protocol.md has it.
+- Checked live against qwentts.cpp with Wheatley: first audio at 0.2 s, 3.6 s of speech in 0.75 s,
+  whisper hears the sentence back word for word.
+- NOT done: the app (step 2, kinoko-android feat/voice). The teach-again path is tested with a fake
+  server only (restarting the real one was not worth it).
