@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "nod
 import { defaultTools } from "../../tools/registry";
 import type { Tool } from "../../types";
 import { join } from "node:path";
-import { stopHint } from "../../shell.ts";
+import { groupAlive, killTree, stopHint } from "../../shell.ts";
 
 const ROOT = `${process.cwd()}/.tmp-tools-test-${process.pid}`;
 
@@ -148,6 +148,24 @@ describe("kinoko core tools", () => {
     expect(out).toMatch(/To stop them: kill -- -\d+/);
     process.kill(pid, "SIGKILL");
     expect(await pick("bash").run({ command: "echo hi" }, ctx(fresh("left2")))).toBe("hi\n");
+  });
+
+  test.skipIf(process.platform === "win32")("bash: a list put aside with & (cd dir && server > log &) does not hold the answer until the timeout", async () => {
+    const started = Date.now();
+    const out = await pick("bash").run({ command: "cd . && sleep 30 > /dev/null 2>&1 &\necho started", timeout: 10_000 }, ctx(fresh("list")));
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(out).toStartWith("started\n");
+    expect(out).toContain("It left processes running on their own (& or nohup)");
+    killTree(Number(/kill -- -(\d+)/.exec(out)?.[1]));
+  });
+
+  test.skipIf(process.platform === "win32")("bash: a server put aside with & and no redirect: the output so far, the server left running", async () => {
+    const out = await pick("bash").run({ command: "(while true; do echo tick; sleep 0.05; done) &\necho started", timeout: 10_000 }, ctx(fresh("noredir")));
+    expect(out).toContain("started");
+    expect(out).toContain("It left processes running on their own (& or nohup)");
+    const pid = Number(/kill -- -(\d+)/.exec(out)?.[1]);
+    expect(groupAlive(pid)).toBe(true);
+    killTree(pid);
   });
 
   test("bash: abort kills the process group, returns <200ms", async () => {
