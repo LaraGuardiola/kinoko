@@ -63,6 +63,22 @@ the computer, or a lost token. Pair again. Forgetting the computer in the app se
 | `GET /v1/agents` | yes | `{"agents": [AgentInfo]}` |
 | `GET /v1/ws` | yes | the WebSocket |
 | `DELETE /v1/device` | yes | `{"ok": true}`: this device unpairs itself; its sockets close (4001) |
+| `GET /v1/speech` | yes | `{"available": true, "voice", "language"}`, or `{"available": false, "why"}` |
+| `POST /v1/speech` | yes | `{"text": "<one sentence>"}` → its speech, streamed as it is made |
+
+### Speech
+
+The phone reads replies aloud in the computer's voice (docs/phone-voice.md). The hub speaks with
+the `"tts"` of `~/.kinoko/voice.json`, the block the voice extension uses (its README): an
+OpenAI-compatible `/v1/audio/speech`, or a program reading the text on stdin.
+
+- The answer is raw 16-bit little-endian mono PCM, `content-type: audio/pcm; rate=24000` (the
+  config's `"rate"`, 24000 unless set), streamed as the backend makes it. Closing the request stops
+  the backend.
+- One sentence per request, up to 2000 characters; an empty one is 400.
+- No `"tts"` set up: 503 with `{"error"}`, the same reason GET gives. The backend failing: 502.
+- A cloned voice the backend has forgotten (qwentts.cpp, restarted) is taught again from
+  `~/.kinoko/voices/` and the sentence asked for once more.
 
 ## The WebSocket
 

@@ -172,7 +172,7 @@ export async function runServe(argv: string[], opts: { command: string[]; versio
   // The profile in use, looked at every few seconds (a TUI or the phone may switch it): the phone
   // draws that profile's mushroom.
   let profile = await currentProfile(userHome());
-  const hub = serve({ profile: () => profile, port, ...(lanIdentity ? { lan: { port: lanPort, identity: lanIdentity, urls: lanUrls } } : {}), devices, command: opts.command, sessionsDir: join(HOME, "sessions"), version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
+  const hub = serve({ profile: () => profile, port, ...(lanIdentity ? { lan: { port: lanPort, identity: lanIdentity, urls: lanUrls } } : {}), devices, command: opts.command, sessionsDir: join(HOME, "sessions"), speech: { config: join(HOME, "voice.json"), voices: join(HOME, "voices") }, version: opts.version, socket: SOCKET, render, log: (line) => out(dim(`${time()} ${line}`)) });
 
   const profileWatch = setInterval(() => {
     void currentProfile(userHome()).then((now) => {
